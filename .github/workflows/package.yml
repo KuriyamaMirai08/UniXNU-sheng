@@ -1,7 +1,3 @@
-name: package
-
-# scripts/package.sh of this repository on a macOS runner, with the UniXNU and uefi-sheng
-# checkouts beside it, the layout board.toml names. The platform seed comes from the
 # repository secret UNIXNU_UNIQUE_CHIP_ID and is baked into the images, so the run's
 # artifacts belong to one device alone: download them, then delete the run.
 
@@ -135,7 +131,7 @@ jobs:
             args+=(--init-data)
           fi
 
-          # 自动清空冲突的性能诊断补丁（空补丁在 git apply 时直接成功跳过，不影响 GPU 驱动核心功能）
+          # 自动清空冲突的性能诊断补丁（空补丁在 git apply 时直接跳过，不影响 GPU 驱动核心渲染）
           find .. -name "*turnip-frame-diagnostics.patch*" -exec cp /dev/null {} \; 2>/dev/null || true
 
           # 自动为所有 runtime 构建脚本的 patch 命令加上 --3way 容错
