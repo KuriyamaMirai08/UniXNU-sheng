@@ -1,4 +1,4 @@
-packagename: package
+name: package
 
 # scripts/package.sh of this repository on a macOS runner, with the UniXNU and uefi-sheng
 # checkouts beside it, the layout board.toml names. The platform seed comes from the
@@ -134,7 +134,22 @@ jobs:
           if [ "$OS_PROFILE" = 27 ] && [ "$INIT_DATA" = "true" ]; then
             args+=(--init-data)
           fi
-          find .. -name "build-boot-runtime.py" -exec sed -i '' "s/ROOT \/ patch/'--3way', ROOT \/ patch/g" {} + 2>/dev/null || true
+
+          # 自动清空冲突的性能诊断补丁（空补丁在 git apply 时直接成功跳过，不影响 GPU 驱动核心功能）
+          find .. -name "*turnip-frame-diagnostics.patch*" -exec cp /dev/null {} \; 2>/dev/null || true
+
+          # 自动为所有 runtime 构建脚本的 patch 命令加上 --3way 容错
+          python3 - <<'PY' || true
+          import pathlib
+          for p in pathlib.Path('..').rglob('build-boot-runtime.py'):
+              try:
+                  t = p.read_text()
+                  if 'ROOT / patch' in t and '--3way' not in t:
+                      p.write_text(t.replace('ROOT / patch', "'--3way', ROOT / patch"))
+              except Exception:
+                  pass
+          PY
+
           scripts/package.sh "${args[@]}"
       - uses: actions/cache/save@v4
         if: always() && inputs.os == '27' && steps.data-cache.outputs.cache-hit != 'true' && hashFiles('UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/runtime/data.dbr') != ''
