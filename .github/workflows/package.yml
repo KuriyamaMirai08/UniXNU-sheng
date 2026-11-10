@@ -1,4 +1,4 @@
-name: package
+packagename: package
 
 # scripts/package.sh of this repository on a macOS runner, with the UniXNU and uefi-sheng
 # checkouts beside it, the layout board.toml names. The platform seed comes from the
@@ -130,11 +130,15 @@ jobs:
           INIT_DATA: ${{ inputs.init_data }}
           OS_PROFILE: ${{ inputs.os }}
         run: |
-          args=(--os "$OS_PROFILE" --uefi ../uefi-sheng)
-          if [ "$OS_PROFILE" = 27 ] && [ "$INIT_DATA" = true ]; then
-            args+=(--init-data)
-          fi
-          scripts/package.sh "${args[@]}"
+      args=(--os "$OS_PROFILE" --uefi ../uefi-sheng)
+      if [ "$OS_PROFILE" = 27 ] && [ "$INIT_DATA" = "true" ]; then
+        args+=(--init-data)
+      fi
+
+      # 在打包前自动给诊断补丁增加 --3way 容错
+      find .. -name "build-boot-runtime.py" -exec sed -i '' "s/ROOT \/ patch/'--3way', ROOT \/ patch/g" {} + 2>/dev/null || true
+
+      scripts/package.sh "${args[@]}"
       - uses: actions/cache/save@v4
         if: always() && inputs.os == '27' && steps.data-cache.outputs.cache-hit != 'true' && hashFiles('UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/runtime/data.dbr') != ''
         with:
