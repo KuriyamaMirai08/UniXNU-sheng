@@ -51,6 +51,15 @@ normal dependency preparation before the original archive dispatcher.
 It respects the same source pins and existing checkouts; IPSW/runtime/Seed
 preparation remains excluded.
 
+Run 43064681233 fetched the missing references and advanced through the
+display source-driver/ABI work to the keyboard firmware prerequisite.
+Native mode now uses the existing SHA-256-checked `extract-files.py
+--section Keyboard` and the same Wi-Fi/Bluetooth source prefetch commands
+as hosted package preparation. The public keyboard image is 82,524 bytes;
+no stock-ROM archive, installation runtime or Seed is involved. Source
+prefetch is outside the display sub-build's compile timeout; its existing
+compiler/object checks and pinned-source preparation remain unchanged.
+
 Dispatch `package.yml` on `codex/fix-package29-weak-binds`, with
 `runner_location=self-hosted`, `self_hosted_stage=xnu-corecrypto`, `os=27`.
 Leave seed fields empty and init_data false. This selects a separate job;

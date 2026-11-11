@@ -125,6 +125,13 @@ command = "workflow_dispatch native-link; Actions run 43064254937"
 revision = "e0b31c59e6d9d35bc8dfe71caab87da854f22c94"
 result = "The shared display helper resolved through the explicit source root and stopped at a missing IOHIDFamily checkout. Native mode now performs the formal source-only feeds.fetch dependency preparation, retaining pins and caches without invoking IPSW, runtime or installation operations."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-xnu-corecrypto.md"
+command = "workflow_dispatch native-link; Actions run 43064681233"
+revision = "063d363c359907f40784f435bd1a39298aeb7695"
+result = "The display source helper advanced after reference fetching and required the pinned keyboard image. Native mode now uses the existing SHA-checked Keyboard extraction and formal Wi-Fi/Bluetooth source prefetch outside the display compile timeout. No runtime, stock-ROM or installation Seed preparation is added."
+
 [[area]]
 id = "firmware"
 status = "implemented"

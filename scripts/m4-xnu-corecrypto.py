@@ -147,6 +147,15 @@ if args.stage == 'native-link':
     plan = [(kind, item['id'] if kind == 'component' else item) for kind, item in kernel.archive_plan(ctx)]
     (args.logs / 'archive-plan.json').write_text(json.dumps(plan, indent=2) + '\n')
     print('Production archive plan:', json.dumps(plan), flush=True)
+    # These are the source/keyboard prerequisites of the hosted package path,
+    # not runtime/Seed preparation. Pre-fetch outside the display sub-build's
+    # 300-second compile window, preserving every already verified download.
+    for label, command in [
+        ('keyboard-input', ['python3', device / 'scripts/extract-files.py', '--section', 'Keyboard', '--device', device]),
+        ('wifi-sources', ['bash', ath / 'tools/fetch-sources.sh']),
+        ('bluetooth-sources', ['python3', device / 'drivers/QcaBluetooth/tools/prepare-linux.py']),
+    ]:
+        run(command, cwd=device, log_file=ctx.logs / (label + '.log'))
 else:
     kernel.build_archives = corecrypto_stage
     os.environ['UNIXNU_XNU_COMPILE_STAGE'] = '1'
