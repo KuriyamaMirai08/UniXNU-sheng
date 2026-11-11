@@ -112,8 +112,9 @@ jobs:
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/ios-obj
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/.cache/appsync-signer
             device/.cache/firmware/sheng
-          key: unixnu-heavy-build-${{ inputs.os }}-${{ github.sha }}
+          key: unixnu-heavy-build-${{ inputs.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
+            unixnu-heavy-build-${{ inputs.os }}-${{ github.sha }}-
             unixnu-heavy-build-${{ inputs.os }}-
       - name: prepare preserved Data seed
         if: inputs.os == '27'
@@ -140,6 +141,17 @@ jobs:
           if not path.is_file() and os.environ['INIT_DATA'] != 'true':
               raise SystemExit('No saved seed. Supply the ORIGINAL seed for an existing installation, or select init_data for a FIRST installation')
           PY
+      # Verify/extract the large stock ROM before a long kernel build. The tree's
+      # .cache/firmware is linked to this same device cache by unixnu tree.
+      - name: Stage verified sheng UEFI inputs early
+        working-directory: device
+        env:
+          UNIXNU_DEVICE: ${{ github.workspace }}/device
+          UNIXNU_UEFI: ${{ github.workspace }}/uefi-sheng
+        run: |
+          python3 scripts/download-sheng-firmware.py --connections 16
+          python3 scripts/extract-sheng-firmware.py --delete-archive
+          python3 scripts/import-sheng-uefi.py
       - name: package
         working-directory: device
         env:
@@ -176,7 +188,7 @@ jobs:
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/ios-obj
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/.cache/appsync-signer
             device/.cache/firmware/sheng
-          key: unixnu-heavy-build-${{ inputs.os }}-${{ github.sha }}
+          key: unixnu-heavy-build-${{ inputs.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: actions/cache/save@v4
         if: always() && inputs.os == '27' && steps.data-cache.outputs.cache-hit != 'true' && hashFiles('UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/runtime/data.dbr') != ''
         with:
