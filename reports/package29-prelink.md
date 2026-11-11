@@ -58,8 +58,10 @@ The fix does not change XnuPrelink or broaden its accepted input formats.
 - Porting record checker: 17 structured areas checked.
 - A targeted Apple-linker reproduction uses the actual generated support
   definitions from the fix branch, live weak-import consumers, an arm64e iOS
-  target, and `-kernel -add_split_seg_info`.
-- Reproduction run: https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43010015204
+  target, and `-static -kernel -add_split_seg_info`. It passes on macOS 26:
+  the weak variant has exactly four chained imports, and the strong variant
+  has zero. The workflow YAML and its three embedded Python blocks also parse.
+- Passing reproduction run: https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43010840790
 - Full package and device boot results are not established by host tests.
 
 The UniXNU checkout follows its default branch rather than the revision from
