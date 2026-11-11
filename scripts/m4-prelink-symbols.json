@@ -1,0 +1,23 @@
+{
+  "inputs": {
+    "kernelcache_sha256": "38e6d9fa5f789b8228f4617ef4c6d2a3fd8ab564abdc9b62920f1db53fc1780a",
+    "entry": "com.apple.kernel"
+  },
+  "functions": [
+    {
+      "original": "0xfffffe000ae14d08",
+      "original_size": 32,
+      "original_sha256": "5fb51dd740f43c93bdf2a80fe754b033423025c869862799b89c4b5b92f72325",
+      "native_symbol": "_vm_map_page_size",
+      "evidence": "Returns 1u << map->page_shift, or 1u << 14 for a null map. Original loads byte +0x2c; native loads halfword +0x44 and obtains the native default shift from page_shift. Both implement osfmk/vm/vm_map.c vm_map_page_size / VM_MAP_PAGE_SIZE. Map is kernel-owned; bind the callable KPI, never rewrite a struct offset. Original neighbors include vm_map_exec and vm_map_region_top_walk. Source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+    },
+    {
+      "original": "0xfffffe000aec5fe0",
+      "original_size": 72,
+      "original_sha256": "70c01cf568a210d3abd5353036159dfac4da5df7290c552ff007139d1bec104c",
+      "native_symbol": "_ml_stack_remaining",
+      "evidence": "Computes a local stack address minus the active stack bottom. Interrupt stack bounds use top minus 0x4000; normal stack uses current_thread kernel_stack. The original CONFIG_SPTM path additionally subtracts a red-zone page when kredzonestack is zero. Native non-SPTM implementation omits that conditional, as required by its own kernel stacks. Matches osfmk/arm/machine_routines_common.c ml_stack_remaining, source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f. Same no-argument vm_offset_t ABI; this binding does not claim original/private struct layout compatibility."
+    }
+  ],
+  "data": []
+}

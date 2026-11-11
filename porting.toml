@@ -10,7 +10,7 @@ summary = "Xiaomi Pad 6S Pro 12.4 uses shared SM8550 support and board-owned sto
 id = "configuration"
 status = "implemented"
 components = []
-paths = ["board.toml", "feeds.toml", "configs/**", ".gitmodules", ".github/**", ".gitignore", "scripts/m4-compile-smoke.sh", "scripts/m4-xnu-corecrypto.sh", "scripts/m4-xnu-corecrypto.py", "scripts/m4-prelink.py", "scripts/prepare-corecrypto-cache.py"]
+paths = ["board.toml", "feeds.toml", "configs/**", ".gitmodules", ".github/**", ".gitignore", "scripts/m4-compile-smoke.sh", "scripts/m4-xnu-corecrypto.sh", "scripts/m4-xnu-corecrypto.py", "scripts/m4-prelink.py", "scripts/m4-prelink-symbols.json", "scripts/prepare-corecrypto-cache.py"]
 inputs = ["SM8550 profile, iPadOS 26.5.2 build 23F84, arm64e sheng_ipados26_defconfig and pinned component sources."]
 configuration = ["board.soc_source = sm8550; board.os_profile = ipados-26.5.2-23F84; schema_version = 2.", "The device owns ShengUfs, ShengHidInput, ShengNovatekTouch and ShengPreflight submodules."]
 procedure = ["Read https://unixnu.com/porting/device-repository and https://unixnu.com/porting/records.", "Run ./unixnu defconfig sheng_ipados26_defconfig -D ../UniXNU-sheng from UniXNU.", "Run ./unixnu status --json -D ../UniXNU-sheng and review profiles, components, source pins and patch order."]
@@ -150,6 +150,11 @@ reference = "reports/m4-prelink.md"
 command = "workflow_dispatch prelink; Actions run 43069001174"
 revision = "a5112b2b866f1355bb32a1b33cdbfb477decbdd8"
 result = "Real prelink placed 0x1e8000 DATA without overlap, relocated 111618 native chain sites and rebound 561 original adapter branches. Strict output was refused for 21 unresolved pointers, with no fallback stubs. Input-bound maps, failure reports and one public input evidence export are retained for diagnosis."
+
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-prelink.md"
+result = "Two exact-byte reviewed callable identities recover vm_map_page_size and ml_stack_remaining from the real failed M4 inputs. The existing matcher validates original hashes and native symbols, and invalidates its map on fixture changes. Strict unresolved-reference and ABI checks remain enabled."
 
 [[area]]
 id = "firmware"

@@ -47,6 +47,13 @@ cache = args.out / 'ipsw' / ctx.board['ipsw']['build'] / 'kernelcache.decompress
 if not cache.is_file() or sha(cache) != spec['kernelcache_sha256']:
     cache = ipsw.kernelcache(ctx, ipsw.Ipsw(ctx))  # HTTP ranges; KernelCache only.
 ctx.args.kernelcache = str(cache)
+# The engine's existing reviewed-symbol interface validates original function
+# bytes and resolves the native symbol afresh. Keep this board-owned evidence
+# separate from the pinned shared fixtures; its digest invalidates pairing maps.
+anchors = device / 'scripts/m4-prelink-symbols.json'
+reviewed = ctx.tree / 'kits/XnuPrelink/fixtures/fileset-24A446-sheng-m4-symbols.json'
+if not reviewed.is_file() or reviewed.read_bytes() != anchors.read_bytes():
+    shutil.copyfile(anchors, reviewed)
 sys.path.insert(0, str(ctx.tree / 'kits/XnuPrelink'))
 from kc_image import Image
 from fileset_emit import dependency_closure, rebase_collection
@@ -56,6 +63,7 @@ inputs = {'native': str(native), 'native_sha256': native_sha,
           'reference': str(reference), 'reference_sha256': reference_sha,
           'kernelcache': str(cache), 'kernelcache_sha256': sha(cache),
           'roots': spec['roots'], 'allow_missing': False, 'build_invoked': False}
+inputs['reviewed_symbols_sha256'] = sha(anchors)
 (args.logs / 'prelink-inputs.json').write_text(json.dumps(inputs, indent=2) + '\n')
 print('Real retained prelink inputs:', json.dumps(inputs), flush=True)
 

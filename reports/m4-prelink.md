@@ -49,3 +49,25 @@ On a first failure for each input triple, the workflow exports hardlinks
 to the three public kernel inputs with their recorded digests for offline
 binding diagnosis. No disk-copy of the images or installation input is
 introduced, and a content marker avoids uploading them on every retry.
+
+## Reviewed callable identities
+
+The second real run, [43069929349](https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43069929349),
+reused the map and reproduced all 21 unresolved pointers in about ten
+seconds of emission. No native/reference rebuild occurred.
+
+`scripts/m4-prelink-symbols.json` records two recovered identities with
+original function extents, byte hashes, named native targets and source
+reasoning: `vm_map_page_size` and `ml_stack_remaining`. The runtime stage
+copies this evidence into a separately named fixture using the prelink
+engine's existing reviewed-symbol interface. Its signature invalidates
+old maps; the engine checks original bytes and resolves native symbols.
+No matching heuristic or ABI check is weakened. These are callable KPIs;
+their different internal field offsets are not patched or treated as
+proof that private structure layouts match.
+
+The selected OS profile explicitly uses public xnu-12377.121.6 with
+Darwin 26 compatibility patches against the stripped 24A446 collection.
+A successful native link therefore does not establish that every private
+24A446 interface exists or has the same ABI. Remaining private bindings
+require individual implementation/signature evidence before publication.
