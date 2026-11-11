@@ -156,6 +156,13 @@ kind = "source"
 reference = "reports/m4-prelink.md"
 result = "Two exact-byte reviewed callable identities recover vm_map_page_size and ml_stack_remaining from the real failed M4 inputs. The existing matcher validates original hashes and native symbols, and invalidates its map on fixture changes. Strict unresolved-reference and ABI checks remain enabled."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-prelink.md"
+command = "workflow_dispatch prelink; Actions run 43071105217"
+revision = "be828a08381d3857058ca028e024903f7a88c22f"
+result = "Real strict retry confirmed both reviewed callable identities and reduced unresolved pointers from 21 to 19. DATA fits the retained closure at 0x1e8000 with zero growth headroom before Libm. Native/reference inputs were unchanged. No stubs or incomplete output were published; private CPU/platform/Image4 ABI recovery and final runtime qualification remain incomplete."
+
 [[area]]
 id = "firmware"
 status = "implemented"

@@ -80,6 +80,11 @@ layout_report = {'native_data_bytes': next(s['size'] for s in executable.segment
 try:
     layout = Layout(rebased, executable, closure)
     layout_report.update(layout_valid=True, placements=layout.describe())
+    data_begin, data_end = layout.placements['__DATA'], layout.end('__DATA')
+    next_retained = min((begin for begin, end in layout.occupied if begin >= data_end), default=None)
+    layout_report.update(data_begin=hex(data_begin), data_end_exclusive=hex(data_end),
+                         next_retained_begin=hex(next_retained) if next_retained is not None else None,
+                         data_headroom_bytes=next_retained - data_end if next_retained is not None else None)
 except ValueError as error:
     layout_report.update(layout_valid=False, error=str(error))
 (args.logs / 'data-layout.json').write_text(json.dumps(layout_report, indent=2) + '\n')

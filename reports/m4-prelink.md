@@ -71,3 +71,60 @@ Darwin 26 compatibility patches against the stripped 24A446 collection.
 A successful native link therefore does not establish that every private
 24A446 interface exists or has the same ABI. Remaining private bindings
 require individual implementation/signature evidence before publication.
+
+## Strict retry after the two identity fixes
+
+[Run 43071105217](https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43071105217)
+on `be828a08381d3857058ca028e024903f7a88c22f` confirmed both named targets
+were bound by the reviewed mechanism. Unresolved pointer references fell
+from 21 to 19. Native/reference input digests were unchanged. All 57
+selected closure entries remained; the formal emitter processed 111,618
+native chain sites, 130,884 retained kext chain sites, 81,116 rebound kext
+pointers and 561 original adapter branches. Split relocations processed:
+kind 3: 17,297; kind 4: 53; kind 5: 164,606; kind 6: 175,610;
+kind 7: 4,050; pointer relocations: 111,618. No fallback stubs were used.
+
+The actual DATA interval is `[0xfffffff00b834000, 0xfffffff00ba1c000)`.
+Reconstructing the same production Layout from these retained inputs
+finds the first retained Libm DATA byte at exactly `0xfffffff00ba1c000`:
+`0x1e8000` fits this closure with **zero growth headroom**. Increasing it
+by 16 KiB would collide with Libm; any native input change must rerun the
+actual layout check. The M4 stage also records these boundary fields.
+
+Remaining strict failures (output address space uses slide 0x1f000000000):
+
+| Owner | Unresolved pointer references |
+| --- | ---: |
+| AppleARMPlatform | 7 |
+| AppleARMWatchdogTimer | 3 |
+| ApplePMGR | 2 |
+| IOHIDFamily | 1 |
+| IOSurface | 1 |
+| AppleImage4 | 1 |
+| Image4 | 4 |
+
+The two non-code targets in original address space are
+`0xfffffe00070446a8` (kernel TEXT const) and `0xfffffe000b8b3ce8`
+(kernel DATA common). The remaining code includes the original
+`processor_info` identity at `0xfffffe000ad53f60`: its disassembly handles
+flavor 3 with count >= 12, whereas the selected public source's
+`osfmk/kern/processor.c` implements basic/load flavors and delegates others
+to cpu_info. A named binding alone cannot qualify this additional flavor.
+The Image4 targets `0xfffffe000b2a1694` and `0xfffffe000b2a170c` construct
+monitor requests with operation constants 0x34 and 0x35. Their exact ABI
+and required implementation are not yet proven. They remain unresolved,
+not mapped to a superficially similar function or panic stub.
+
+The strict writer reported `candidate_written=false`,
+`mapping_complete=false`, `stubbed={}`. There is no qualified final
+prelink artifact/hash. The retained failure JSON SHA-256 is
+`a242b95a2883df2912d8c557429381c3478dbf331868864fc4b374d1f71c00b3`.
+The native input SHA-256 remains
+`31f8273297025436fa9814b9540329b439af45afd661f7f6836476401a9ec15b`.
+
+Next work is identity/ABI recovery for these 19 references, with a real
+implementation or adapter wherever the public source lacks the required
+interface. Until those are proven, final fileset structure checks,
+complete binding qualification, early init, runtime selftests and device
+boot remain unverified. Failures, maps and inputs remain on the Mac;
+this stage never cleans build objects, headers or archives.
