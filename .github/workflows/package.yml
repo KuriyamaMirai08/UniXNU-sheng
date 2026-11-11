@@ -8,6 +8,11 @@ name: package
 on:
   workflow_dispatch:
     inputs:
+      runner_location:
+        description: "hosted: device-bound package; self-hosted: UniXNU-M4 public-source compile smoke only"
+        type: choice
+        options: [hosted, self-hosted]
+        default: hosted
       os:
         description: "OS profile of the images"
         type: choice
@@ -28,11 +33,57 @@ permissions:
   contents: read
 
 concurrency:
-  group: package-${{ github.ref }}
-  cancel-in-progress: true
+  group: package-${{ github.ref }}-${{ inputs.runner_location || 'hosted' }}
+  cancel-in-progress: ${{ inputs.runner_location != 'self-hosted' }}
 
 jobs:
+  m4-smoke:
+    # No secrets, seed cache, artifacts or authenticated checkout on the rental Mac.
+    # Reject sensitive dispatch fields BEFORE assigning a job (and its event file).
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.runner_location == 'self-hosted' &&
+      !inputs.init_data && inputs.data_seed_url == '' && inputs.data_seed_sha256 == ''
+    permissions: {}
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 45
+    concurrency:
+      group: unixnu-m4-public-smoke
+      cancel-in-progress: false
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - name: Require the registered M4
+        env:
+          ACTUAL_RUNNER: ${{ runner.name }}
+        run: |
+          test "$ACTUAL_RUNNER" = UniXNU-M4 || { echo 'Expected UniXNU-M4; refusing another runner'; exit 1; }
+          test "$(uname -m)" = arm64
+      - name: Anonymous public source checkout
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          # Never pass github.token, a PAT or persisted checkout credentials.
+          source_dir="$RUNNER_TEMP/unixnu-public-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          git -c credential.helper= clone --no-checkout --depth 1 https://github.com/KuriyamaMirai08/UniXNU-sheng.git "$source_dir"
+          git -C "$source_dir" -c credential.helper= fetch --depth 1 origin "$SOURCE_SHA"
+          git -C "$source_dir" checkout --detach FETCH_HEAD
+          echo "SMOKE_DEVICE=$source_dir" >> "$GITHUB_ENV"
+      - name: Check dependencies and compile public targets with persistent output
+        run: bash "$SMOKE_DEVICE/scripts/m4-compile-smoke.sh"
+
+  reject-unsafe-smoke-inputs:
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.runner_location == 'self-hosted' &&
+      (inputs.init_data || inputs.data_seed_url != '' || inputs.data_seed_sha256 != '')
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - run: echo 'Self-hosted smoke requires init_data=false and empty seed URL/SHA fields. No job was sent to the rental Mac.'; exit 1
+
   package:
+    # All secret/seed/cache/image steps stay inside this hosted-only job.
+    if: github.event_name == 'workflow_dispatch' && (inputs.runner_location == 'hosted' || inputs.runner_location == '')
     runs-on: macos-26
     timeout-minutes: 360
     env:
