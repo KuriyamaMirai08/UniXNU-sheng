@@ -11,6 +11,7 @@ import tarfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+from firmware_cache import verified_retained
 directory = ROOT / '.cache/firmware/sheng'
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--delete-archive', action='store_true')
@@ -24,13 +25,9 @@ import tomllib
 board = Path(os.environ.get('UNIXNU_DEVICE') or ROOT) / 'board.toml'
 image = tomllib.load(open(board, 'rb'))['firmware']['image']
 record_path = directory / 'porting-inputs.json'
-if record_path.is_file():
-    import json as _json
-    record = _json.loads(record_path.read_text())
-    if (record.get('archive_deleted') and record.get('source_url') == image['url']
-            and record.get('archive_sha256') == image['sha256']):
-        print('firmware inputs already extracted; nothing to do')
-        raise SystemExit(0)
+if verified_retained(directory, image):
+    print('firmware retained inputs verified; nothing to extract')
+    raise SystemExit(0)
 if (not download.get('verified') or download.get('url') != image['url'] or
         download.get('md5') != image['md5'] or download.get('sha256') != image['sha256']):
     raise SystemExit('Download must finish its verification against board.toml [firmware.image] first')

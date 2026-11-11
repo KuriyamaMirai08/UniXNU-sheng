@@ -61,12 +61,6 @@ def main():
         raise SystemExit('Ath12k fetcher has unreviewed local modifications')
     if current != fixed:
         path.write_text(fixed)
-    prelink = args.unixnu / 'kits/XnuPrelink'
-    patch = device / 'scripts/ci-patches/prelink-data-placement.patch'
-    if subprocess.run(['git', '-C', str(prelink), 'apply', '--reverse', '--check', str(patch.resolve())],
-                      capture_output=True).returncode:
-        subprocess.run(['git', '-C', str(prelink), 'apply', '--check', str(patch.resolve())], check=True)
-        subprocess.run(['git', '-C', str(prelink), 'apply', str(patch.resolve())], check=True)
     print('Prepared pinned Ath12k fetcher; Mesa, prelink and build input checks remain enabled')
 
 

@@ -35,6 +35,8 @@ jobs:
   package:
     runs-on: macos-26
     timeout-minutes: 360
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,6 +56,9 @@ jobs:
           submodules: recursive
       - name: tools
         run: |
+          test -d "$DEVELOPER_DIR"
+          xcrun clang --version
+          xcrun --sdk iphoneos --show-sdk-version
           brew install dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw
           {
             echo "$HOME/.cargo/bin"

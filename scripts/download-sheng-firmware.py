@@ -13,6 +13,7 @@ import time
 import urllib.request
 
 import tomllib
+from firmware_cache import required_free_bytes, verified_retained
 
 ROOT = Path(__file__).resolve().parents[1]
 directory = ROOT / '.cache/firmware/sheng'
@@ -20,12 +21,9 @@ BOARD = Path(os.environ.get('UNIXNU_DEVICE') or ROOT) / 'board.toml'
 image = tomllib.load(open(BOARD, 'rb'))['firmware']['image']
 URL, MD5 = image['url'], image['md5']
 retained = directory / 'porting-inputs.json'
-if retained.is_file():
-    import json
-    record = json.loads(retained.read_text())
-    if record.get('archive_deleted') and record.get('source_url') == URL and record.get('archive_sha256') == image['sha256']:
-        print(f'firmware inputs already extracted from {URL.rsplit("/", 1)[1]}')
-        raise SystemExit(0)
+if verified_retained(directory, image):
+    print(f'firmware inputs verified from {URL.rsplit("/", 1)[1]}')
+    raise SystemExit(0)
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--connections', type=int, default=32)
 args = parser.parse_args()
@@ -41,6 +39,8 @@ with urllib.request.urlopen(request, timeout=30) as response:
     if response.status != 206 or not match or response.read() != b'\x1f':
         raise SystemExit('Expected a ranged gzip response; refusing a whole-body fallback')
     size = int(match[1])
+    if size != image['bytes']:
+        raise SystemExit('Remote firmware size differs from board.toml; refusing an unpinned download')
     etag = response.headers.get('ETag')
 chunk_size = 8 * 1024 * 1024
 count = (size + chunk_size - 1) // chunk_size
@@ -55,6 +55,9 @@ if target.exists():
 elif state['completed'] and not partial.exists():
     raise SystemExit('Resume state exists without its archive')
 allocated = partial.stat().st_blocks * 512 if partial.exists() else 0
+needed = required_free_bytes(size, allocated)
+if shutil.disk_usage(directory).free < needed:
+    raise SystemExit(f'Firmware download/extraction needs at least {needed} free bytes; preserve existing inputs and free space first')
 descriptor = os.open(partial, os.O_RDWR | os.O_CREAT, 0o600)
 os.ftruncate(descriptor, size)
 lock = threading.Lock()

@@ -95,6 +95,7 @@ def main():
     sys.path[:0] = [str(upstream / 'scripts'), str(upstream / 'kits/XnuPrelink')]
     from kc_image import Image
     from unixnu import ipsw, kernel, profiles
+    from fileset_emit import dependency_closure
     device = Path(__file__).resolve().parents[1]
     profile = tomllib.loads((upstream / 'profiles/os/ipados-27.0.1-24A446/profile.toml').read_text())
     board = tomllib.loads((device / 'board.toml').read_text())
@@ -117,6 +118,33 @@ def main():
         command += ['--root', root]
     summary = {'diagnostic_only': True, 'rebases': bindings, 'roots': roots,
                'native_original_sha256': NATIVE29, 'reference_sha256': hashlib.sha256(reference.read_bytes()).hexdigest()}
+    raw_cache = Image(cache.read_bytes())
+    data_root = next(s for s in raw_cache.segments if s['name'] == '__DATA')
+    for label, selected in (('current', roots), ('profile_control', profile['kernel']['prelink']['roots'])):
+        closure = dependency_closure(raw_cache, selected)
+        occupied = []
+        for name in sorted(closure - {'com.apple.kernel'}):
+            for segment in Image(raw_cache.data, raw_cache.entries[name][1]).segments:
+                if segment['size'] and segment['name'] != '__LINKEDIT':
+                    occupied.append((segment['va'], segment['va'] + segment['size'], name))
+        cursor, limit = data_root['va'], data_root['va'] + data_root['size']
+        holes = []
+        for begin, end, _ in sorted(occupied):
+            if end <= cursor or begin >= limit:
+                continue
+            aligned = (cursor + 0x3fff) & ~0x3fff
+            if begin > aligned:
+                holes.append(begin - aligned)
+            cursor = max(cursor, end)
+        holes.append(max(0, limit - ((cursor + 0x3fff) & ~0x3fff)))
+        summary[label + '_data_capacity'] = {'closure_entries': len(closure), 'largest_hole': max(holes),
+                                             'native_bytes': next(s['size'] for s in Image(simulated).segments if s['name'] == '__DATA')}
+    receipt = reference.with_suffix('.json')
+    if receipt.is_file():
+        saved = json.loads(receipt.read_text())
+        summary['reference_record_digest_matches'] = saved.get('sha256') == summary['reference_sha256']
+    summary['cached_runtime_inputs'] = {'gpu_addon': (cached.parent / 'runtime/generated.json').is_file(),
+                                        'turnip_receipt': (cached / 'build/mesa-tu-ios27/builtin-build-profile.json').is_file()}
     try:
         with (out / 'prelink.log').open('w') as log:
             result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=720)
