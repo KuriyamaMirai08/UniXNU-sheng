@@ -82,7 +82,10 @@ clean only the affected build directory; do not routinely delete all output.
 
 The test checks Xcode 26.6 / 17F113, iPhoneOS SDK, Python with `tomllib`,
 the hosted workflow's Brew formula/tool list, Rust 1.98.0 and rust-src.
-It reports missing dependencies without upgrading the machine. If needed:
+It selects a Brew Python with `tomllib` (installs `python@3.13` if absent),
+installs only missing Brew formulae without auto-update, and installs Rust
+1.98.0/rust-src if missing. Installed formulae are not upgraded. The same
+prerequisites can also be prepared manually:
 
 ```sh
 brew install dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw
@@ -96,3 +99,13 @@ IPSW, stock ROM, real seed, complete XNU kernel, or platform FD. Passing
 does not establish full package feasibility or successful device boot.
 Run smoke a second time to observe EDK/Cargo incremental reuse. A rented
 host can falsify its own logs; this is a functional check, not attestation.
+
+## First real runner observation
+
+Run https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43053568014
+reached `UniXNU-M4`, passed the name/ARM64 guard and anonymous checkout,
+and confirmed macOS 26.3, Xcode 26.6 / 17F113 and iPhoneOS SDK 26.5.
+It stopped before compilation because the default `python3` had no
+`tomllib`. The Python selection/bootstrap above addresses that observed
+failure. The hosted package job was skipped. Compilation and a second-run
+cache hit still require a successful follow-up run.

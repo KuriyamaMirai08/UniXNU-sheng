@@ -14,23 +14,48 @@ xcodebuild -version
 test "$(xcodebuild -version)" = "$(printf 'Xcode 26.6\nBuild version 17F113')"
 xcrun clang --version
 xcrun --sdk iphoneos --show-sdk-version
+# macOS /usr/bin/python3 can be 3.9 even with current Xcode. Prefer a
+# compatible Brew Python and install one only if none is already available.
+select_python() {
+  local candidate
+  for candidate in /opt/homebrew/bin/python3 /opt/homebrew/opt/python@3.*/libexec/bin/python3; do
+    if [ -x "$candidate" ] && "$candidate" -c 'import tomllib' 2>/dev/null; then
+      export PATH="$(dirname "$candidate"):$PATH"
+      return 0
+    fi
+  done
+  return 1
+}
+export HOMEBREW_NO_AUTO_UPDATE=1
+if ! select_python; then
+  brew install python@3.13
+  select_python
+fi
+python3 --version
 python3 -c 'import tomllib'
 
-# Report every missing dependency together; do not upgrade a rented machine's
-# toolchain or download firmware just to find out whether it can compile.
+# Install only missing prerequisites; leave installed formulae unchanged.
 missing=0
 for formula in dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup ipsw; do
-  brew list --versions "$formula" || { echo "Missing brew formula: $formula"; missing=1; }
+  if ! brew list --versions "$formula"; then
+    install_formula=$formula
+    [ "$formula" != ipsw ] || install_formula=blacktop/tap/ipsw
+    brew install "$install_formula"
+  fi
 done
 export PATH="/opt/homebrew/opt/llvm/bin:/opt/homebrew/opt/lld/bin:$PATH"
 for tool in clang xcodebuild make git ninja cmake dtc fdtget fdtput aea compression_tool mformat mcopy ipsw \
             lld-link llvm-lib llvm-rc llvm-nm llvm-objcopy bison pkg-config glslangValidator glslc spirv-val rustup; do
   command -v "$tool" || { echo "Missing command: $tool"; missing=1; }
 done
-rustup run 1.98.0 rustc --version || { echo 'Install: rustup toolchain install 1.98.0 --profile minimal --component rust-src'; missing=1; }
 test "$missing" = 0
+if ! rustup run 1.98.0 rustc --version; then
+  rustup toolchain install 1.98.0 --profile minimal --component rust-src
+fi
 rust_src=$(rustup run 1.98.0 rustc --print sysroot)/lib/rustlib/src/rust/library
-test -d "$rust_src" || { echo 'Install: rustup component add rust-src --toolchain 1.98.0'; exit 1; }
+if [ ! -d "$rust_src" ]; then
+  rustup component add rust-src --toolchain 1.98.0
+fi
 
 # Fixed absolute paths: neither workspace cleaning nor temporary checkout
 # removal can reach the source/BaseTools/EDK/Cargo/XNU build outputs here.
