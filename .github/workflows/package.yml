@@ -143,24 +143,43 @@ jobs:
             args+=(--init-data)
           fi
 
-          echo "=== [1/4] 预拉取键盘与触控专有固件 (MCU_Upgrade.bin 等) ==="
-          python3 scripts/extract-files.py
-
-          echo "=== [2/4] 预拉取 Ath12k Wi-Fi 依赖源码 (Linux / FreeBSD / wpa_supplicant) ==="
-          bash drivers/Ath12kWifi/tools/fetch-sources.sh
-
-          echo "=== [3/4] 预拉取 QcaBluetooth 源码与蓝牙固件 ==="
-          python3 drivers/QcaBluetooth/tools/prepare-linux.py
-          python3 scripts/stage-bluetooth-firmware.py .cache/bt-stage --fetch
-
-          echo "=== [4/4] 注入 Mesa 补丁容错与校验短路逻辑 ==="
+          echo "=== [1/4] 注入 Git 镜像容错、sparse-checkout 修复与 Mesa 补丁短路逻辑 ==="
           python3 - <<'PY'
           import pathlib
+
+          old_clone = """        subprocess.run(["git", "clone", "--depth", "1", "--branch", source["ref"],
+                        "--filter=blob:none", "--sparse", source["url"], str(directory)], check=True)"""
+          new_clone = """        urls = [source["url"]]
+        if "git.kernel.org" in source["url"]:
+            urls.append(source["url"].replace("https://git.kernel.org/", "https://kernel.googlesource.com/"))
+        for attempt in range(4):
+            url = urls[attempt % len(urls)]
+            try:
+                import shutil as _shutil
+                _shutil.rmtree(directory, ignore_errors=True)
+                directory.mkdir(parents=True, exist_ok=True)
+                subprocess.run(["git", "init", "-q", str(directory)], check=True)
+                subprocess.run(["git", "-C", str(directory), "sparse-checkout", "set", "--no-cone", *source["paths"]], check=True)
+                subprocess.run(["git", "-C", str(directory), "fetch", "--depth", "1", "--filter=blob:none", url, source["commit"]], check=True)
+                subprocess.run(["git", "-C", str(directory), "checkout", "-q", "--detach", "FETCH_HEAD"], check=True)
+                break
+            except Exception as e:
+                print(f"Fetch attempt {attempt+1} from {url} failed: {e}")
+                if attempt == 3:
+                    raise"""
 
           for p in pathlib.Path('..').rglob('*.py'):
               try:
                   content = p.read_text()
                   changed = False
+
+                  if old_clone in content:
+                      content = content.replace(old_clone, new_clone)
+                      changed = True
+
+                  if '"sparse-checkout", "add"' in content:
+                      content = content.replace('"sparse-checkout", "add"', '"sparse-checkout", "set", "--no-cone"')
+                      changed = True
 
                   old_apply = "run('git', '-C', mesa, 'apply', ROOT / patch)"
                   if old_apply in content and "Bypassed patch apply error" not in content:
@@ -186,6 +205,16 @@ jobs:
               except Exception as err:
                   pass
           PY
+
+          echo "=== [2/4] 预拉取键盘与触控专有固件 (MCU_Upgrade.bin 等) ==="
+          python3 scripts/extract-files.py
+
+          echo "=== [3/4] 预拉取 Ath12k Wi-Fi 依赖源码 (Linux / FreeBSD / wpa_supplicant) ==="
+          bash drivers/Ath12kWifi/tools/fetch-sources.sh
+
+          echo "=== [4/4] 预拉取 QcaBluetooth 源码与蓝牙固件 ==="
+          python3 drivers/QcaBluetooth/tools/prepare-linux.py
+          python3 scripts/stage-bluetooth-firmware.py .cache/bt-stage --fetch
 
           scripts/package.sh "${args[@]}"
       - uses: actions/cache/save@v4
