@@ -75,3 +75,39 @@ because its link-only filter accepted `clang` but not `clang++`. It now
 accepts either driver only when the log also contains the arm64e undefined
 symbol diagnostics. Source compilation errors still fail; other board
 archives and the final native link remain deferred in this stage.
+
+## Verified compilation and incremental retry
+
+Code revision: `2267df6cbf50dab923445866c7e75887cad2e604`.
+
+* First successful stage:
+  https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43061093667
+* Successful incremental stage:
+  https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43061503882
+
+Both ran on `UniXNU-M4`, skipped EDK smoke and hosted package, and retained
+the same persistent tree. `stage-report.json` recorded 957 XNU `.o` files
+and all three generated Kernel.framework headers. XNU source compilation
+reached the deliberately unresolved bootstrap link. Ordinary and
+namespaced CoreCrypto each compiled 529 kernel C sources with zero
+failures; all 529 objects in each archive passed the original architecture
+and deployment audit. Neither archive had external names absent from the
+XNU object symbol set. The namespaced archive had zero globals shared with
+the XNU object symbol set (the plain archive had 64, as expected).
+
+The incremental run reported `CoreCrypto objects reused: 529/529` for both
+variants and no XNU CC/CXX/AS compile commands. The compile step took 22
+seconds, compared with 70 seconds for the first successful stage. Both
+archive hashes were identical across those two runs:
+
+| Archive | SHA-256 |
+| --- | --- |
+| `libcorecrypto_kernel_noasm.a` | `c376cb840a1a5aab27b02ab14958f3c62e62266e972fe9bd35ab89aa1ea921ad` |
+| `libcorecrypto_kernel_noasm-namespaced.a` | `4d74783c8cbbb784301878f4bb8a863c396269d9e4dd2ef129f9908ff897bc2e` |
+
+The actual `kern/clock.h` include chain now compiles successfully. No
+cache/header removal or production validation bypass was needed. Full
+board archive integration, final native link, CoreCrypto registration and
+selftests, prelink and boot are still unverified. The next stage is to
+build the remaining production board archives and complete the native
+link from this retained tree, without introducing installation inputs.

@@ -92,6 +92,13 @@ command = "Re-run failed jobs in Actions run 43059188516, attempt 2"
 revision = "16f689b419b0e4b653deebce34ceb65cf4c4fb26"
 result = "After Xcode system initialization, XNU compiled to the expected unresolved bootstrap link and kern/assert.h, kern/clock.h and pexpert/pexpert.h were present. The stage filter now recognizes clang++ as well as clang linker-only errors when arm64e undefined-symbol diagnostics are present; source compiler errors remain fatal."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-xnu-corecrypto.md"
+command = "workflow_dispatch package.yml runner_location=self-hosted self_hosted_stage=xnu-corecrypto os=27; runs 43061093667 and 43061503882"
+revision = "2267df6cbf50dab923445866c7e75887cad2e604"
+result = "Both M4 stages passed: XNU source compilation reached the expected bootstrap link, generated headers were present, and each CoreCrypto variant built 529 sources with zero failures and passed 529 object ABI audits. The incremental run recompiled no XNU objects and reused 529/529 objects in each CoreCrypto variant; both archive hashes were unchanged. Full native link, registration/selftests, prelink and boot remain unverified."
+
 [[area]]
 id = "firmware"
 status = "implemented"
@@ -668,6 +675,13 @@ result = "Global AppSync scope, on-device signature repair, dynamic kernel trust
 kind = "source"
 reference = "scripts/build-gop-legacy-display-27.py"
 result = "On macOS the keyboard firmware image is placed in __DATA,__firmware."
+
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-xnu-corecrypto.md"
+command = "workflow_dispatch package.yml runner_location=self-hosted self_hosted_stage=xnu-corecrypto os=27; runs 43061093667 and 43061503882"
+revision = "2267df6cbf50dab923445866c7e75887cad2e604"
+result = "Both M4 stages passed: XNU source compilation reached the expected bootstrap link, generated headers were present, and each CoreCrypto variant built 529 sources with zero failures and passed 529 object ABI audits. The incremental run recompiled no XNU objects and reused 529/529 objects in each CoreCrypto variant; both archive hashes were unchanged. Full native link, registration/selftests, prelink and boot remain unverified."
 
 [[area]]
 id = "diagnostics"
