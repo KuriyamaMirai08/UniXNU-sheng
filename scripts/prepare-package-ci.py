@@ -40,6 +40,29 @@ def transform(source):
     return result
 
 
+# A restored XNU object/compile-record cache does not include the generated
+# Kernel.framework headers on a fresh macOS runner. Without those headers,
+# corecrypto-2023 fails hundreds of source compiles even though startup.o.json
+# exists. Bootstrap must run to install the SDK headers before archive recipes.
+KERNEL_BOOTSTRAP_ORIGINAL = "    if not record.is_file():\\n"
+KERNEL_BOOTSTRAP_FIXED = """    framework = ctx.tree / '.cache/fakeroot/System/Library/Frameworks/Kernel.framework/Versions/A'
+    required = ('kern/assert.h', 'kern/clock.h', 'pexpert/pexpert.h')
+    missing_headers = [name for name in required if not any(
+        (framework / root / name).is_file() for root in ('Headers', 'PrivateHeaders'))]
+    if missing_headers:
+        log('kernel: missing generated XNU headers; forcing bootstrap: ' + ', '.join(missing_headers))
+    if not record.is_file() or missing_headers:
+"""
+
+
+def transform_kernel_bootstrap(source):
+    if source.count(KERNEL_BOOTSTRAP_ORIGINAL) != 1:
+        raise ValueError('Pinned kernel bootstrap source changed; review before adapting it')
+    result = source.replace(KERNEL_BOOTSTRAP_ORIGINAL, KERNEL_BOOTSTRAP_FIXED)
+    ast.parse(result)
+    return result
+
+
 def git(repo, *args):
     return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
 
@@ -61,7 +84,16 @@ def main():
         raise SystemExit('Ath12k fetcher has unreviewed local modifications')
     if current != fixed:
         path.write_text(fixed)
-    print('Prepared pinned Ath12k fetcher; Mesa, prelink and build input checks remain enabled')
+    kernel_path = args.unixnu / 'scripts/unixnu/kernel.py'
+    original_kernel = subprocess.check_output(
+        ['git', '-C', str(args.unixnu), 'show', 'HEAD:scripts/unixnu/kernel.py'], text=True)
+    fixed_kernel = transform_kernel_bootstrap(original_kernel)
+    current_kernel = kernel_path.read_text()
+    if current_kernel not in (original_kernel, fixed_kernel):
+        raise SystemExit('Pinned kernel builder has unreviewed local modifications')
+    if current_kernel != fixed_kernel:
+        kernel_path.write_text(fixed_kernel)
+    print('Prepared pinned Ath12k fetcher and XNU header bootstrap; validation checks remain enabled')
 
 
 if __name__ == '__main__':
