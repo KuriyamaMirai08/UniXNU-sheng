@@ -43,11 +43,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU
+          ref: 97437dcf7389484a0eeaa8067725ce743aff18ef
           path: UniXNU
           submodules: recursive
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/uefi-sheng
+          ref: 66421cb7bb5694843aec8de1ca3d1de4c20cca38
           path: uefi-sheng
           submodules: recursive
       - name: tools

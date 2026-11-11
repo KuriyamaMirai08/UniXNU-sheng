@@ -1,0 +1,47 @@
+name: Prebuild audit (no full package)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/prebuild-audit.yml'
+      - 'scripts/audit-cached-prelink.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cached-prelink:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: device
+      - uses: actions/checkout@v4
+        with:
+          repository: UniXNU/UniXNU
+          ref: 97437dcf7389484a0eeaa8067725ce743aff18ef
+          path: UniXNU
+      - run: git -C UniXNU submodule update --init --depth 1 kits/XnuPrelink
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/m2v-target
+            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/mesa-tu-ios27
+            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/fileset-reference
+            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/ios-obj
+            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/.cache/appsync-signer
+            device/.cache/firmware/sheng
+          key: unixnu-heavy-build-27-59fd891211ff79ab5047f9d19a80d95e6a3b29a7
+          fail-on-cache-miss: true
+      - name: Diagnose later prelink stages without compiling or accessing Data
+        run: >-
+          python3 device/scripts/audit-cached-prelink.py --unixnu UniXNU
+          --cache-tree UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree
+          --output audit
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-prelink-reports
+          path: |
+            audit/*.json
+            audit/*.log
+          retention-days: 7
