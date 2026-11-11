@@ -4,29 +4,73 @@ on:
 permissions:
   contents: read
 jobs:
-  inspect:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  reproduce:
+    runs-on: macos-15
+    timeout-minutes: 10
     steps:
-      - uses: actions/cache/restore@v4
+      - uses: actions/checkout@v4
         with:
-          path: |
-            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/m2v-target
-            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/mesa-tu-ios27
-            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/fileset-reference
-            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/ios-obj
-            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/.cache/appsync-signer
-            device/.cache/firmware/sheng
-          key: unixnu-heavy-build-27-59fd891211ff79ab5047f9d19a80d95e6a3b29a7
-          fail-on-cache-miss: true
-      - name: Inspect cached native executable
+          ref: codex/fix-package29-weak-binds
+      - name: Reproduce weak binds and validate strong definitions
         run: |
-          kernel=UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf
-          file "$kernel"
-          mkdir diagnostic
-          cp "$kernel" diagnostic/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: package29-native-diagnostic
-          retention-days: 1
-          path: diagnostic/
+          python3 - <<'PY'
+          import ast, pathlib, struct, subprocess
+          workflow = pathlib.Path('.github/workflows/package.yml').read_text()
+          # Parse only the injection block; the remaining package steps do not run.
+          start = workflow.index('          import pathlib\n')
+          end = workflow.index('          PY\n', start)
+          block = '\n'.join(line[10:] for line in workflow[start:end].splitlines())
+          tree = ast.parse(block)
+          values = {}
+          for node in tree.body:
+              if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+                  name = node.targets[0].id
+                  if name == 'old_gop':
+                      values[name] = ast.literal_eval(node.value)
+                  elif name == 'new_gop':
+                      values[name] = '\n'.join(values['old_gop'] if isinstance(item, ast.Name) else ast.literal_eval(item)
+                                              for item in node.value.args[0].elts)
+          support = values['new_gop']
+          header = 'typedef unsigned long uintptr_t; typedef unsigned long size_t; typedef unsigned long long uint64_t; typedef int kern_return_t; class IOMemoryDescriptor;\n#define KERN_INVALID_ARGUMENT 4\n'
+          # The same weak-import declarations and live address references as consumers.
+          calls = '''
+          extern "C" void sheng_ethernet_probe(void) __attribute__((weak_import));
+          extern "C" void sheng_software_aes_probe(void) __attribute__((weak_import));
+          extern "C" bool ml_static_mfree_prepare(uintptr_t, size_t) __attribute__((weak_import));
+          extern "C" kern_return_t iokit_physical_descriptor_close_notify(IOMemoryDescriptor *, void (*)(void *), void *) __attribute__((weak_import));
+          extern "C" void entry() {
+              if(sheng_ethernet_probe) sheng_ethernet_probe();
+              if(sheng_software_aes_probe) sheng_software_aes_probe();
+              if(ml_static_mfree_prepare) ml_static_mfree_prepare(0,0);
+              if(iokit_physical_descriptor_close_notify) iokit_physical_descriptor_close_notify(0,0,0);
+          }
+          '''
+          pathlib.Path('consumer.cpp').write_text(header + calls)
+          flags = ['xcrun','clang++','-target','arm64e-apple-ios27.0','-mkernel','-ffreestanding','-fno-stack-protector']
+          subprocess.run(flags + ['-c','consumer.cpp','-o','consumer.o'], check=True)
+          counts = {}
+          for mode in ('weak','strong'):
+              source = support
+              if mode == 'weak':
+                  for typ in ('void', 'bool', 'kern_return_t'):
+                      source = source.replace('extern "C" ' + typ, 'extern "C" __attribute__((weak)) ' + typ)
+              pathlib.Path('support.cpp').write_text(header + source)
+              subprocess.run(flags + ['-c','support.cpp','-o','support.o'], check=True)
+              subprocess.run(flags + ['-nostdlib','-Wl,-kernel,-add_split_seg_info,-e,_entry','consumer.o','support.o','-o',mode+'.macho'], check=True)
+              data = pathlib.Path(mode+'.macho').read_bytes()
+              ncmds, = struct.unpack_from('<I',data,16)
+              offset = 32
+              for _ in range(ncmds):
+                  cmd, size = struct.unpack_from('<II',data,offset)
+                  if cmd == 0x80000034:
+                      fixups, = struct.unpack_from('<I',data,offset+8)
+                      counts[mode], = struct.unpack_from('<I',data,fixups+16)
+                      break
+                  offset += size
+              else:
+                  raise AssertionError('Expected chained fixup command')
+              print(mode, 'chained imports:', counts[mode])
+          assert counts['weak'] == 4, counts
+          assert counts['strong'] == 0, counts
+          print('PASS: the four imports reproduce before the fix and disappear after it')
+          PY
