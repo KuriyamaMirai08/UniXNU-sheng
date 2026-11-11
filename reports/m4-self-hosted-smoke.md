@@ -46,7 +46,7 @@ The absolute root is
 | `src/uefi-sheng/Mu_Basecore` | Pinned EDK sources and built BaseTools, including `BaseTools/Source/C/bin/GenFw` |
 | `edk-package/Build/UniXNU/DEBUG_CLANGPDB` | Actual persistent EDK object/output directory |
 | `edk-package/Build/Out/AARCH64-DEBUG` | Six standalone EFI files checked after compilation |
-| `toolchain` | EDK tool symlinks, refreshed without deleting build output |
+| `toolchain` | EDK tool symlinks, preserved when their resolved targets are unchanged |
 | `rust-probe`, `cargo-target` | Stable tiny offline Rust source and Cargo incremental output |
 
 The workflow's temporary device checkout is outside this root. Neither
@@ -118,3 +118,12 @@ rustup. Smoke now sets `RUSTC`/`RUSTDOC` to `rustup which` paths explicitly.
 It also installs missing Brew Bash for EDK's wrappers, which use array
 indexing unsupported by macOS's old Bash. The EDK output was retained for
 the next run; no clean/reset was performed.
+
+Runs https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43054700502
+and https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43054942155
+passed all targets. The repeat reused BaseTools and Cargo (0.00 seconds),
+but still invoked the EDK compiler 128 times. Inspection identified the
+upstream `clang_bin()` helper recreating identical compiler symlinks on
+every call. Smoke now keeps unchanged symlinks and only replaces them when
+the resolved tool target changes, preserving EDK's dependency timestamps.
+This corrects actual recompilation rather than merely retaining files.

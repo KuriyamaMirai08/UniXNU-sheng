@@ -103,8 +103,20 @@ CLANG_BIN=$(python3 - "$unixnu/scripts" "$cache/toolchain" <<'PY'
 import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
-from unixnu.util import clang_bin
-print(clang_bin(Path(sys.argv[2])))
+from unixnu.util import CLANGPDB_TOOLS, tool
+directory = Path(sys.argv[2])
+directory.mkdir(parents=True, exist_ok=True)
+for name in CLANGPDB_TOOLS:
+    link = directory / name
+    target = Path(tool(name, 'brew install llvm lld')).resolve()
+    # clang_bin() recreates even identical symlinks. EDK's make dependencies
+    # see the new tool timestamps and rebuild every object on every run.
+    if link.is_symlink() and link.resolve() == target:
+        continue
+    if link.is_symlink() or link.exists():
+        link.unlink()
+    link.symlink_to(target)
+print(str(directory) + '/')
 PY
 )
 # The pinned build.sh never cleans UNIXNU_BUILD_DIR, copies changed Conf
