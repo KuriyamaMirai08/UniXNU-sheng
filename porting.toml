@@ -10,7 +10,7 @@ summary = "Xiaomi Pad 6S Pro 12.4 uses shared SM8550 support and board-owned sto
 id = "configuration"
 status = "implemented"
 components = []
-paths = ["board.toml", "feeds.toml", "configs/**", ".gitmodules", ".github/**", ".gitignore"]
+paths = ["board.toml", "feeds.toml", "configs/**", ".gitmodules", ".github/**", ".gitignore", "scripts/m4-compile-smoke.sh"]
 inputs = ["SM8550 profile, iPadOS 26.5.2 build 23F84, arm64e sheng_ipados26_defconfig and pinned component sources."]
 configuration = ["board.soc_source = sm8550; board.os_profile = ipados-26.5.2-23F84; schema_version = 2.", "The device owns ShengUfs, ShengHidInput, ShengNovatekTouch and ShengPreflight submodules."]
 procedure = ["Read https://unixnu.com/porting/device-repository and https://unixnu.com/porting/records.", "Run ./unixnu defconfig sheng_ipados26_defconfig -D ../UniXNU-sheng from UniXNU.", "Run ./unixnu status --json -D ../UniXNU-sheng and review profiles, components, source pins and patch order."]
@@ -69,6 +69,8 @@ result = "Four chained imports use weak-lookup ordinal -3 and have local definit
 [[area.evidence]]
 kind = "host"
 reference = "reports/m4-self-hosted-smoke.md"
+command = "workflow_dispatch package.yml with runner_location=self-hosted and empty seed inputs"
+revision = "3ff15d10782ab10a66556f13377aee7e77ed2110"
 result = "The package workflow isolates hosted device secrets and Data seed operations from a public-source-only UniXNU-M4 job. Real M4 runs pass six EFI targets, Rust 1.98.0 and board helper tests. Persistent EDK reuse validates source, tool, configuration and output hashes; full XNU and boot remain unverified."
 
 [[area]]

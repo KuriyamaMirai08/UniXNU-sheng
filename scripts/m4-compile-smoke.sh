@@ -135,12 +135,13 @@ def capture(*args):
 def identity():
     # Clean pinned source checks above cover tracked source/EDK input changes.
     # Hash actual tools and generated Conf too: never reuse on existence alone.
-    files = [recipe, pathlib.Path(sys.executable).resolve()]
+    files = [pathlib.Path(sys.executable).resolve()]
     files += list(pathlib.Path(os.environ['CLANG_BIN']).iterdir())
     files += list((build / 'Build/Conf').glob('*.txt'))
     files += [p for p in (uefi / 'Mu_Basecore/BaseTools/Source/C/bin').glob('*') if p.is_file()]
     return {
         'files': {str(p): digest(p) for p in files if p.is_file()},
+        'recipe': digest(recipe),  # Temporary device checkout path varies by run.
         'unixnu': capture('git', '-C', str(unixnu), 'rev-parse', 'HEAD'),
         'uefi': capture('git', '-C', str(uefi), 'rev-parse', 'HEAD'),
         'submodules': capture('git', '-C', str(uefi), 'submodule', 'status', '--recursive'),
