@@ -25,15 +25,15 @@ class FetchPreparation(unittest.TestCase):
     def test_cached_compilation_record_without_generated_headers_bootstraps(self):
         # This represents the pinned builder: entry and error-handler conditions.
         source = (
-            'def build(ctx):\\n'
-            "    record = ctx.tree / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT/startup.o.json'\\n"
-            '    if not record.is_file():\\n'
-            '        pass\\n'
-            '    try:\\n'
-            '        pass\\n'
-            '    except Exception:\\n'
-            '        if not record.is_file():\\n'
-            '            raise\\n'
+            'def build(ctx):\n'
+            "    record = ctx.tree / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT/startup.o.json'\n"
+            '    if not record.is_file():\n'
+            '        pass\n'
+            '    try:\n'
+            '        pass\n'
+            '    except Exception:\n'
+            '        if not record.is_file():\n'
+            '            raise\n'
         )
         updated = ci.transform_kernel_bootstrap(source)
         self.assertIn('if not record.is_file() or missing_headers:', updated)
