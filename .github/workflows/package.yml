@@ -9,10 +9,15 @@ on:
   workflow_dispatch:
     inputs:
       runner_location:
-        description: "hosted: device-bound package; self-hosted: UniXNU-M4 public-source compile smoke only"
+        description: "hosted: device-bound package; self-hosted: public-source compilation on UniXNU-M4"
         type: choice
         options: [hosted, self-hosted]
         default: hosted
+      self_hosted_stage:
+        description: "M4 compilation stage (no device keys or installation Seed)"
+        type: choice
+        options: [xnu-corecrypto, smoke]
+        default: xnu-corecrypto
       os:
         description: "OS profile of the images"
         type: choice
@@ -43,6 +48,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       inputs.runner_location == 'self-hosted' &&
+      inputs.self_hosted_stage == 'smoke' &&
       !inputs.init_data && inputs.data_seed_url == '' && inputs.data_seed_sha256 == ''
     permissions: {}
     runs-on: [self-hosted, macOS, ARM64]
@@ -71,6 +77,51 @@ jobs:
           echo "SMOKE_DEVICE=$source_dir" >> "$GITHUB_ENV"
       - name: Check dependencies and compile public targets with persistent output
         run: bash "$SMOKE_DEVICE/scripts/m4-compile-smoke.sh"
+
+  m4-xnu-corecrypto:
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.runner_location == 'self-hosted' &&
+      inputs.self_hosted_stage == 'xnu-corecrypto' && inputs.os == '27' &&
+      !inputs.init_data && inputs.data_seed_url == '' && inputs.data_seed_sha256 == ''
+    permissions: {}
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 180
+    concurrency:
+      group: unixnu-m4-public-xnu
+      cancel-in-progress: false
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - name: Require the registered M4 and prepare persistent public checkout
+        env:
+          ACTUAL_RUNNER: ${{ runner.name }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$ACTUAL_RUNNER" = UniXNU-M4
+          test "$(uname -m)" = arm64
+          root="$HOME/Library/Caches/UniXNU-sheng/public-xnu-v1"
+          mkdir -p "$root"
+          device="$root/device"
+          if [ ! -d "$device/.git" ]; then
+            git -c credential.helper= clone --no-checkout --filter=blob:none https://github.com/KuriyamaMirai08/UniXNU-sheng.git "$device"
+          else
+            git -C "$device" diff --exit-code --ignore-submodules=untracked HEAD --
+          fi
+          git -C "$device" -c credential.helper= fetch --depth 1 origin "$SOURCE_SHA"
+          git -C "$device" checkout --detach "$SOURCE_SHA"
+          echo "M4_ROOT=$root" >> "$GITHUB_ENV"
+          echo "M4_LOG_DIR=$root/logs/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+      - name: Compile real XNU bootstrap and both CoreCrypto archives
+        run: bash "$M4_ROOT/device/scripts/m4-xnu-corecrypto.sh"
+      - name: Public compile logs and reports (never installation inputs)
+        if: always() && env.M4_LOG_DIR != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: m4-xnu-corecrypto-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.M4_LOG_DIR }}/
+          retention-days: 7
+          if-no-files-found: warn
 
   reject-unsafe-smoke-inputs:
     if: >-
