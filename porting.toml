@@ -132,6 +132,13 @@ command = "workflow_dispatch native-link; Actions run 43064681233"
 revision = "063d363c359907f40784f435bd1a39298aeb7695"
 result = "The display source helper advanced after reference fetching and required the pinned keyboard image. Native mode now uses the existing SHA-checked Keyboard extraction and formal Wi-Fi/Bluetooth source prefetch outside the display compile timeout. No runtime, stock-ROM or installation Seed preparation is added."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-xnu-corecrypto.md"
+command = "workflow_dispatch native-link; Actions run 43065584630"
+revision = "457ba5b9cc46c9d6a7a7394970deaf4ae55c014c"
+result = "The original 20-step board archive chain and real DEVELOPMENT native link passed on UniXNU-M4. The 28199136-byte arm64e MH_EXECUTE has SHA-256 31f8273297025436fa9814b9540329b439af45afd661f7f6836476401a9ec15b and no undefined nm symbols. DATA vmsize is 0x1e8000. The final make reused XNU objects and both CoreCrypto variants reused 529/529 objects. Prelink, runtime selftests and boot remain unverified; no installation inputs were used."
+
 [[area]]
 id = "firmware"
 status = "implemented"
@@ -277,6 +284,13 @@ reference = "reports/m4-xnu-corecrypto.md"
 command = "workflow_dispatch native-link; Actions run 43063685115"
 revision = "e0b6f8df543c9f52c87e1ebb27b33e5838e6d7db"
 result = "The retained M4 build passed pinned GPU input validation, GMU/SMMU generators and Adreno kits/accelerator. Display compilation exposed an out-root path assumption. The builder now receives the explicit UniXNU source root while retaining the same shared helper and ABI checks."
+
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-xnu-corecrypto.md"
+command = "workflow_dispatch native-link; Actions run 43065584630"
+revision = "457ba5b9cc46c9d6a7a7394970deaf4ae55c014c"
+result = "The original 20-step board archive chain and real DEVELOPMENT native link passed on UniXNU-M4. The 28199136-byte arm64e MH_EXECUTE has SHA-256 31f8273297025436fa9814b9540329b439af45afd661f7f6836476401a9ec15b and no undefined nm symbols. DATA vmsize is 0x1e8000. The final make reused XNU objects and both CoreCrypto variants reused 529/529 objects. Prelink, runtime selftests and boot remain unverified; no installation inputs were used."
 
 [[area]]
 id = "input"
@@ -521,6 +535,13 @@ command = "fastboot boot boot.img"
 revision = "1edc1ca7fc87defa8b2231254667ad4085320706"
 result = "05ac:12ab at Device Speed 4 with a USB 3 cable; Trust accepted on the panel; a Mac reported Device Paired, then AMDeviceValidatePairing and AMDeviceStartSession succeeded."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-xnu-corecrypto.md"
+command = "workflow_dispatch native-link; Actions run 43065584630"
+revision = "457ba5b9cc46c9d6a7a7394970deaf4ae55c014c"
+result = "The display/USB board archive passed after using the explicit UniXNU helper root; the complete formal archive chain then linked an arm64e MH_EXECUTE with no undefined symbols. USB runtime and boot remain unverified."
+
 [[area]]
 id = "network"
 status = "implemented"
@@ -722,6 +743,13 @@ reference = "reports/m4-xnu-corecrypto.md"
 command = "workflow_dispatch package.yml runner_location=self-hosted self_hosted_stage=xnu-corecrypto os=27; runs 43061093667 and 43061503882"
 revision = "2267df6cbf50dab923445866c7e75887cad2e604"
 result = "Both M4 stages passed: XNU source compilation reached the expected bootstrap link, generated headers were present, and each CoreCrypto variant built 529 sources with zero failures and passed 529 object ABI audits. The incremental run recompiled no XNU objects and reused 529/529 objects in each CoreCrypto variant; both archive hashes were unchanged. Full native link, registration/selftests, prelink and boot remain unverified."
+
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-xnu-corecrypto.md"
+command = "workflow_dispatch native-link; Actions run 43065584630"
+revision = "457ba5b9cc46c9d6a7a7394970deaf4ae55c014c"
+result = "The original 20-step board archive chain and real DEVELOPMENT native link passed on UniXNU-M4. The 28199136-byte arm64e MH_EXECUTE has SHA-256 31f8273297025436fa9814b9540329b439af45afd661f7f6836476401a9ec15b and no undefined nm symbols. DATA vmsize is 0x1e8000. The final make reused XNU objects and both CoreCrypto variants reused 529/529 objects. Prelink, runtime selftests and boot remain unverified; no installation inputs were used."
 
 [[area]]
 id = "diagnostics"

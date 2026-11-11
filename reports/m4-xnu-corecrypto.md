@@ -60,6 +60,58 @@ no stock-ROM archive, installation runtime or Seed is involved. Source
 prefetch is outside the display sub-build's compile timeout; its existing
 compiler/object checks and pinned-source preparation remain unchanged.
 
+## Verified complete native link
+
+Code revision: `457ba5b9cc46c9d6a7a7394970deaf4ae55c014c`.
+Successful run:
+https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43065584630
+
+The original 20-step resolved archive plan completed on `UniXNU-M4`,
+including the RELEASE/LTO comparison kernel, followed by the real
+DEVELOPMENT native link. EDK smoke and hosted package were skipped. The
+final `pipeline/kernel.log` contains the actual `LD
+mach.development.bcm2837.unstripped.noctf` operation, zero compiler error
+diagnostics and zero duplicate-symbol diagnostics. No XNU CC/CXX/AS
+compilations were needed in that final make: it reused the retained
+objects. Both CoreCrypto recipes reused 529/529 objects with zero failures.
+
+Native output under the persistent root:
+
+```text
+out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf
+```
+
+| Check | Actual result |
+| --- | --- |
+| File size | 28,199,136 bytes |
+| SHA-256 | `31f8273297025436fa9814b9540329b439af45afd661f7f6836476401a9ec15b` |
+| CPU / subtype | ARM64, arm64e kernel (`0xc0000002`) |
+| Mach-O file type | `MH_EXECUTE` |
+| Apple nm undefined symbols | Empty |
+| Apple otool flags | `NOUNDEFS`; 27 load commands |
+| `__DATA` virtual size | 1,998,848 bytes (`0x1e8000`) |
+
+The DATA size is one 16 KiB page below the historical `0x1ec000` native
+measurement. It does not establish the complete prelink placement result.
+Apple `otool -hv -l` and `size -m` reports plus `native-link-report.json`
+and `native-undefined.txt` are included in the run's public log artifact.
+The native binary, comparison kernel and all successful intermediate
+outputs remain in the same persistent tree.
+
+The comparison build followed the existing pinned builder's isolated-copy
+behavior, recording 67 unavailable forced-export removals before its
+second link succeeded. That comparison kernel is used for layout analysis.
+The complete native-link result above comes from the original DEVELOPMENT
+build; no new export filtering, missing-symbol allowance or stub fallback
+was added to that build. The normal source-provider POST integrity-field
+population also completed on the unstripped sibling; runtime selftests
+remain unverified.
+
+Remaining work: independent prelink layout, relocation and ABI/regression
+validation against the original collection, then boot validation. No
+device-bound installation image, real device key or installation Seed
+was used or produced in this stage.
+
 Dispatch `package.yml` on `codex/fix-package29-weak-binds`, with
 `runner_location=self-hosted`, `self_hosted_stage=xnu-corecrypto`, `os=27`.
 Leave seed fields empty and init_data false. This selects a separate job;
