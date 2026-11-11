@@ -66,6 +66,11 @@ revision = "59fd891211ff79ab5047f9d19a80d95e6a3b29a7"
 result = "Four chained imports use weak-lookup ordinal -3 and have local definitions. The bootstrap link failure is expected and the final native link succeeds; prelink is the first unrecovered failure."
 
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-self-hosted-smoke.md"
+result = "The package workflow isolates hosted device secrets and Data seed operations from a public-source-only UniXNU-M4 job. Real M4 runs pass six EFI targets, Rust 1.98.0 and board helper tests. Persistent EDK reuse validates source, tool, configuration and output hashes; full XNU and boot remain unverified."
+
 [[area]]
 id = "firmware"
 status = "implemented"

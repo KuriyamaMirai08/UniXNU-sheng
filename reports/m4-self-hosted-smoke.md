@@ -126,4 +126,15 @@ but still invoked the EDK compiler 128 times. Inspection identified the
 upstream `clang_bin()` helper recreating identical compiler symlinks on
 every call. Smoke now keeps unchanged symlinks and only replaces them when
 the resolved tool target changes, preserving EDK's dependency timestamps.
-This corrects actual recompilation rather than merely retaining files.
+Run https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43055235988
+passed but showed that stable tool symlinks alone were insufficient: EDK
+still compiled 133 objects. Smoke therefore also records an explicit
+content identity for the pinned clean sources and nested submodule refs,
+actual compiler/BaseTools binaries, Python/Bash, Xcode/SDK, build recipe,
+generated Conf files and fixed build options. It skips the standalone EDK
+build only when that identity AND all six output SHA-256 values match.
+Any mismatch invokes the existing build script and records fresh hashes.
+This gate is confined to the six public smoke EFI modules; production
+kernel, Mesa, prelink and package validation is unchanged. Files are not
+accepted based on existence alone. Cargo still runs its own offline input
+checks on every smoke run.

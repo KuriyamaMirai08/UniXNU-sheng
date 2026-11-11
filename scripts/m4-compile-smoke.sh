@@ -121,7 +121,45 @@ PY
 )
 # The pinned build.sh never cleans UNIXNU_BUILD_DIR, copies changed Conf
 # templates only, and builds BaseTools only when GenFw is absent.
-bash "$unixnu/package/build.sh"
+python3 - "$unixnu" "$uefi" "$device/scripts/m4-compile-smoke.sh" <<'PY'
+import hashlib, json, os, pathlib, subprocess, sys
+unixnu, uefi, recipe = map(pathlib.Path, sys.argv[1:])
+build = pathlib.Path(os.environ['UNIXNU_BUILD_DIR'])
+record = build / 'smoke-build-identity.json'
+names = ('UniXNU', 'UniXNUDxe', 'UniXNURamDiskDxe', 'HelloPayload', 'SampleDriver', 'XnuTest')
+outputs = [build / 'Build/Out/AARCH64-DEBUG' / (name + '.efi') for name in names]
+def digest(path):
+    return hashlib.file_digest(path.open('rb'), 'sha256').hexdigest()
+def capture(*args):
+    return subprocess.check_output(args, text=True).strip()
+def identity():
+    # Clean pinned source checks above cover tracked source/EDK input changes.
+    # Hash actual tools and generated Conf too: never reuse on existence alone.
+    files = [recipe, pathlib.Path(sys.executable).resolve()]
+    files += list(pathlib.Path(os.environ['CLANG_BIN']).iterdir())
+    files += list((build / 'Build/Conf').glob('*.txt'))
+    files += [p for p in (uefi / 'Mu_Basecore/BaseTools/Source/C/bin').glob('*') if p.is_file()]
+    return {
+        'files': {str(p): digest(p) for p in files if p.is_file()},
+        'unixnu': capture('git', '-C', str(unixnu), 'rev-parse', 'HEAD'),
+        'uefi': capture('git', '-C', str(uefi), 'rev-parse', 'HEAD'),
+        'submodules': capture('git', '-C', str(uefi), 'submodule', 'status', '--recursive'),
+        'xcode': capture('xcodebuild', '-version'),
+        'sdk': capture('xcrun', '--sdk', 'iphoneos', '--show-sdk-version'),
+        'python': sys.version,
+        'bash': capture('bash', '--version'),
+        'build': str(build), 'jobs': os.environ['JOBS'],
+    }
+saved = json.loads(record.read_text()) if record.is_file() else {}
+hashes = {p.name: digest(p) for p in outputs if p.is_file()}
+if len(hashes) == len(outputs) and saved.get('inputs') == identity() and saved.get('outputs') == hashes:
+    print('EDK cache HIT: source/tool/config identity and all six output SHA-256 values verified', flush=True)
+else:
+    print('EDK cache MISS: compile and record verified output identity', flush=True)
+    subprocess.run(['bash', str(unixnu / 'package/build.sh')], check=True)
+    hashes = {p.name: digest(p) for p in outputs}
+    record.write_text(json.dumps({'inputs': identity(), 'outputs': hashes}, sort_keys=True) + '\n')
+PY
 for module in UniXNU UniXNUDxe UniXNURamDiskDxe HelloPayload SampleDriver XnuTest; do
   test -s "$UNIXNU_BUILD_DIR/Build/Out/AARCH64-DEBUG/$module.efi"
 done
