@@ -11,6 +11,8 @@ on:
       - 'scripts/build-gop-legacy-display-27.py'
       - 'scripts/firmware_cache.py'
       - 'scripts/test-firmware-cache.py'
+      - 'scripts/test-kcpu-allocation.py'
+      - 'package/BootUiTraceProbe.c'
   workflow_dispatch:
 permissions:
   contents: read
@@ -112,6 +114,7 @@ jobs:
         run: |
           python3 device/scripts/test-firmware-cache.py
           python3 device/scripts/test-prepare-package-ci.py
+          python3 device/scripts/test-kcpu-allocation.py
       - name: Round-trip ADT, FAT payload, BootShim, Android header and manifest with fixtures
         run: python3 device/scripts/check-package-readiness.py --unixnu UniXNU --uefi uefi-sheng --soc soc > audit-edk/image-roundtrip.log 2>&1
       - uses: actions/upload-artifact@v4
