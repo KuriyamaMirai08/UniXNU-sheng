@@ -379,7 +379,15 @@ extern "C" int boot_progress_prepare_scanout(void) {return 1;}
 extern "C" void boot_progress_cancel_scanout(void) {}
 extern "C" void boot_progress_stage(const char *) {}
 extern "C" int boot_progress_pulse_anchor(uintptr_t,uint64_t,unsigned,unsigned,unsigned) {return 0;}
-''')
+''' + ('''
+// These optional providers are not built for iPadOS 27. Local strong functions
+// avoid the weak-lookup chained binds unsupported by XnuPrelink.
+extern "C" void sheng_ethernet_probe(void) {}
+extern "C" void sheng_software_aes_probe(void) {}
+extern "C" __attribute__((weak)) const unsigned native_legacy_request_layout[6] = {17, 81, 984, 996, 1008, 2944};
+extern "C" bool ml_static_mfree_prepare(uintptr_t, size_t) { return false; }
+extern "C" kern_return_t iokit_physical_descriptor_close_notify(IOMemoryDescriptor *, void (*)(void *), void *) { return KERN_INVALID_ARGUMENT; }
+''' if not MACOS else ''))
 compile_cpp(support, OUT / 'LegacyDisplaySupport27.o')
 # The keystore state service (AppleKeyStoreState) and its probe, unchanged from iPadOS 17.
 keystore_source = ROOT / 'kits/sheng/KeyStoreProbe.cpp'

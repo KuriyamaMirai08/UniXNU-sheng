@@ -4,9 +4,15 @@ on:
     paths:
       - '.github/workflows/prebuild-audit.yml'
       - 'scripts/audit-cached-prelink.py'
+      - 'scripts/ci-patches/**'
+      - 'scripts/check-package-readiness.py'
+      - 'scripts/prepare-package-ci.py'
+      - 'scripts/test-ci-prelink-layout.py'
+      - 'scripts/build-gop-legacy-display-27.py'
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 jobs:
   cached-prelink:
     runs-on: macos-26
@@ -21,6 +27,17 @@ jobs:
           ref: 97437dcf7389484a0eeaa8067725ce743aff18ef
           path: UniXNU
       - run: git -C UniXNU submodule update --init --depth 1 kits/XnuPrelink
+      - name: Apply and test collision-free DATA placement
+        run: |
+          git -C UniXNU/kits/XnuPrelink apply "$GITHUB_WORKSPACE/device/scripts/ci-patches/prelink-data-placement.patch"
+          python3 device/scripts/test-ci-prelink-layout.py
+          python3 -m unittest discover -s UniXNU/kits/XnuPrelink -p 'test_*.py'
+      - uses: actions/download-artifact@v4
+        with:
+          name: audit-prelink-reports
+          run-id: 43014970736
+          github-token: ${{ github.token }}
+          path: audit
       - uses: actions/cache/restore@v4
         with:
           path: |
@@ -70,6 +87,11 @@ jobs:
           brew install llvm lld cmake dtc mtools
           echo /opt/homebrew/opt/llvm/bin >> "$GITHUB_PATH"
           echo /opt/homebrew/opt/lld/bin >> "$GITHUB_PATH"
+      - uses: actions/checkout@v4
+        with:
+          repository: UniXNU/UniXNU-sm8550-common
+          ref: 97665e28578483082b674e8375a8fa65f4cf49cf
+          path: soc
       - name: Compile standalone UniXNU EDK II package
         run: |
           mkdir -p audit-edk
@@ -80,6 +102,8 @@ jobs:
       - name: Exercise existing pipeline and image host tests
         working-directory: UniXNU
         run: python3 -m unittest discover -s scripts/unixnu -t scripts -p 'test_*.py' > ../audit-edk/host-tests.log 2>&1
+      - name: Round-trip ADT, FAT payload, BootShim, Android header and manifest with fixtures
+        run: python3 device/scripts/check-package-readiness.py --unixnu UniXNU --uefi uefi-sheng --soc soc > audit-edk/image-roundtrip.log 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
