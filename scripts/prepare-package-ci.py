@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply only the verified Ath12k fetch compatibility fix to its pinned source.
+"""Apply pinned Ath12k fetch and XNU header-bootstrap compatibility fixes.
 
 Mesa/prelink validation and the reference, Cargo and Ninja input checks remain
 enabled. No tree traversal, ignored patch failures, or file-existence reuse.
