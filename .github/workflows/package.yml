@@ -100,6 +100,7 @@ jobs:
         with:
           path: |
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/m2v-target
+            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/mesa-tu-ios27
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/fileset-reference
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/.cache/appsync-signer
           key: unixnu-heavy-build-${{ inputs.os }}-${{ github.sha }}
@@ -223,6 +224,7 @@ jobs:
         with:
           path: |
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/m2v-target
+            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/mesa-tu-ios27
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/fileset-reference
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/.cache/appsync-signer
           key: unixnu-heavy-build-${{ inputs.os }}-${{ github.sha }}
