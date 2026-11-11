@@ -44,7 +44,7 @@ def transform(source):
 # Kernel.framework headers on a fresh macOS runner. Without those headers,
 # corecrypto-2023 fails hundreds of source compiles even though startup.o.json
 # exists. Bootstrap must run to install the SDK headers before archive recipes.
-KERNEL_BOOTSTRAP_ORIGINAL = "    if not record.is_file():\\n"
+KERNEL_BOOTSTRAP_ORIGINAL = "    if not record.is_file():\n"
 KERNEL_BOOTSTRAP_FIXED = """    framework = ctx.tree / '.cache/fakeroot/System/Library/Frameworks/Kernel.framework/Versions/A'
     required = ('kern/assert.h', 'kern/clock.h', 'pexpert/pexpert.h')
     missing_headers = [name for name in required if not any(
