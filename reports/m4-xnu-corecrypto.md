@@ -25,6 +25,16 @@ load-command/segment reports are saved alongside it. No link-only error
 filter is used for this stage. Prelink and all installation operations
 remain excluded.
 
+Run 43062836814 reached source-storage, RamBlock, the Adreno740 base archive
+and DTS generation. It stopped reading a pinned GPU input with a network
+timeout. CoreCrypto reused 529/529 objects in both variants. A retry also
+exposed the checkout guard rejecting the known Ath12k fetch compatibility
+edit left by the preceding build. The guard now validates that exact
+tracked edit and rejects other submodule edits, without resetting source
+or deleting outputs. GPU input transport gets bounded retries and a
+longer read timeout; all content hashes, lengths and Git blob identities
+remain checked before writing retained files.
+
 Dispatch `package.yml` on `codex/fix-package29-weak-binds`, with
 `runner_location=self-hosted`, `self_hosted_stage=xnu-corecrypto`, `os=27`.
 Leave seed fields empty and init_data false. This selects a separate job;

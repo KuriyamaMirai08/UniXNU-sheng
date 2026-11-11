@@ -107,7 +107,29 @@ jobs:
           if [ ! -d "$device/.git" ]; then
             git -c credential.helper= clone --no-checkout --filter=blob:none https://github.com/KuriyamaMirai08/UniXNU-sheng.git "$device"
           else
-            git -C "$device" diff --exit-code --ignore-submodules=untracked HEAD --
+            # Preserve the exact reviewed Ath12k compatibility edit from a
+            # previous build. Reject every other tracked submodule edit.
+            /opt/homebrew/opt/python@3.13/libexec/bin/python3 - "$device" <<'PY'
+          import importlib.util, pathlib, subprocess, sys
+          device = pathlib.Path(sys.argv[1])
+          spec = importlib.util.spec_from_file_location('ci', device / 'scripts/prepare-package-ci.py')
+          ci = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(ci)
+          def git(repo, *argv):
+              return subprocess.check_output(['git', '-C', str(repo), *argv], text=True).strip()
+          repos = git(device, 'submodule', 'foreach', '--quiet', '--recursive', 'pwd').splitlines()
+          for repo in map(pathlib.Path, repos):
+              dirty = git(repo, 'diff', '--name-only', '--ignore-submodules=dirty', 'HEAD', '--').splitlines()
+              if not dirty:
+                  continue
+              if (repo.resolve() != (device / 'drivers/Ath12kWifi').resolve()
+                      or dirty != ['tools/fetch-sources.py'] or git(repo, 'rev-parse', 'HEAD') != ci.ATH12K):
+                  raise SystemExit('Unreviewed tracked changes retained in ' + str(repo))
+              original = git(repo, 'show', 'HEAD:tools/fetch-sources.py') + '\n'
+              if (repo / dirty[0]).read_text() != ci.transform(original):
+                  raise SystemExit('Unreviewed Ath12k fetcher edit retained')
+          PY
+            git -C "$device" diff --exit-code --ignore-submodules=dirty HEAD --
           fi
           git -C "$device" -c credential.helper= fetch --depth 1 origin "$SOURCE_SHA"
           git -C "$device" checkout --detach "$SOURCE_SHA"

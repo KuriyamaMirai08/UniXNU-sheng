@@ -104,6 +104,13 @@ kind = "source"
 reference = "reports/m4-xnu-corecrypto.md"
 result = "The native-link stage uses the original production archive dispatcher and final XNU make in the retained M4 tree. CoreCrypto dependency reuse remains enabled; real link errors fail. A successful output must pass arm64e MH_EXECUTE and undefined-symbol checks, with persistent logs and no installation inputs."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-xnu-corecrypto.md"
+command = "workflow_dispatch native-link; Actions run 43062836814 attempts 1 and 2"
+revision = "9f401a4db6f10627bfa68c26398a9b2965ee966b"
+result = "The formal archive chain passed source-storage, RamBlock and base Adreno740 with both CoreCrypto variants reusing all 529 objects. GPU input transfer timed out. Retry preparation now accepts only the exact reviewed Ath12k fetcher edit, and bounded GPU transport retries preserve every pinned-content check and successful output."
+
 [[area]]
 id = "firmware"
 status = "implemented"

@@ -114,6 +114,29 @@ if args.stage == 'native-link':
         raise SystemExit('Unreviewed Ath12k fetcher edits; preserved for inspection')
     if ath_path.read_text() != ath_fixed:
         ath_path.write_text(ath_fixed)
+    # The actual M4 attempt timed out while reading a pinned GPU input.
+    # Retry transport failures only; keep all SHA-256/size/blob checks intact.
+    fetch_path = args.unixnu / 'scripts/fetch-adreno-inputs.py'
+    fetch_original = subprocess.check_output(['git', '-C', args.unixnu, 'show', 'HEAD:scripts/fetch-adreno-inputs.py'], text=True)
+    network_old = "        with urllib.request.urlopen(request, timeout=30) as response:\n            data = response.read()"
+    network_new = '''        for attempt in range(4):
+            try:
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    data = response.read()
+                break
+            except (TimeoutError, urllib.error.URLError, http.client.IncompleteRead) as error:
+                print(f'GPU input transport attempt {attempt + 1}/4: {url}: {error}', flush=True)
+                if attempt == 3:
+                    raise
+                time.sleep(2 ** attempt)'''
+    if fetch_original.count(network_old) != 1:
+        raise Error('Pinned GPU fetcher changed; review before adapting')
+    fetch_fixed = 'import time, urllib.error, http.client\n' + fetch_original.replace(network_old, network_new)
+    ast.parse(fetch_fixed)
+    if fetch_path.read_text() not in (fetch_original, fetch_fixed):
+        raise Error('Unreviewed GPU fetcher changes retained')
+    if fetch_path.read_text() != fetch_fixed:
+        fetch_path.write_text(fetch_fixed)
     tree.assemble(ctx, modules)
     plan = [(kind, item['id'] if kind == 'component' else item) for kind, item in kernel.archive_plan(ctx)]
     (args.logs / 'archive-plan.json').write_text(json.dumps(plan, indent=2) + '\n')
