@@ -104,6 +104,7 @@ if args.stage == 'native-link':
     # Retain the original ordered archive dispatcher and final native make.
     # Existing startup records and generated headers avoid another bootstrap.
     os.environ.pop('UNIXNU_XNU_COMPILE_STAGE', None)
+    os.environ['UNIXNU_ROOT'] = str(args.unixnu.resolve())
     ath = device / 'drivers/Ath12kWifi'
     if ci.git(ath, 'rev-parse', 'HEAD') != ci.ATH12K:
         raise SystemExit('Unexpected Ath12k source revision')

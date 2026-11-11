@@ -35,6 +35,14 @@ or deleting outputs. GPU input transport gets bounded retries and a
 longer read timeout; all content hashes, lengths and Git blob identities
 remain checked before writing retained files.
 
+Run 43063685115 passed the pinned GPU input checks, GMU/SMMU preparation,
+Adreno kit/accelerator builds and AppleKeyStoreState, then exposed a
+display-builder path assumption: `ROOT.parents[4]` was assumed to be the
+UniXNU checkout. The persistent `--out` root is outside that checkout.
+Native mode now supplies `UNIXNU_ROOT` explicitly and the board display
+builder uses it to locate the unchanged shared source-driver helper and
+its OS profiles. No archive/ABI validation is removed.
+
 Dispatch `package.yml` on `codex/fix-package29-weak-binds`, with
 `runner_location=self-hosted`, `self_hosted_stage=xnu-corecrypto`, `os=27`.
 Leave seed fields empty and init_data false. This selects a separate job;

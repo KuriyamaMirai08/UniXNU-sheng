@@ -111,6 +111,13 @@ command = "workflow_dispatch native-link; Actions run 43062836814 attempts 1 and
 revision = "9f401a4db6f10627bfa68c26398a9b2965ee966b"
 result = "The formal archive chain passed source-storage, RamBlock and base Adreno740 with both CoreCrypto variants reusing all 529 objects. GPU input transfer timed out. Retry preparation now accepts only the exact reviewed Ath12k fetcher edit, and bounded GPU transport retries preserve every pinned-content check and successful output."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-xnu-corecrypto.md"
+command = "workflow_dispatch native-link; Actions run 43063685115"
+revision = "e0b6f8df543c9f52c87e1ebb27b33e5838e6d7db"
+result = "The retained M4 build passed pinned GPU input validation, GMU/SMMU generators and Adreno kits/accelerator. Display compilation exposed an out-root path assumption. The builder now receives the explicit UniXNU source root while retaining the same shared helper and ABI checks."
+
 [[area]]
 id = "firmware"
 status = "implemented"
@@ -249,6 +256,13 @@ result = "Implementation and configuration described in this section"
 kind = "source"
 reference = "package/LegacyDisplayProbe.cpp"
 result = "The diagnostic ring timestamps VSync timer arms, sends, idle stops, late ticks, starts and refresh-rate reports."
+
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-xnu-corecrypto.md"
+command = "workflow_dispatch native-link; Actions run 43063685115"
+revision = "e0b6f8df543c9f52c87e1ebb27b33e5838e6d7db"
+result = "The retained M4 build passed pinned GPU input validation, GMU/SMMU generators and Adreno kits/accelerator. Display compilation exposed an out-root path assumption. The builder now receives the explicit UniXNU source root while retaining the same shared helper and ABI checks."
 
 [[area]]
 id = "input"
