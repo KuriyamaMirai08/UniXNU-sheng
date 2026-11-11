@@ -19,6 +19,20 @@ test "$(xcodebuild -version)" = "$(printf 'Xcode 26.6\nBuild version 17F113')"
 mkdir -p "$M4_LOG_DIR"
 exec > >(tee -a "$M4_LOG_DIR/console.log") 2>&1
 export PYTHONUNBUFFERED=1 ZERO_AR_DATE=1 JOBS=4
+# A copied Xcode can answer -version and xcrun yet fail real xcodebuild
+# targets because its system CoreSimulator framework was never installed.
+# Initialize only when required, never ask for/handle an administrator password.
+if [ ! -d /Library/Developer/PrivateFrameworks/CoreSimulator.framework ] || ! xcodebuild -checkFirstLaunchStatus; then
+  echo 'Xcode system components are incomplete; running the official first-launch initializer'
+  if sudo -n true 2>/dev/null; then
+    sudo -n env DEVELOPER_DIR="$DEVELOPER_DIR" /usr/bin/xcodebuild -runFirstLaunch
+  else
+    /usr/bin/xcodebuild -runFirstLaunch </dev/null || {
+      echo 'Administrator setup is required on the Mac: sudo env DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer xcodebuild -runFirstLaunch'
+      exit 1
+    }
+  fi
+fi
 python3 - <<'PY'
 import os, shutil
 free = shutil.disk_usage(os.environ['M4_ROOT']).free

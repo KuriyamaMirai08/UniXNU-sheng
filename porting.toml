@@ -78,6 +78,13 @@ kind = "source"
 reference = "reports/m4-xnu-corecrypto.md"
 result = "The M4 xnu-corecrypto stage retains XNU objects, generated Kernel.framework headers and dependency-validated CoreCrypto objects outside the Actions workspace. It executes the existing header-bootstrap fix and stops before other board archives, final native link, prelink or installation inputs."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-xnu-corecrypto.md"
+command = "workflow_dispatch package.yml runner_location=self-hosted self_hosted_stage=xnu-corecrypto os=27"
+revision = "7059a1ae6a768b3c5812498418296039aa0e3d20"
+result = "Run 43057794006 generated XNU headers including clock.h, then stopped in firehose with Xcode exit 70 because the system CoreSimulator framework was missing. First-launch initialization now runs when needed; the failed source/header tree remains intact."
+
 [[area]]
 id = "firmware"
 status = "implemented"
@@ -667,6 +674,11 @@ findings = ["The final kcpu test passes ASan/UBSan failure, zeroing and 1024-slo
 completion = ["Each claimed milestone has a reproducible command, a matching source/image revision and an accessible result."]
 limits = ["Source references in this record describe implemented behavior. Host and device status require their respective evidence entries."]
 next_action = ["Add captured host or device evidence when repeating a checkpoint on a known image."]
+
+[[area.evidence]]
+kind = "source"
+reference = "scripts/prepare-corecrypto-cache.py"
+result = "The pinned CoreCrypto transform records clang dependencies, compiler/command identity and object hashes; it preserves successful objects and failure logs across incremental retries without removing the original ABI and symbol checks."
 
 [[area.evidence]]
 kind = "source"

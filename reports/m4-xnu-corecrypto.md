@@ -49,3 +49,20 @@ script may selectively invalidate individual objects when its inputs change.
 The rental runner receives no repository secret, PAT, device identity or
 installation Seed. Public sources are fetched anonymously. Logs and
 objects stay on the Mac even if a job fails or an artifact upload fails.
+
+## First real build observation
+
+Run https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43057794006
+fetched the pinned sources and applied the production patch series. The
+header-bootstrap check correctly detected missing `kern/clock.h` and ran
+XNU `installhdrs`. The subsequent firehose Xcode build stopped with code
+70 because `/Library/Developer/PrivateFrameworks/CoreSimulator.framework`
+was absent; Xcode's IDESimulatorFoundation plugin could not load. The M4
+could answer `xcodebuild -version` and run clang, which did not expose this
+system-component problem in the earlier EDK smoke.
+
+The workflow now runs the official `xcodebuild -runFirstLaunch` when system
+components are incomplete, using noninteractive sudo if available. It never
+requests or stores an admin password. If admin setup is blocked, the exact
+local administrator command is printed. Existing sources/headers/outputs
+are retained and the next dispatch resumes in the same persistent tree.
