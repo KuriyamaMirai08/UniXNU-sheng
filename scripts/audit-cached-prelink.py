@@ -110,6 +110,7 @@ def main():
     roots = effective['kernel']['prelink']['roots']
     command = [sys.executable, str(upstream / 'kits/XnuPrelink/emit_prelink.py'),
                '--kernel', str(diagnostic), '--prelinked', str(cache), '--fileset-reference', str(reference),
+               '--slide=' + effective['kernel']['prelink']['slide'],
                '--allow-missing', '--early-security-init', effective['kernel']['prelink']['early_security_init'],
                '--output', str(out / 'DIAGNOSTIC-prelinked.macho')]
     for root in roots:
@@ -138,6 +139,8 @@ def main():
         # Keep diagnostic reports; neither simulated image is a deliverable.
         diagnostic.unlink(missing_ok=True)
         (out / 'DIAGNOSTIC-prelinked.macho').unlink(missing_ok=True)
+    if summary.get('prelink_exit') != 0 or summary.get('regression_policy') != 'pass':
+        raise SystemExit('Audit found a prelink blocker; read summary.json and prelink.log')
 
 
 if __name__ == '__main__':
