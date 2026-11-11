@@ -49,6 +49,11 @@ KERNEL_BOOTSTRAP_FIXED = """    framework = ctx.tree / '.cache/fakeroot/System/L
     required = ('kern/assert.h', 'kern/clock.h', 'pexpert/pexpert.h')
     missing_headers = [name for name in required if not any(
         (framework / root / name).is_file() for root in ('Headers', 'PrivateHeaders'))]
+    stamp = ctx.tree / '.cache/fakeroot' / ('.xnu-' + env.get('UNIXNU_XNU_VERSION', '10063.141.1') + '-headers')
+    if missing_headers and stamp.is_file():
+        stamp.unlink()  # An incomplete restored header cache must not skip installhdrs.
+    if not stamp.is_file():
+        missing_headers.append('XNU installhdrs stamp')
     if missing_headers:
         log('kernel: missing generated XNU headers; forcing bootstrap: ' + ', '.join(missing_headers))
     if not record.is_file() or missing_headers:
