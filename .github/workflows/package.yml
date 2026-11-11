@@ -110,6 +110,7 @@ jobs:
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/mesa-tu-ios27
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/fileset-reference
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/ios-obj
+            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/.cache/fakeroot
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/.cache/appsync-signer
             device/.cache/firmware/sheng
           key: unixnu-heavy-build-${{ inputs.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -186,6 +187,7 @@ jobs:
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/mesa-tu-ios27
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/fileset-reference
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/ios-obj
+            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/.cache/fakeroot
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/.cache/appsync-signer
             device/.cache/firmware/sheng
           key: unixnu-heavy-build-${{ inputs.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
