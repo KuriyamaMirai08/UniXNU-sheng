@@ -35,6 +35,8 @@ jobs:
           python3 device/scripts/test-ci-prelink-layout.py
           python3 -m unittest discover -s UniXNU/kits/XnuPrelink -p 'test_*.py'
       - uses: actions/download-artifact@v4
+        # The reviewed map only saves matcher time; expiry must recompute it.
+        continue-on-error: true
         with:
           name: audit-prelink-reports
           run-id: 43014970736

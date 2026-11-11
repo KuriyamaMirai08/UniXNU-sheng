@@ -92,6 +92,8 @@ def main():
     args = parser.parse_args()
     upstream, cached, out = args.unixnu.resolve(), args.cache_tree.resolve(), args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
+    for name in ('summary.json', 'prelink.log', 'DIAGNOSTIC-prelinked.json'):
+        (out / name).unlink(missing_ok=True)
     sys.path[:0] = [str(upstream / 'scripts'), str(upstream / 'kits/XnuPrelink')]
     from kc_image import Image
     from unixnu import ipsw, kernel, profiles
@@ -124,6 +126,9 @@ def main():
         closure = dependency_closure(raw_cache, selected)
         occupied = []
         for name in sorted(closure - {'com.apple.kernel'}):
+            # Codeless bundles live only in prelink metadata, not MH_FILESET entries.
+            if name not in raw_cache.entries:
+                continue
             for segment in Image(raw_cache.data, raw_cache.entries[name][1]).segments:
                 if segment['size'] and segment['name'] != '__LINKEDIT':
                     occupied.append((segment['va'], segment['va'] + segment['size'], name))
