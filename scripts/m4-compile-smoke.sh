@@ -36,7 +36,7 @@ python3 -c 'import tomllib'
 
 # Install only missing prerequisites; leave installed formulae unchanged.
 missing=0
-for formula in dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup ipsw; do
+for formula in bash dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup ipsw; do
   if ! brew list --versions "$formula"; then
     install_formula=$formula
     [ "$formula" != ipsw ] || install_formula=blacktop/tap/ipsw
@@ -120,6 +120,12 @@ mkdir -p "$cache/rust-probe/src"
 test -f "$cache/rust-probe/Cargo.toml" || printf '[package]\nname="unixnu-m4-smoke"\nversion="0.1.0"\nedition="2021"\n' > "$cache/rust-probe/Cargo.toml"
 test -f "$cache/rust-probe/src/main.rs" || printf 'fn main() { assert_eq!(std::mem::size_of::<usize>(), 8); println!("Rust ARM64 smoke passed"); }\n' > "$cache/rust-probe/src/main.rs"
 export CARGO_TARGET_DIR="$cache/cargo-target"
+# Homebrew rustup need not install the ~/.cargo/bin rustc/rustdoc proxies.
+# Cargo invokes rustc by name unless given the actual selected compiler.
+export RUSTC
+export RUSTDOC
+RUSTC=$(rustup which --toolchain 1.98.0 rustc)
+RUSTDOC=$(rustup which --toolchain 1.98.0 rustdoc)
 rustup run 1.98.0 cargo run --offline --manifest-path "$cache/rust-probe/Cargo.toml"
 # Real board code: host sanitizers and arm64e iOS cross-compilation, no device key.
 PATH="/usr/bin:$PATH" python3 "$device/scripts/test-kcpu-allocation.py"

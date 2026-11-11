@@ -88,7 +88,7 @@ installs only missing Brew formulae without auto-update, and installs Rust
 prerequisites can also be prepared manually:
 
 ```sh
-brew install dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw
+brew install bash dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw
 rustup toolchain install 1.98.0 --profile minimal --component rust-src
 ```
 
@@ -109,3 +109,12 @@ It stopped before compilation because the default `python3` had no
 `tomllib`. The Python selection/bootstrap above addresses that observed
 failure. The hosted package job was skipped. Compilation and a second-run
 cache hit still require a successful follow-up run.
+
+Follow-up https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43053886415
+passed all dependency checks with Rust 1.98.0 and 184.7 GiB free, built
+BaseTools, then successfully compiled all six EFI modules (EDK build time
+21 seconds). Cargo then failed to find the `rustc` proxy with Homebrew
+rustup. Smoke now sets `RUSTC`/`RUSTDOC` to `rustup which` paths explicitly.
+It also installs missing Brew Bash for EDK's wrappers, which use array
+indexing unsupported by macOS's old Bash. The EDK output was retained for
+the next run; no clean/reset was performed.
