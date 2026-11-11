@@ -58,7 +58,7 @@ KERNEL_BOOTSTRAP_FIXED = """    framework = ctx.tree / '.cache/fakeroot/System/L
 def transform_kernel_bootstrap(source):
     # The pinned kernel.py has two such checks: the bootstrap entry condition
     # and the post-failure validation. Modify only the first; retain the guard.
-    marker = "    record = ctx.tree / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT/startup.o.json'\\n"
+    marker = "    record = ctx.tree / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT/startup.o.json'\n"
     if source.count(marker) != 1 or source.count(KERNEL_BOOTSTRAP_ORIGINAL) != 2:
         raise ValueError('Pinned kernel bootstrap source changed; review before adapting it')
     start = source.index(marker) + len(marker)
