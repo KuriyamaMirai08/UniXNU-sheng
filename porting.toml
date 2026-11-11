@@ -118,6 +118,13 @@ command = "workflow_dispatch native-link; Actions run 43063685115"
 revision = "e0b6f8df543c9f52c87e1ebb27b33e5838e6d7db"
 result = "The retained M4 build passed pinned GPU input validation, GMU/SMMU generators and Adreno kits/accelerator. Display compilation exposed an out-root path assumption. The builder now receives the explicit UniXNU source root while retaining the same shared helper and ABI checks."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-xnu-corecrypto.md"
+command = "workflow_dispatch native-link; Actions run 43064254937"
+revision = "e0b31c59e6d9d35bc8dfe71caab87da854f22c94"
+result = "The shared display helper resolved through the explicit source root and stopped at a missing IOHIDFamily checkout. Native mode now performs the formal source-only feeds.fetch dependency preparation, retaining pins and caches without invoking IPSW, runtime or installation operations."
+
 [[area]]
 id = "firmware"
 status = "implemented"

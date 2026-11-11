@@ -105,6 +105,11 @@ if args.stage == 'native-link':
     # Existing startup records and generated headers avoid another bootstrap.
     os.environ.pop('UNIXNU_XNU_COMPILE_STAGE', None)
     os.environ['UNIXNU_ROOT'] = str(args.unixnu.resolve())
+    # cli.prepare(kernel) fetches only the bootstrap reference subset. Board
+    # archives also consume pinned HID/USB/etc sources normally fetched by
+    # release dependency preparation. Fetch sources only, never IPSW/runtime.
+    from unixnu import feeds
+    feeds.fetch(ctx, modules)
     ath = device / 'drivers/Ath12kWifi'
     if ci.git(ath, 'rev-parse', 'HEAD') != ci.ATH12K:
         raise SystemExit('Unexpected Ath12k source revision')

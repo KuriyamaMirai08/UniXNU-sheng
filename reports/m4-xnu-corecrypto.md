@@ -43,6 +43,14 @@ Native mode now supplies `UNIXNU_ROOT` explicitly and the board display
 builder uses it to locate the unchanged shared source-driver helper and
 its OS profiles. No archive/ABI validation is removed.
 
+Run 43064254937 resolved the shared helper correctly and exposed a missing
+IOHIDFamily source checkout. `cli.prepare(kernel)` fetches the bootstrap
+reference subset; the production board archives require additional pinned
+references. Native mode now performs the source-only `feeds.fetch` part of
+normal dependency preparation before the original archive dispatcher.
+It respects the same source pins and existing checkouts; IPSW/runtime/Seed
+preparation remains excluded.
+
 Dispatch `package.yml` on `codex/fix-package29-weak-binds`, with
 `runner_location=self-hosted`, `self_hosted_stage=xnu-corecrypto`, `os=27`.
 Leave seed fields empty and init_data false. This selects a separate job;
