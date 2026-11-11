@@ -34,3 +34,18 @@ a capacity estimate does not count as a completed prelink.
 
 Static emission and ABI checks do not establish runtime correctness. No
 device key, installation Seed or device-bound installation image is used.
+
+## First real emission
+
+Run 43069001174 used the actual M4 native/reference binaries and pinned
+original collection. Its 57-entry closure placed native DATA at
+`0xfffffff00b834000` with size `0x1e8000`, without overlap. The real emitter
+processed 111,618 native chained pointers and rebound 561 adapter branches.
+Strict output was refused for 21 unresolved pointer references; no panic
+stubs were enabled. The failed report and input-bound pairing map remain
+in the persistent output and per-attempt artifact.
+
+On a first failure for each input triple, the workflow exports hardlinks
+to the three public kernel inputs with their recorded digests for offline
+binding diagnosis. No disk-copy of the images or installation input is
+introduced, and a content marker avoids uploading them on every retry.

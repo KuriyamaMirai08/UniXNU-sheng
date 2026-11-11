@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persistent production XNU compilation through CoreCrypto or native link; no prelink/images."""
+"""Persistent production XNU compilation, native link or strict prelink; no installation images."""
 import argparse
 import ast
 import importlib.util

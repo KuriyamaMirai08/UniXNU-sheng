@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import struct
 import subprocess
@@ -90,6 +91,19 @@ class RetainedAttempt:
 kernel.tempfile = SimpleNamespace(TemporaryDirectory=RetainedAttempt)
 try:
     result = kernel.prelink(ctx)
+except Exception:
+    # One content-identified evidence export for offline binding diagnosis.
+    # Hardlinks do not duplicate the persistent kernel inputs on the Mac.
+    # These three public kernel images contain no installation/device inputs.
+    marker = ctx.work / 'kernel' / 'input-evidence-exported.json'
+    identity = {k: inputs[k] for k in ('native_sha256', 'reference_sha256', 'kernelcache_sha256')}
+    if not marker.is_file() or json.loads(marker.read_text()) != identity:
+        evidence = args.logs / 'public-kernel-inputs'
+        evidence.mkdir(exist_ok=True)
+        for path, name in ((native, 'native.macho'), (reference, 'reference.macho'), (cache, 'original.macho')):
+            os.link(path, evidence / name)
+        marker.write_text(json.dumps(identity, sort_keys=True) + '\n')
+    raise
 finally:
     for filename in ('kernel.json', 'kernel.failed.json', 'kernel.map.json'):
         path = ctx.work / 'kernel' / filename

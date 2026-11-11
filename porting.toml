@@ -144,6 +144,13 @@ kind = "source"
 reference = "reports/m4-prelink.md"
 result = "The M4 prelink stage reuses the verified real native kernel and reference, executes the formal prelink engine without historical allow-missing or panic-stub fallback, preserves roots/regression checks and failed attempt directories, and requires structural and complete-binding validation. No native rebuild or installation input is invoked."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-prelink.md"
+command = "workflow_dispatch prelink; Actions run 43069001174"
+revision = "a5112b2b866f1355bb32a1b33cdbfb477decbdd8"
+result = "Real prelink placed 0x1e8000 DATA without overlap, relocated 111618 native chain sites and rebound 561 original adapter branches. Strict output was refused for 21 unresolved pointers, with no fallback stubs. Input-bound maps, failure reports and one public input evidence export are retained for diagnosis."
+
 [[area]]
 id = "firmware"
 status = "implemented"
