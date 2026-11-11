@@ -10,7 +10,7 @@ summary = "Xiaomi Pad 6S Pro 12.4 uses shared SM8550 support and board-owned sto
 id = "configuration"
 status = "implemented"
 components = []
-paths = ["board.toml", "feeds.toml", "configs/**", ".gitmodules", ".github/**", ".gitignore", "scripts/m4-compile-smoke.sh", "scripts/m4-xnu-corecrypto.sh", "scripts/m4-xnu-corecrypto.py", "scripts/prepare-corecrypto-cache.py"]
+paths = ["board.toml", "feeds.toml", "configs/**", ".gitmodules", ".github/**", ".gitignore", "scripts/m4-compile-smoke.sh", "scripts/m4-xnu-corecrypto.sh", "scripts/m4-xnu-corecrypto.py", "scripts/m4-prelink.py", "scripts/prepare-corecrypto-cache.py"]
 inputs = ["SM8550 profile, iPadOS 26.5.2 build 23F84, arm64e sheng_ipados26_defconfig and pinned component sources."]
 configuration = ["board.soc_source = sm8550; board.os_profile = ipados-26.5.2-23F84; schema_version = 2.", "The device owns ShengUfs, ShengHidInput, ShengNovatekTouch and ShengPreflight submodules."]
 procedure = ["Read https://unixnu.com/porting/device-repository and https://unixnu.com/porting/records.", "Run ./unixnu defconfig sheng_ipados26_defconfig -D ../UniXNU-sheng from UniXNU.", "Run ./unixnu status --json -D ../UniXNU-sheng and review profiles, components, source pins and patch order."]
@@ -138,6 +138,11 @@ reference = "reports/m4-xnu-corecrypto.md"
 command = "workflow_dispatch native-link; Actions run 43065584630"
 revision = "457ba5b9cc46c9d6a7a7394970deaf4ae55c014c"
 result = "The original 20-step board archive chain and real DEVELOPMENT native link passed on UniXNU-M4. The 28199136-byte arm64e MH_EXECUTE has SHA-256 31f8273297025436fa9814b9540329b439af45afd661f7f6836476401a9ec15b and no undefined nm symbols. DATA vmsize is 0x1e8000. The final make reused XNU objects and both CoreCrypto variants reused 529/529 objects. Prelink, runtime selftests and boot remain unverified; no installation inputs were used."
+
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-prelink.md"
+result = "The M4 prelink stage reuses the verified real native kernel and reference, executes the formal prelink engine without historical allow-missing or panic-stub fallback, preserves roots/regression checks and failed attempt directories, and requires structural and complete-binding validation. No native rebuild or installation input is invoked."
 
 [[area]]
 id = "firmware"
@@ -750,6 +755,11 @@ reference = "reports/m4-xnu-corecrypto.md"
 command = "workflow_dispatch native-link; Actions run 43065584630"
 revision = "457ba5b9cc46c9d6a7a7394970deaf4ae55c014c"
 result = "The original 20-step board archive chain and real DEVELOPMENT native link passed on UniXNU-M4. The 28199136-byte arm64e MH_EXECUTE has SHA-256 31f8273297025436fa9814b9540329b439af45afd661f7f6836476401a9ec15b and no undefined nm symbols. DATA vmsize is 0x1e8000. The final make reused XNU objects and both CoreCrypto variants reused 529/529 objects. Prelink, runtime selftests and boot remain unverified; no installation inputs were used."
+
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-prelink.md"
+result = "The M4 prelink stage reuses the verified real native kernel and reference, executes the formal prelink engine without historical allow-missing or panic-stub fallback, preserves roots/regression checks and failed attempt directories, and requires structural and complete-binding validation. No native rebuild or installation input is invoked."
 
 [[area]]
 id = "diagnostics"

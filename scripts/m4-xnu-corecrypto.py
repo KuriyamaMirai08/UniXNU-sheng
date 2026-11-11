@@ -17,10 +17,15 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--unixnu', type=Path, required=True)
 p.add_argument('--out', type=Path, required=True)
 p.add_argument('--logs', type=Path, required=True)
-p.add_argument('--stage', choices=('xnu-corecrypto', 'native-link'), default='xnu-corecrypto')
+p.add_argument('--stage', choices=('xnu-corecrypto', 'native-link', 'prelink'), default='xnu-corecrypto')
 args = p.parse_args()
 device = Path(__file__).resolve().parents[1]
 args.logs.mkdir(parents=True, exist_ok=True)
+if args.stage == 'prelink':
+    # No archive dispatcher, make, compiler, defconfig rewrite or input prefetch.
+    subprocess.run([sys.executable, device / 'scripts/m4-prelink.py', '--unixnu', args.unixnu,
+                    '--out', args.out, '--logs', args.logs], check=True)
+    raise SystemExit(0)
 spec = importlib.util.spec_from_file_location('prepare_ci', device / 'scripts/prepare-package-ci.py')
 ci = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ci)

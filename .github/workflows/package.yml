@@ -16,8 +16,8 @@ on:
       self_hosted_stage:
         description: "M4 compilation stage (no device keys or installation Seed)"
         type: choice
-        options: [native-link, xnu-corecrypto, smoke]
-        default: native-link
+        options: [prelink, native-link, xnu-corecrypto, smoke]
+        default: prelink
       os:
         description: "OS profile of the images"
         type: choice
@@ -81,7 +81,7 @@ jobs:
   m4-xnu-corecrypto:
     if: >-
       github.event_name == 'workflow_dispatch' && inputs.runner_location == 'self-hosted' &&
-      (inputs.self_hosted_stage == 'xnu-corecrypto' || inputs.self_hosted_stage == 'native-link') && inputs.os == '27' &&
+      (inputs.self_hosted_stage == 'xnu-corecrypto' || inputs.self_hosted_stage == 'native-link' || inputs.self_hosted_stage == 'prelink') && inputs.os == '27' &&
       !inputs.init_data && inputs.data_seed_url == '' && inputs.data_seed_sha256 == ''
     permissions: {}
     runs-on: [self-hosted, macOS, ARM64]

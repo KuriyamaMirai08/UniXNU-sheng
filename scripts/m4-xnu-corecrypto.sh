@@ -12,7 +12,7 @@ for candidate in /opt/homebrew/bin/python3 /opt/homebrew/opt/python@3.*/libexec/
   fi
 done
 python3 -c 'import tomllib'
-if [ "${M4_STAGE:-xnu-corecrypto}" != native-link ]; then
+if [ "${M4_STAGE:-xnu-corecrypto}" = xnu-corecrypto ]; then
 for formula in unifdef cmake ninja bison; do
   brew list --versions "$formula" || brew install "$formula"
 done
@@ -35,7 +35,7 @@ if [ ! -d /Library/Developer/PrivateFrameworks/CoreSimulator.framework ] || ! xc
   fi
 fi
 fi
-if [ "${M4_STAGE:-xnu-corecrypto}" = native-link ]; then
+if [ "${M4_STAGE:-xnu-corecrypto}" != xnu-corecrypto ]; then
   mkdir -p "$M4_LOG_DIR"
   exec > >(tee -a "$M4_LOG_DIR/console.log") 2>&1
 fi
@@ -60,5 +60,7 @@ test "$(git -C "$unixnu" rev-parse HEAD)" = 97437dcf7389484a0eeaa8067725ce743aff
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
 # Use the already installed pinned toolchain even when rustup proxy shims
 # are absent. Production Rust recipes keep their original input checks.
-export PATH="$(dirname "$(rustup which --toolchain 1.98.0 rustc)"):$PATH"
+if [ "${M4_STAGE:-xnu-corecrypto}" != prelink ]; then
+  export PATH="$(dirname "$(rustup which --toolchain 1.98.0 rustc)"):$PATH"
+fi
 python3 "$M4_ROOT/device/scripts/m4-xnu-corecrypto.py" --unixnu "$unixnu" --out "$M4_ROOT/out" --logs "$M4_LOG_DIR" --stage "${M4_STAGE:-xnu-corecrypto}"
