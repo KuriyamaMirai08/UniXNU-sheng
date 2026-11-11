@@ -1,5 +1,30 @@
 # M4 XNU and CoreCrypto compilation
 
+## Native-link stage
+
+The next stage is `self_hosted_stage=native-link`, also using `os=27` and
+empty installation inputs. It runs the original ordered production
+`kernel.build_archives` and final native make, with no narrowed archive
+dispatcher and no forced bootstrap when retained records/headers exist.
+Both CoreCrypto recipes retain dependency-validated object reuse. The
+previous environment initialization checks are not repeated in this mode.
+The already-installed Rust 1.98.0 compiler directory is put on PATH for
+production Cargo recipes without relying on optional rustup proxy shims.
+
+Sources, headers, archives and object directories stay under the same
+`public-xnu-v1` root. Each attempt saves the actual production archive plan
+and full per-recipe/final-link logs in its own log directory. Failed jobs
+do not remove successful outputs. The pinned Ath12k fetch compatibility
+transform used by hosted packaging is applied without source pin changes.
+
+A native-link success requires the real build command to succeed and
+the selected kernel output to be an arm64e `MH_EXECUTE` with no undefined
+symbols reported by Apple nm. Its SHA-256, byte size, architecture and
+archive inventory go in `native-link-report.json`; Apple otool and size
+load-command/segment reports are saved alongside it. No link-only error
+filter is used for this stage. Prelink and all installation operations
+remain excluded.
+
 Dispatch `package.yml` on `codex/fix-package29-weak-binds`, with
 `runner_location=self-hosted`, `self_hosted_stage=xnu-corecrypto`, `os=27`.
 Leave seed fields empty and init_data false. This selects a separate job;

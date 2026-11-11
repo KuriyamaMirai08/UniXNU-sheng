@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real production-config XNU bootstrap and CoreCrypto, stopping before other archives/link/prelink/images."""
+"""Persistent production XNU compilation through CoreCrypto or native link; no prelink/images."""
 import argparse
 import ast
 import importlib.util
@@ -10,11 +10,14 @@ import re
 import shutil
 import subprocess
 import sys
+import hashlib
+import struct
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--unixnu', type=Path, required=True)
 p.add_argument('--out', type=Path, required=True)
 p.add_argument('--logs', type=Path, required=True)
+p.add_argument('--stage', choices=('xnu-corecrypto', 'native-link'), default='xnu-corecrypto')
 args = p.parse_args()
 device = Path(__file__).resolve().parents[1]
 args.logs.mkdir(parents=True, exist_ok=True)
@@ -97,9 +100,50 @@ def corecrypto_stage(context, env):
 # Use the existing fixed kernel.build bootstrap/header path verbatim. Replace
 # only its archive dispatch in this process, then stop before other board
 # archives and the final native link. No production recipe is bypassed in package.
-kernel.build_archives = corecrypto_stage
-os.environ['UNIXNU_XNU_COMPILE_STAGE'] = '1'
+if args.stage == 'native-link':
+    # Retain the original ordered archive dispatcher and final native make.
+    # Existing startup records and generated headers avoid another bootstrap.
+    os.environ.pop('UNIXNU_XNU_COMPILE_STAGE', None)
+    ath = device / 'drivers/Ath12kWifi'
+    if ci.git(ath, 'rev-parse', 'HEAD') != ci.ATH12K:
+        raise SystemExit('Unexpected Ath12k source revision')
+    ath_original = subprocess.check_output(['git', '-C', ath, 'show', 'HEAD:tools/fetch-sources.py'], text=True)
+    ath_fixed = ci.transform(ath_original)
+    ath_path = ath / 'tools/fetch-sources.py'
+    if ath_path.read_text() not in (ath_original, ath_fixed):
+        raise SystemExit('Unreviewed Ath12k fetcher edits; preserved for inspection')
+    if ath_path.read_text() != ath_fixed:
+        ath_path.write_text(ath_fixed)
+    tree.assemble(ctx, modules)
+    plan = [(kind, item['id'] if kind == 'component' else item) for kind, item in kernel.archive_plan(ctx)]
+    (args.logs / 'archive-plan.json').write_text(json.dumps(plan, indent=2) + '\n')
+    print('Production archive plan:', json.dumps(plan), flush=True)
+else:
+    kernel.build_archives = corecrypto_stage
+    os.environ['UNIXNU_XNU_COMPILE_STAGE'] = '1'
 try:
     kernel.build(ctx, modules)
 except StageComplete:
     print('PASS: real XNU compile/bootstrap and both CoreCrypto archives; full board link remains deferred', flush=True)
+else:
+    if args.stage != 'native-link':
+        raise Error('CoreCrypto stage did not stop at its expected boundary')
+    native = ctx.tree / ctx.board['kernel']['prelink']['kernel']
+    blob = native.read_bytes()
+    magic, cpu, subtype, filetype = struct.unpack_from('<4I', blob)
+    if (magic, cpu, subtype & 0xffffff, filetype) != (0xfeedfacf, 0x100000c, 2, 2):
+        raise Error(f'Not an arm64e MH_EXECUTE native kernel: {(magic, cpu, subtype, filetype)}')
+    undefined = subprocess.check_output(['xcrun', 'nm', '-u', '-j', native], text=True).strip()
+    (args.logs / 'native-undefined.txt').write_text(undefined + '\n')
+    if undefined:
+        raise Error('Native executable has unresolved symbols: ' + undefined[:2000])
+    for label, command in [('native-load-commands', ['xcrun', 'otool', '-hv', '-l', native]),
+                           ('native-segments', ['xcrun', 'size', '-m', native])]:
+        (args.logs / (label + '.txt')).write_text(subprocess.check_output(command, text=True))
+    report = {'stage': 'native-link', 'native': str(native), 'bytes': len(blob),
+              'sha256': hashlib.sha256(blob).hexdigest(), 'cpu': cpu, 'subtype': subtype,
+              'filetype': 'MH_EXECUTE', 'architecture': 'arm64e', 'undefined_symbols': [],
+              'full_native_link': True, 'prelink': False, 'installation_images': False,
+              'archives': [str(p.relative_to(ctx.tree)) for p in sorted((ctx.tree / 'build').rglob('*.a'))]}
+    (args.logs / 'native-link-report.json').write_text(json.dumps(report, indent=2) + '\n')
+    print('PASS: real arm64e native link and undefined-symbol check', json.dumps(report, indent=2), flush=True)

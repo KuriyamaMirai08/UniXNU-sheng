@@ -16,8 +16,8 @@ on:
       self_hosted_stage:
         description: "M4 compilation stage (no device keys or installation Seed)"
         type: choice
-        options: [xnu-corecrypto, smoke]
-        default: xnu-corecrypto
+        options: [native-link, xnu-corecrypto, smoke]
+        default: native-link
       os:
         description: "OS profile of the images"
         type: choice
@@ -81,16 +81,17 @@ jobs:
   m4-xnu-corecrypto:
     if: >-
       github.event_name == 'workflow_dispatch' && inputs.runner_location == 'self-hosted' &&
-      inputs.self_hosted_stage == 'xnu-corecrypto' && inputs.os == '27' &&
+      (inputs.self_hosted_stage == 'xnu-corecrypto' || inputs.self_hosted_stage == 'native-link') && inputs.os == '27' &&
       !inputs.init_data && inputs.data_seed_url == '' && inputs.data_seed_sha256 == ''
     permissions: {}
     runs-on: [self-hosted, macOS, ARM64]
-    timeout-minutes: 180
+    timeout-minutes: 360
     concurrency:
       group: unixnu-m4-public-xnu
       cancel-in-progress: false
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      M4_STAGE: ${{ inputs.self_hosted_stage }}
     steps:
       - name: Require the registered M4 and prepare persistent public checkout
         env:
@@ -112,7 +113,7 @@ jobs:
           git -C "$device" checkout --detach "$SOURCE_SHA"
           echo "M4_ROOT=$root" >> "$GITHUB_ENV"
           echo "M4_LOG_DIR=$root/logs/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
-      - name: Compile real XNU bootstrap and both CoreCrypto archives
+      - name: Compile selected XNU stage with persistent archives and objects
         run: bash "$M4_ROOT/device/scripts/m4-xnu-corecrypto.sh"
       - name: Public compile logs and reports (never installation inputs)
         if: always() && env.M4_LOG_DIR != ''

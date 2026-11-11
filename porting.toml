@@ -99,6 +99,11 @@ command = "workflow_dispatch package.yml runner_location=self-hosted self_hosted
 revision = "2267df6cbf50dab923445866c7e75887cad2e604"
 result = "Both M4 stages passed: XNU source compilation reached the expected bootstrap link, generated headers were present, and each CoreCrypto variant built 529 sources with zero failures and passed 529 object ABI audits. The incremental run recompiled no XNU objects and reused 529/529 objects in each CoreCrypto variant; both archive hashes were unchanged. Full native link, registration/selftests, prelink and boot remain unverified."
 
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-xnu-corecrypto.md"
+result = "The native-link stage uses the original production archive dispatcher and final XNU make in the retained M4 tree. CoreCrypto dependency reuse remains enabled; real link errors fail. A successful output must pass arm64e MH_EXECUTE and undefined-symbol checks, with persistent logs and no installation inputs."
+
 [[area]]
 id = "firmware"
 status = "implemented"
