@@ -46,7 +46,7 @@ jobs:
           }
           '''
           pathlib.Path('consumer.cpp').write_text(header + calls)
-          flags = ['xcrun','clang++','-target','arm64e-apple-ios27.0','-mkernel','-ffreestanding','-fno-stack-protector']
+          flags = ['xcrun','clang++','-target','arm64e-apple-ios27.0','-isysroot',subprocess.check_output(['xcrun','--sdk','iphoneos','--show-sdk-path'],text=True).strip(),'-mkernel','-ffreestanding','-fno-stack-protector']
           subprocess.run(flags + ['-c','consumer.cpp','-o','consumer.o'], check=True)
           counts = {}
           for mode in ('weak','strong'):
@@ -56,7 +56,7 @@ jobs:
                       source = source.replace('extern "C" ' + typ, 'extern "C" __attribute__((weak)) ' + typ)
               pathlib.Path('support.cpp').write_text(header + source)
               subprocess.run(flags + ['-c','support.cpp','-o','support.o'], check=True)
-              subprocess.run(flags + ['-nostdlib','-Wl,-kernel,-add_split_seg_info,-e,_entry','consumer.o','support.o','-o',mode+'.macho'], check=True)
+              subprocess.run(flags + ['-static','-nostdlib','-Wl,-kernel,-add_split_seg_info,-e,_entry','consumer.o','support.o','-o',mode+'.macho'], check=True)
               data = pathlib.Path(mode+'.macho').read_bytes()
               ncmds, = struct.unpack_from('<I',data,16)
               offset = 32
