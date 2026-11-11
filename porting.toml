@@ -85,6 +85,13 @@ command = "workflow_dispatch package.yml runner_location=self-hosted self_hosted
 revision = "7059a1ae6a768b3c5812498418296039aa0e3d20"
 result = "Run 43057794006 generated XNU headers including clock.h, then stopped in firehose with Xcode exit 70 because the system CoreSimulator framework was missing. First-launch initialization now runs when needed; the failed source/header tree remains intact."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-xnu-corecrypto.md"
+command = "Re-run failed jobs in Actions run 43059188516, attempt 2"
+revision = "16f689b419b0e4b653deebce34ceb65cf4c4fb26"
+result = "After Xcode system initialization, XNU compiled to the expected unresolved bootstrap link and kern/assert.h, kern/clock.h and pexpert/pexpert.h were present. The stage filter now recognizes clang++ as well as clang linker-only errors when arm64e undefined-symbol diagnostics are present; source compiler errors remain fatal."
+
 [[area]]
 id = "firmware"
 status = "implemented"

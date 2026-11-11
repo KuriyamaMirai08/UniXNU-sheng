@@ -72,8 +72,11 @@ def corecrypto_stage(context, env):
     text = bootstrap.read_text(errors='replace')
     # Upstream tolerates the deliberate unresolved bootstrap link if a compile
     # record exists. Do not accidentally hide a C/C++ compilation failure.
+    expected_unresolved_link = ('Undefined symbols for architecture arm64e' in text
+                                and 'ld: symbol(s) not found for architecture arm64e' in text)
     errors = [line for line in text.splitlines() if re.search(r'\bfatal error:|\berror:', line)
-              and not re.search(r'(?:clang|ld): error: linker command failed', line)]
+              and not (expected_unresolved_link and re.search(
+                  r'^(?:clang(?:\+\+)?|ld): error: linker command failed', line))]
     if errors:
         raise Error('XNU compile diagnostics before the archive stage:\n' + '\n'.join(errors[-20:]))
     env = dict(env, PATH=kernel.toolchain_path(env.get('PATH')), UNIXNU_DEVICE=str(device))

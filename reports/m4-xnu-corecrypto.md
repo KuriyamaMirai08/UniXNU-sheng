@@ -66,3 +66,12 @@ components are incomplete, using noninteractive sudo if available. It never
 requests or stores an admin password. If admin setup is blocked, the exact
 local administrator command is printed. Existing sources/headers/outputs
 are retained and the next dispatch resumes in the same persistent tree.
+
+After administrator initialization, attempt 2 of run 43059188516 reused
+the source/header tree, compiled XNU to the expected unresolved bootstrap
+link, and confirmed all three required Kernel.framework headers exist.
+The stage then incorrectly rejected `clang++: error: linker command failed`
+because its link-only filter accepted `clang` but not `clang++`. It now
+accepts either driver only when the log also contains the arm64e undefined
+symbol diagnostics. Source compilation errors still fail; other board
+archives and the final native link remain deferred in this stage.
