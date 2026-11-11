@@ -5,7 +5,7 @@ permissions:
   contents: read
 jobs:
   inspect:
-    runs-on: macos-26
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/cache/restore@v4
@@ -22,7 +22,7 @@ jobs:
       - name: Inspect cached native executable
         run: |
           kernel=UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf
-          xcrun nm -u "$kernel"
+          file "$kernel"
           mkdir diagnostic
           cp "$kernel" diagnostic/
       - uses: actions/upload-artifact@v4
