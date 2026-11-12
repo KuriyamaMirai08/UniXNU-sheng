@@ -72,6 +72,10 @@ print('Real retained prelink inputs:', json.dumps(inputs), flush=True)
 raw, native_data = cache.read_bytes(), native.read_bytes()
 stock, executable = Image(raw), Image(native_data)
 closure = dependency_closure(stock, spec['roots'])
+from m4_prelink_evidence import validate
+interface_evidence = validate(json.loads(anchors.read_text()), raw, native_data, closure)
+(args.logs / 'reviewed-interface-validation.json').write_text(json.dumps(interface_evidence, indent=2) + '\n')
+print('Reviewed interface contracts verified:', json.dumps(interface_evidence), flush=True)
 initializers = dict([spec['early_security_init'].split('=', 1)]) if spec.get('early_security_init') else {}
 initializers = {name: int(address, 0) for name, address in initializers.items()}
 rebased, slide, _ = rebase_collection(stock, executable.base, closure, initializers, set(spec['roots']))

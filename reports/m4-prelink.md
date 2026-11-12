@@ -128,3 +128,7 @@ interface. Until those are proven, final fileset structure checks,
 complete binding qualification, early init, runtime selftests and device
 boot remain unverified. Failures, maps and inputs remain on the Mac;
 this stage never cleans build objects, headers or archives.
+
+## Interface recovery
+
+See [the complete 19-reference inventory and ABI recovery report](m4-prelink-interfaces.md) for exact-byte reviewed identities, typed data objects, the guarded BASIC_INFO-only processor_info contract and the five remaining IDL/TXM blockers.

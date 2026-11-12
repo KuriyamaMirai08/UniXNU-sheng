@@ -17,7 +17,152 @@
       "original_sha256": "70c01cf568a210d3abd5353036159dfac4da5df7290c552ff007139d1bec104c",
       "native_symbol": "_ml_stack_remaining",
       "evidence": "Computes a local stack address minus the active stack bottom. Interrupt stack bounds use top minus 0x4000; normal stack uses current_thread kernel_stack. The original CONFIG_SPTM path additionally subtracts a red-zone page when kredzonestack is zero. Native non-SPTM implementation omits that conditional, as required by its own kernel stacks. Matches osfmk/arm/machine_routines_common.c ml_stack_remaining, source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f. Same no-argument vm_offset_t ABI; this binding does not claim original/private struct layout compatibility."
+    },
+    {
+      "original": "0xfffffe000aebcc3c",
+      "original_size": 352,
+      "original_sha256": "814c52a693f36b4ba9338e02c33484aabf1ebf2db1cfb91192330fc6430f8ce1",
+      "native_symbol": "_ml_arm_sleep",
+      "native_size": 272,
+      "native_sha256": "f1e9a4eea026ab86720e573d41d1ddce5ada31597351f489fea2195e9e41ae1d",
+      "evidence": "void(void), noreturn. BootCpuData selects the primary path; waits for every other CpuDataEntries sleep token 0x50535553; stores timebase into wake_abstime, resets time with UINT64_MAX, cleans the secondary CPU data and writes CoreSight unlock 0xc5acce55/+0xfb0 then zero/+0x310 before arm64_prepare_for_sleep(true). Native implements the same state machine with its own CPU data offsets. osfmk/arm64/cpu.c ml_arm_sleep, lines 1024 onward. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+    },
+    {
+      "original": "0xfffffe000aebdee4",
+      "original_size": 16,
+      "original_sha256": "7a19bae6d03d743d2533c0a4a80daae82d83cc1f203fead056edf43aaab50ae4",
+      "native_symbol": "_cpu_number",
+      "native_size": 28,
+      "native_sha256": "d8446ed5fd81fc76332764efd715d53e17cbed3dd7ed8ab0500695e646b7cbed",
+      "evidence": "int(void): TPIDR_EL1 current_thread then zero-extended 16-bit machine.cpu_number; original +0x1b0, native +0x238 after current_thread(). Both retained import veneers have no input arguments and use w0 as CPU index. osfmk/arm/cpu_common.c:881 explicitly returns current_thread()->machine.cpu_number. No private offset is transplanted. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+    },
+    {
+      "original": "0xfffffe000aebdef4",
+      "original_size": 16,
+      "original_sha256": "560bda14a018312ca80f25649beeb2eefdb1d5017a37a5f8120001e903845c24",
+      "native_symbol": "_ml_get_wake_timebase",
+      "native_size": 16,
+      "native_sha256": "41bbf629395a9d18e3f835045ae13dbeb3feb643533e518a5eea36f518557299",
+      "evidence": "uint64_t(void): loads the exact 8-byte global written by the proven ml_arm_sleep boot-CPU path, original 0xfffffe000b9284f0, native 0xfffffff007fffd38. osfmk/arm/cpu_common.c:901 returns wake_abstime. Corroborated by producer and consumer, not merely a leaf load shape. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+    },
+    {
+      "original": "0xfffffe000ad6df18",
+      "original_size": 748,
+      "original_sha256": "fb1aedc1e1715f9e03a8e5e332402c215e0aecf83d08eb275083433b066c91eb",
+      "native_symbol": "_sched_enable_acc_rail",
+      "native_size": 580,
+      "native_sha256": "7d38dcf4fa35d947728fceed5bea8d4b7fbff4fd22676711792061c9561ef83b",
+      "evidence": "void(unsigned int die_id, unsigned int die_cluster_id): w0/w1 select topology cluster die_id and die_cluster_id; original cluster stride 0x58 vs native 0x50; loads its cpu_mask, acquires cluster_powerdown_lock and scheduler spinlock, ORs pcs_required_online_pmgr (+0x28), synchronously calls sched_update_powered_cores_drops_lock with REASON_PMGR_SYSTEM=5, flushes pulled thread queue and unlocks. osfmk/kern/sched_prim.c:7916. The topology and scheduler structures remain owned by the native implementation. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+    },
+    {
+      "original": "0xfffffe000ad6e204",
+      "original_size": 860,
+      "original_sha256": "7bda8e0b4f6cdc0985487571d01f178f6adebbc67f9bb2d24c3d951fa640b660",
+      "native_symbol": "_sched_disable_acc_rail",
+      "native_size": 608,
+      "native_sha256": "b137d4c6251e9b738b6b7ecc2e292bfc783bc5d865cb68ffe1a78621ba493025",
+      "evidence": "void(unsigned int die_id, unsigned int die_cluster_id): same w0/w1 topology lookup as enable, ANDs pcs_required_online_pmgr with complement cpu_mask under scheduler spinlock, records reason 5 and signals sched_update_powered_cores_wakeup/thread asynchronously. osfmk/kern/sched_prim.c:7964. This differs deliberately from synchronous enable and is not bound by function adjacency alone. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+    },
+    {
+      "original": "0xfffffe000b4ca1d0",
+      "original_size": 72,
+      "original_sha256": "03a03eca25252f3fcb080642f48a996c379ba573e30af495175395c21d7dcd3f",
+      "native_symbol": "__ZN24IOCPUInterruptControllerC1Ev",
+      "native_size": 88,
+      "native_sha256": "3495dc7e231a514bf83235acb9cc8a5d4dab005793948f4ed3b19e0244fc3f91",
+      "evidence": "Default constructor with x0=this, returning the same object pointer. Writes refCount=1 at +8; signs vptr for __ZTV24IOCPUInterruptController+16 with address discriminator 0xcda1; increments __ZN24IOCPUInterruptController10gMetaClassE instanceCount at +0x24, traversing superClassLink on 0-to-1. Original vtable 0xfffffe0007ed0b70 and metaclass 0xfffffe000b929fd8 independently map to the same native class. Native base constructor chain only replaces intermediate vptrs, initializes refCount and invokes the same metaclass accounting; no class-specific data fields are initialized. Existing public OSDefineMetaClassAndStructors macro and native constructor chain are the evidence. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+    },
+    {
+      "original": "0xfffffe000b4ca260",
+      "original_size": 136,
+      "original_sha256": "e7be7e9dcd4d91a03f8b936a712c0714928f89905fd418777134b443f7553c75",
+      "native_symbol": "_IOCPURunPlatformQuiesceActions",
+      "native_size": 196,
+      "native_sha256": "3fcb0ab7a6a92e190353678d448d22ba5684d9f74a8bbe6cac874f98176533df",
+      "evidence": "kern_return_t(void): iterates gActionQueues[kQueueQuiesce=2], 16-byte queue heads; callback fields action +0x10, priority +0x18, name +0x20, refcons +0x28/+0x30. Supplies x0/x1=refcons,w2=abs(priority),x3/x4/x5=0,x6=name,w7=ALLOW_NESTED_CALLOUTS=1. Authenticates callback with 0x2753, returns first nonzero result in w0. Active queue is exactly head+16; source iokit/Kernel/IOPlatformActions.cpp:136. Native preemption assertions/debug logging remain intact. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+    },
+    {
+      "original": "0xfffffe000b4ca2e8",
+      "original_size": 136,
+      "original_sha256": "cf463d473fff64381f185a8f7df7a2cf2953d88c0aa6ab545427407b0cd4a113",
+      "native_symbol": "_IOCPURunPlatformActiveActions",
+      "native_size": 204,
+      "native_sha256": "7137b3937dd1472e43a49970cd3bbe8655a77c868bb803c48df611f17b2686af",
+      "evidence": "kern_return_t(void): same proven callback record offsets, eight-register callback ABI, 0x2753 discriminator, nested flag 1 and first-error reduction as QuiesceActions, but gActionQueues[kQueueActive=3], exactly 16 bytes after quiesce. iokit/Kernel/IOPlatformActions.cpp:145. Native additionally retains its own ml_hibernate_active_pre/post and assertions; no function body or check is removed. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+    },
+    {
+      "original": "0xfffffe000ad53f60",
+      "original_size": 832,
+      "original_sha256": "9e5579a9584f8d1b091ec43f7bb9aa545718071c33b8df4782d4efc7a0a4e092",
+      "native_symbol": "_processor_info",
+      "native_size": 424,
+      "native_sha256": "2f951d70b2fa358fe9f4193a842d8aabcf6d5f2b13618de61a1e7ed8350d8d64",
+      "evidence": "Scoped imported ABI only: kern_return_t(processor_t,w1=PROCESSOR_BASIC_INFO=1,host_t*,processor_info_t,mach_msg_type_number_t*). The only selected importer is AppleARMWatchdogTimer GOT 0xfffffe0007f873b0, veneer 0xfffffe000871b0b4, BL 0xfffffe00087170e0. The whole caller fixes count=5 at 0xfffffe00087170ac and flavor=1 at 0xfffffe00087170dc, then consumes running at info+8. Public osfmk/kern/processor.c:869 defines the same five-int basic result/count/host/error semantics and native owns processor offsets. Original flavor 3 requires count>=12 and an entitlement gate; it is NOT claimed implemented or compatible. A pre-emission closure/caller guard rejects any selected importer outside this proven call contract. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+    },
+    {
+      "original": "0xfffffe000b4b6724",
+      "original_size": 308,
+      "original_sha256": "c378259811821b6a5a228380edfe89cab21a3f9a336cd1a4d34a3409a129d92a",
+      "native_symbol": "__ZN18IOMemoryDescriptor26ktraceEmitPhysicalSegmentsEv",
+      "native_size": 1588,
+      "native_sha256": "4a8092cb4ce14d81618a612fae6085e0d1fc3c0513e40189026d74e82deff51e",
+      "evidence": "IOReturn(this=x0): kdebug_debugid_enabled(0x05410004), preparation ID >=2, nonzero descriptor ID, private reserved state present, then iterates getPhysicalSegment(offset,&length,0) until zero length or getLength; returns kIOReturnBadArgument 0xe00002c2 or success. Public iokit/Kernel/IOMemoryDescriptor.cpp:3067 implements these exact gates and iteration with trace packing. Original optimization removes timestamp packing but retains gates/iteration. Native virtual dispatch uses the native descriptor layout; no original object field/vtable offsets are patched into it. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+    },
+    {
+      "original": "0xfffffe000b5a3ba8",
+      "original_size": 16,
+      "original_sha256": "270e3f8691f72932d5b54c15ba75782fa0a900b4afe6ad4133552961da730434",
+      "native_symbol": "_kernel_image4_storage_data",
+      "native_size": 8,
+      "native_sha256": "3a8bf209532ceeb2da30caddfbf0e798237a10bf1ca654ce971b28b55e5e9e62",
+      "evidence": "void*(size_t*): original 16-byte wrapper calls txm_image4_storage_data, whose exact diagnostic is unsupported AppleImage4 interface (txm.c). This is the public storage API selected through the kernel wrapper, not a general missing function mapped to panic. Selected AppleImage4 caller 0xfffffe0009016fbc passes &size, checks size>=0x390 and pointer alignment 8, then initializes its own storage. Native kernel wrapper calls xnu_image4_storage_data, which returns a real zero-initialized 8-aligned 0x1400-byte buffer at __xnu_image4_storage and writes size_t 0x1400. Source bsd/kern/code_signing/{txm.c,xnu.c}; monitor-specific semantics are NOT claimed by this storage binding. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
     }
   ],
-  "data": []
+  "data": [
+    {
+      "original": "0xfffffe00070446a8",
+      "original_size": 8,
+      "original_alignment": 8,
+      "original_bytes": "0000000000000000",
+      "native_symbol": "_PE_arm_debug_panic_hook",
+      "native_size": 8,
+      "native_alignment": 8,
+      "native_bytes": "189bc100be2a2080",
+      "evidence": "8-byte aligned function-pointer slot, not code. Original RELEASE const slot is initially NULL; Watchdog reads 8 bytes and installs a callback with OSCompareAndSwapPtr, signing callback with discriminator 0x2abe. AppleProcessorTrace imports the same slot. Native PE_panic_hook loads this exact native symbol and BRAA-authenticates with the same 0x2abe. pexpert/pexpert/pexpert.h declares void(*PE_arm_debug_panic_hook)(const char*), const in RELEASE and mutable in DEVELOPMENT. Native DEVELOPMENT already initializes this slot with PE_arm_panic_hook, authenticated with diversity 0x2abe; preserve that real handler and its chain bits, do not replace it with NULL. The native mutable DATA slot is preserved; no fabricated buffer is added.",
+      "native_fixup": {
+        "symbol": "_PE_arm_panic_hook",
+        "fields": [
+          1,
+          0,
+          10942,
+          0
+        ]
+      }
+    },
+    {
+      "original": "0xfffffe000b8b3ce8",
+      "original_size": 4,
+      "original_alignment": 4,
+      "original_zerofill": true,
+      "original_bytes": "00000000",
+      "native_symbol": "_kext_assertions_enable",
+      "native_size": 4,
+      "native_alignment": 4,
+      "native_bytes": "01000000",
+      "evidence": "32-bit int assertion-enable object with natural alignment >=4, read as a 32-bit flag at 81 IOHIDFamily ADRP/GOT use sites; cold targets terminate in BRK 0xbffc with MACH_ASSERT descriptors. Also imported by AppleT8142CLPC and ExclaveKextClient. osfmk/kern/assert.h mach_assert_enabled() under APPLE_KEXT_ASSERTIONS reads this int; osfmk/kern/debug.c declares int kext_assertions_enable=FALSE in RELEASE and TRUE in DEVELOPMENT. Original __common section is S_ZEROFILL (virtual zero, not missing file bytes); native __data holds integer 1, so native assertions remain enabled. Source identity establishes sizeof(int)=4; observed read footprint is 4, not the following linker padding."
+    }
+  ],
+  "processor_info_contract": {
+    "original": "0xfffffe000ad53f60",
+    "consumer": "com.apple.driver.AppleARMWatchdogTimer",
+    "got": "0xfffffe0007f873b0",
+    "stub": "0xfffffe000871b0b4",
+    "call": "0xfffffe00087170e0",
+    "caller_begin": "0xfffffe0008717074",
+    "caller_size": 252,
+    "caller_sha256": "f4bc0ca2d069cee00ae22cda6790e29f0e216be9667f9c4b04cca8c3c6699535",
+    "flavor": 1,
+    "count": 5,
+    "closure_sha256": "1cee00b83aede0b1eba9ff93651bb94bb14719f4f4aed50fa4a5be2929a9a914"
+  }
 }

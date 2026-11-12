@@ -10,7 +10,7 @@ summary = "Xiaomi Pad 6S Pro 12.4 uses shared SM8550 support and board-owned sto
 id = "configuration"
 status = "implemented"
 components = []
-paths = ["board.toml", "feeds.toml", "configs/**", ".gitmodules", ".github/**", ".gitignore", "scripts/m4-compile-smoke.sh", "scripts/m4-xnu-corecrypto.sh", "scripts/m4-xnu-corecrypto.py", "scripts/m4-prelink.py", "scripts/m4-prelink-symbols.json", "scripts/prepare-corecrypto-cache.py"]
+paths = ["board.toml", "feeds.toml", "configs/**", ".gitmodules", ".github/**", ".gitignore", "scripts/m4-compile-smoke.sh", "scripts/m4-xnu-corecrypto.sh", "scripts/m4-xnu-corecrypto.py", "scripts/m4-prelink.py", "scripts/m4-prelink-symbols.json", "scripts/m4_prelink_evidence.py", "scripts/prepare-corecrypto-cache.py"]
 inputs = ["SM8550 profile, iPadOS 26.5.2 build 23F84, arm64e sheng_ipados26_defconfig and pinned component sources."]
 configuration = ["board.soc_source = sm8550; board.os_profile = ipados-26.5.2-23F84; schema_version = 2.", "The device owns ShengUfs, ShengHidInput, ShengNovatekTouch and ShengPreflight submodules."]
 procedure = ["Read https://unixnu.com/porting/device-repository and https://unixnu.com/porting/records.", "Run ./unixnu defconfig sheng_ipados26_defconfig -D ../UniXNU-sheng from UniXNU.", "Run ./unixnu status --json -D ../UniXNU-sheng and review profiles, components, source pins and patch order."]
@@ -162,6 +162,11 @@ reference = "reports/m4-prelink.md"
 command = "workflow_dispatch prelink; Actions run 43071105217"
 revision = "be828a08381d3857058ca028e024903f7a88c22f"
 result = "Real strict retry confirmed both reviewed callable identities and reduced unresolved pointers from 21 to 19. DATA fits the retained closure at 0x1e8000 with zero growth headroom before Libm. Native/reference inputs were unchanged. No stubs or incomplete output were published; private CPU/platform/Image4 ABI recovery and final runtime qualification remain incomplete."
+
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-prelink-interfaces.md"
+result = "Inventoried 19 failed slots as 18 targets with original hashes and static callers; exact-byte/source evidence recovered 11 functions and two typed objects, covering 14 references. A fail-closed pre-emission guard qualifies only the existing processor_info BASIC_INFO consumer and preserves native assertion-enable and authenticated panic-hook contents. Strict actual-input local emission now rejects five remaining IDL/TXM interfaces; no source/native rebuild, stub, closure deletion or checker relaxation."
 
 [[area]]
 id = "firmware"
@@ -780,6 +785,11 @@ kind = "source"
 reference = "reports/m4-prelink.md"
 result = "The M4 prelink stage reuses the verified real native kernel and reference, executes the formal prelink engine without historical allow-missing or panic-stub fallback, preserves roots/regression checks and failed attempt directories, and requires structural and complete-binding validation. No native rebuild or installation input is invoked."
 
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-prelink-interfaces.md"
+result = "Inventoried 19 failed slots as 18 targets with original hashes and static callers; exact-byte/source evidence recovered 11 functions and two typed objects, covering 14 references. A fail-closed pre-emission guard qualifies only the existing processor_info BASIC_INFO consumer and preserves native assertion-enable and authenticated panic-hook contents. Strict actual-input local emission now rejects five remaining IDL/TXM interfaces; no source/native rebuild, stub, closure deletion or checker relaxation."
+
 [[area]]
 id = "diagnostics"
 status = "implemented"
@@ -827,6 +837,11 @@ result = "The shared sampler retains the three expected return addresses for a b
 kind = "source"
 reference = "scripts/sheng-springboard-profile.py"
 result = "With cs-profile=1, exact cross-calls target the SpringBoard main thread. The trace includes Mach wait durations and destinations, per-core PMU availability, EL0 instructions and cycles, and sampler time."
+
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-prelink-interfaces.md"
+result = "Inventoried 19 failed slots as 18 targets with original hashes and static callers; exact-byte/source evidence recovered 11 functions and two typed objects, covering 14 references. A fail-closed pre-emission guard qualifies only the existing processor_info BASIC_INFO consumer and preserves native assertion-enable and authenticated panic-hook contents. Strict actual-input local emission now rejects five remaining IDL/TXM interfaces; no source/native rebuild, stub, closure deletion or checker relaxation."
 
 [[area]]
 id = "arm64e-os"

@@ -1,0 +1,3285 @@
+{
+  "kernelcache_sha256": "38e6d9fa5f789b8228f4617ef4c6d2a3fd8ab564abdc9b62920f1db53fc1780a",
+  "failure_report_sha256": "a242b95a2883df2912d8c557429381c3478dbf331868864fc4b374d1f71c00b3",
+  "reference_count": 19,
+  "unique_targets": 18,
+  "targets": [
+    {
+      "original": "0xfffffe00070446a8",
+      "output": "0xfffffff0070446a8",
+      "type": "data",
+      "section": {
+        "segment": "__TEXT",
+        "name": "__const",
+        "va": 18446741874803791776,
+        "size": 225440
+      },
+      "unresolved_owners": {
+        "com.apple.driver.AppleARMWatchdogTimer": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.driver.AppleARMWatchdogTimer",
+          "site": "0xfffffe0007f873f0",
+          "section": "__DATA_CONST,__got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            0,
+            null,
+            null,
+            null
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleARMWatchdogTimer",
+              "pc": "0xfffffe0008716700",
+              "kind": "ldst"
+            }
+          ]
+        },
+        {
+          "module": "com.apple.driver.AppleProcessorTrace",
+          "site": "0xfffffe00081820a8",
+          "section": "__DATA_CONST,__got",
+          "selected_unresolved": false,
+          "chain_fields": [
+            0,
+            null,
+            null,
+            null
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleProcessorTrace",
+              "pc": "0xfffffe000945d4b4",
+              "kind": "ldst"
+            }
+          ]
+        }
+      ],
+      "direct_calls": [],
+      "direct_address_xrefs": [],
+      "reviewed_identity": {
+        "original": "0xfffffe00070446a8",
+        "original_size": 8,
+        "original_alignment": 8,
+        "original_bytes": "0000000000000000",
+        "native_symbol": "_PE_arm_debug_panic_hook",
+        "native_size": 8,
+        "native_alignment": 8,
+        "native_bytes": "189bc100be2a2080",
+        "evidence": "8-byte aligned function-pointer slot, not code. Original RELEASE const slot is initially NULL; Watchdog reads 8 bytes and installs a callback with OSCompareAndSwapPtr, signing callback with discriminator 0x2abe. AppleProcessorTrace imports the same slot. Native PE_panic_hook loads this exact native symbol and BRAA-authenticates with the same 0x2abe. pexpert/pexpert/pexpert.h declares void(*PE_arm_debug_panic_hook)(const char*), const in RELEASE and mutable in DEVELOPMENT. Native DEVELOPMENT already initializes this slot with PE_arm_panic_hook, authenticated with diversity 0x2abe; preserve that real handler and its chain bits, do not replace it with NULL. The native mutable DATA slot is preserved; no fabricated buffer is added.",
+        "native_fixup": {
+          "symbol": "_PE_arm_panic_hook",
+          "fields": [
+            1,
+            0,
+            10942,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "original": "0xfffffe000ad53f60",
+      "output": "0xfffffff00ad53f60",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.driver.AppleARMWatchdogTimer": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.driver.AppleARMWatchdogTimer",
+          "site": "0xfffffe0007f873b0",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleARMWatchdogTimer",
+              "pc": "0xfffffe000871b0b8",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe000871b0b4",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.AppleARMWatchdogTimer",
+                  "pc": "0xfffffe00087170e0",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [
+        {
+          "module": "com.apple.kernel",
+          "pc": "0xfffffe000ad32410",
+          "kind": "bl"
+        },
+        {
+          "module": "com.apple.kernel",
+          "pc": "0xfffffe000add0830",
+          "kind": "bl"
+        }
+      ],
+      "direct_address_xrefs": [],
+      "size": 832,
+      "sha256": "9e5579a9584f8d1b091ec43f7bb9aa545718071c33b8df4782d4efc7a0a4e092",
+      "words": [
+        "7f2303d5",
+        "ff4302d1",
+        "f85f05a9",
+        "f65706a9",
+        "f44f07a9",
+        "fd7b08a9",
+        "fd030291",
+        "c00400b4",
+        "e80301aa",
+        "3f0c0071",
+        "600c0054",
+        "1f090071",
+        "60040054",
+        "f30302aa",
+        "016440b9",
+        "1f050071",
+        "c10c0054",
+        "880040b9",
+        "1f150071",
+        "230c0054",
+        "287c4093",
+        "09018052",
+        "281108aa",
+        "c95c00d0",
+        "29c12a91",
+        "1fc128eb",
+        "2ac1288b",
+        "3001088b",
+        "b075e5f2",
+        "4a01909a",
+        "480140f9",
+        "080540b9",
+        "680000b9",
+        "480140f9",
+        "080940b9",
+        "680400b9",
+        "080040b9",
+        "1f0d0071",
+        "40000054",
+        "68000035",
+        "08685b39",
+        "480d0036",
+        "e80300aa",
+        "29008052",
+        "69000014",
+        "80008052",
+        "73000014",
+        "880040b9",
+        "1f110071",
+        "63080054",
+        "7f0000f9",
+        "f30303aa",
+        "7f0800b9",
+        "00e4006f",
+        "e08301ad",
+        "e08300ad",
+        "e003803d",
+        "0885fed0",
+        "08813091",
+        "01201791",
+        "f40302aa",
+        "e2030091",
+        "f60300aa",
+        "e00308aa",
+        "f50304aa",
+        "46060094",
+        "e90315aa",
+        "e80314aa",
+        "ca1e43f9",
+        "cb2243f9",
+        "cb01f8b6",
+        "8cd038d5",
+        "8ddd40f9",
+        "af2d40f9",
+        "ed030faa",
+        "cefa3cd5",
+        "8fdd40f9",
+        "ef2d40f9",
+        "ff010deb",
+        "61ffff54",
+        "cc010d8b",
+        "6bf94092",
+        "4a010bcb",
+        "4a010c8b",
+        "00008052",
+        "cb590090",
+        "6c7545b9",
+        "ed0f40f9",
+        "ee0340f9",
+        "ac09cc9a",
+        "6d3e4029",
+        "ac010c0b",
+        "6c0200b9",
+        "ec1b40f9",
+        "8c010e8b",
+        "6b7545b9",
+        "8c09cb9a",
+        "ec010c0b",
+        "4a09cb9a",
+        "6b0a40b9",
+        "6a010a0b",
+        "6caa0029",
+        "7f0e00b9",
+        "8a008052",
+        "2a0100b9",
+        "095b0090",
+        "29012d91",
+        "090100f9",
+        "35000014",
+        "00e4006f",
+        "e08301ad",
+        "e08300ad",
+        "e003803d",
+        "880040b9",
+        "1f310071",
+        "22010054",
+        "a0008052",
+        "2c000014",
+        "e00308aa",
+        "e20303aa",
+        "e30304aa",
+        "5ca30594",
+        "e0040035",
+        "23000014",
+        "f70300aa",
+        "f40303aa",
+        "f50304aa",
+        "f60302aa",
+        "93d038d5",
+        "e00313aa",
+        "ca9d0194",
+        "888dfeb0",
+        "082547f9",
+        "1f0008eb",
+        "60010054",
+        "2d9b0194",
+        "200100b4",
+        "688dfed0",
+        "084545f9",
+        "08e540f9",
+        "0118feb0",
+        "21083091",
+        "d19f9cd2",
+        "11093fd7",
+        "e0020034",
+        "00018052",
+        "0f000014",
+        "e80300aa",
+        "09008052",
+        "00008052",
+        "69040129",
+        "c95a00d0",
+        "29a10091",
+        "1f0109eb",
+        "e8179f1a",
+        "681000b9",
+        "a8008052",
+        "880000b9",
+        "085b0090",
+        "08012d91",
+        "680200f9",
+        "fd7b48a9",
+        "f44f47a9",
+        "f65746a9",
+        "f85f45a9",
+        "ff430291",
+        "ff0f5fd6",
+        "0085fed0",
+        "00803091",
+        "e1221791",
+        "e2030091",
+        "dc050094",
+        "eb1e43f9",
+        "ec2243f9",
+        "e80316aa",
+        "e90315aa",
+        "ea0314aa",
+        "ac01f8b6",
+        "6dde40f9",
+        "af2d40f9",
+        "ed030faa",
+        "cefa3cd5",
+        "6fde40f9",
+        "ef2d40f9",
+        "ff010deb",
+        "61ffff54",
+        "cd010d8b",
+        "8cf94092",
+        "6b010ccb",
+        "6b010d8b",
+        "00008052",
+        "ec0340f9",
+        "ed1b40f9",
+        "ac010c8b",
+        "ed0f40f9",
+        "4d3100a9",
+        "4b0900f9",
+        "e083c03c",
+        "e10bc03d",
+        "2084e04e",
+        "e183c33c",
+        "2084e04e",
+        "0040006e",
+        "4081813c",
+        "eb2740f9",
+        "4b1500f9",
+        "8a018052",
+        "99ffff17"
+      ],
+      "reviewed_identity": {
+        "original": "0xfffffe000ad53f60",
+        "original_size": 832,
+        "original_sha256": "9e5579a9584f8d1b091ec43f7bb9aa545718071c33b8df4782d4efc7a0a4e092",
+        "native_symbol": "_processor_info",
+        "native_size": 424,
+        "native_sha256": "2f951d70b2fa358fe9f4193a842d8aabcf6d5f2b13618de61a1e7ed8350d8d64",
+        "evidence": "Scoped imported ABI only: kern_return_t(processor_t,w1=PROCESSOR_BASIC_INFO=1,host_t*,processor_info_t,mach_msg_type_number_t*). The only selected importer is AppleARMWatchdogTimer GOT 0xfffffe0007f873b0, veneer 0xfffffe000871b0b4, BL 0xfffffe00087170e0. The whole caller fixes count=5 at 0xfffffe00087170ac and flavor=1 at 0xfffffe00087170dc, then consumes running at info+8. Public osfmk/kern/processor.c:869 defines the same five-int basic result/count/host/error semantics and native owns processor offsets. Original flavor 3 requires count>=12 and an entitlement gate; it is NOT claimed implemented or compatible. A pre-emission closure/caller guard rejects any selected importer outside this proven call contract. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+      }
+    },
+    {
+      "original": "0xfffffe000ad6df18",
+      "output": "0xfffffff00ad6df18",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.driver.ApplePMGR": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.driver.AppleH16ANEInterface",
+          "site": "0xfffffe0008085f80",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": false,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleH16ANEInterface",
+              "pc": "0xfffffe0008e0a424",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe0008e0a420",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.AppleH16ANEInterface",
+                  "pc": "0xfffffe0008d790dc",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "module": "com.apple.driver.ApplePMGR",
+          "site": "0xfffffe0008153010",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.ApplePMGR",
+              "pc": "0xfffffe000931f570",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe000931f56c",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.ApplePMGR",
+                  "pc": "0xfffffe00092cbab8",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [],
+      "direct_address_xrefs": [],
+      "size": 748,
+      "sha256": "fb1aedc1e1715f9e03a8e5e332402c215e0aecf83d08eb275083433b066c91eb",
+      "words": [
+        "7f2303d5",
+        "ff8301d1",
+        "f85f02a9",
+        "f65703a9",
+        "f44f04a9",
+        "fd7b05a9",
+        "fd430191",
+        "0889fe90",
+        "088544b9",
+        "e8020034",
+        "090080d2",
+        "0a89fe90",
+        "4a5142f9",
+        "0b0b8052",
+        "04000014",
+        "29050091",
+        "080500f1",
+        "e0010054",
+        "2d7d0b9b",
+        "4c010d8b",
+        "50010cca",
+        "1f264af2",
+        "40000054",
+        "4c14f9f2",
+        "8d1940b9",
+        "bf01006b",
+        "a1feff54",
+        "8d2140b9",
+        "bf01016b",
+        "41feff54",
+        "970940f9",
+        "02000014",
+        "170080d2",
+        "080080d2",
+        "93d038d5",
+        "69fa44b9",
+        "365a00f0",
+        "d6e23b91",
+        "c97ee8c8",
+        "1f0100f1",
+        "210e0054",
+        "28423bd5",
+        "e803282a",
+        "1f097af2",
+        "61000054",
+        "08d28052",
+        "05000014",
+        "68c241b9",
+        "08050011",
+        "68c201b9",
+        "08cf8052",
+        "69da40f9",
+        "0a5a00b0",
+        "4aa10091",
+        "4941898b",
+        "3401088b",
+        "28008052",
+        "88420039",
+        "28423bd5",
+        "880c4836",
+        "08097a92",
+        "1f0107f1",
+        "40000054",
+        "df4703d5",
+        "1f0107f1",
+        "f5079f1a",
+        "68c241b9",
+        "08050011",
+        "68c201b9",
+        "685a00f0",
+        "08410c91",
+        "097d5fc8",
+        "290c00b5",
+        "137de9c8",
+        "3f0100f1",
+        "e10b0054",
+        "f85800d0",
+        "18e31a91",
+        "081740f9",
+        "080117aa",
+        "081700f9",
+        "08034039",
+        "a8060036",
+        "605a00f0",
+        "00400c91",
+        "21008052",
+        "e3490594",
+        "090080d2",
+        "080740f9",
+        "0a034039",
+        "ca010036",
+        "0b3b40b9",
+        "ea0308aa",
+        "2b030035",
+        "e95800d0",
+        "29811b91",
+        "2a2d40a9",
+        "6a010aaa",
+        "29514039",
+        "e9000036",
+        "090080d2",
+        "eb5800d0",
+        "6b6543f9",
+        "09000014",
+        "ea0308aa",
+        "0d000014",
+        "e95800d0",
+        "29411b91",
+        "2b2540a9",
+        "6901098a",
+        "2b01088a",
+        "690108ca",
+        "4a010baa",
+        "ec0308cb",
+        "08010c8a",
+        "5f0100f1",
+        "0a018a9a",
+        "e8030baa",
+        "eb5800d0",
+        "6b7d43f9",
+        "1f010beb",
+        "21010054",
+        "e85800d0",
+        "08011c91",
+        "0b0140f9",
+        "5f010beb",
+        "81000054",
+        "080540f9",
+        "3f0108eb",
+        "c0000054",
+        "a0008052",
+        "e10315aa",
+        "e20314aa",
+        "c9f8ff97",
+        "f40300aa",
+        "605a00f0",
+        "00400c91",
+        "4f6dff97",
+        "e00315aa",
+        "bd5e0594",
+        "e00314aa",
+        "7eeaff97",
+        "68fa44b9",
+        "e20308aa",
+        "dffea288",
+        "5f00086b",
+        "e1030054",
+        "fd7b45a9",
+        "f44f44a9",
+        "f65743a9",
+        "f85f42a9",
+        "ff830191",
+        "ff0f5fd6",
+        "205a00d0",
+        "00c03b91",
+        "e10313aa",
+        "02008052",
+        "6e54ff97",
+        "8bffff17",
+        "c89c8052",
+        "c917fe90",
+        "29f90891",
+        "ca17fe90",
+        "4a2d0a91",
+        "e9a300a9",
+        "ea0300f9",
+        "c017fe90",
+        "00600991",
+        "7f8f2094",
+        "5f2003d5",
+        "605a00f0",
+        "00400c91",
+        "4284fe90",
+        "42200691",
+        "e10313aa",
+        "c26cff97",
+        "9cffff17",
+        "205a00d0",
+        "00c03b91",
+        "e10313aa",
+        "fd7b45a9",
+        "f44f44a9",
+        "f65743a9",
+        "f85f42a9",
+        "ff830191",
+        "ff2303d5",
+        "4857ff17"
+      ],
+      "reviewed_identity": {
+        "original": "0xfffffe000ad6df18",
+        "original_size": 748,
+        "original_sha256": "fb1aedc1e1715f9e03a8e5e332402c215e0aecf83d08eb275083433b066c91eb",
+        "native_symbol": "_sched_enable_acc_rail",
+        "native_size": 580,
+        "native_sha256": "7d38dcf4fa35d947728fceed5bea8d4b7fbff4fd22676711792061c9561ef83b",
+        "evidence": "void(unsigned int die_id, unsigned int die_cluster_id): w0/w1 select topology cluster die_id and die_cluster_id; original cluster stride 0x58 vs native 0x50; loads its cpu_mask, acquires cluster_powerdown_lock and scheduler spinlock, ORs pcs_required_online_pmgr (+0x28), synchronously calls sched_update_powered_cores_drops_lock with REASON_PMGR_SYSTEM=5, flushes pulled thread queue and unlocks. osfmk/kern/sched_prim.c:7916. The topology and scheduler structures remain owned by the native implementation. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+      }
+    },
+    {
+      "original": "0xfffffe000ad6e204",
+      "output": "0xfffffff00ad6e204",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.driver.ApplePMGR": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.driver.AppleH16ANEInterface",
+          "site": "0xfffffe0008085f78",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": false,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleH16ANEInterface",
+              "pc": "0xfffffe0008e0a414",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe0008e0a410",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.AppleH16ANEInterface",
+                  "pc": "0xfffffe0008d7a5ec",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "module": "com.apple.driver.ApplePMGR",
+          "site": "0xfffffe0008153008",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.ApplePMGR",
+              "pc": "0xfffffe000931f560",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe000931f55c",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.ApplePMGR",
+                  "pc": "0xfffffe00092cbac0",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [],
+      "direct_address_xrefs": [],
+      "size": 860,
+      "sha256": "7bda8e0b4f6cdc0985487571d01f178f6adebbc67f9bb2d24c3d951fa640b660",
+      "words": [
+        "7f2303d5",
+        "ff4301d1",
+        "f65702a9",
+        "f44f03a9",
+        "fd7b04a9",
+        "fd030191",
+        "e888fef0",
+        "088544b9",
+        "08030034",
+        "090080d2",
+        "ea88fef0",
+        "4a5142f9",
+        "0b0b8052",
+        "04000014",
+        "29050091",
+        "080500f1",
+        "00020054",
+        "2d7d0b9b",
+        "4c010d8b",
+        "50010cca",
+        "1f264af2",
+        "40000054",
+        "4c14f9f2",
+        "8d1940b9",
+        "bf01006b",
+        "a1feff54",
+        "8d2140b9",
+        "bf01016b",
+        "41feff54",
+        "880940f9",
+        "f50328aa",
+        "02000014",
+        "15008092",
+        "93d038d5",
+        "28423bd5",
+        "28124836",
+        "08097a92",
+        "1f0107f1",
+        "40000054",
+        "df4703d5",
+        "1f0107f1",
+        "f4079f1a",
+        "68c241b9",
+        "08050011",
+        "68c201b9",
+        "685a00f0",
+        "08410c91",
+        "097d5fc8",
+        "c91100b5",
+        "137de9c8",
+        "3f0100f1",
+        "81110054",
+        "f65800d0",
+        "d6e21a91",
+        "c81640f9",
+        "0801158a",
+        "c81600f9",
+        "c8024039",
+        "08060036",
+        "605a00f0",
+        "00400c91",
+        "21008052",
+        "40490594",
+        "090080d2",
+        "c80640f9",
+        "ca024039",
+        "ca010036",
+        "cb3a40b9",
+        "ea0308aa",
+        "2b030035",
+        "e95800d0",
+        "29811b91",
+        "2a2d40a9",
+        "6a010aaa",
+        "29514039",
+        "e9000036",
+        "090080d2",
+        "eb5800d0",
+        "6b6543f9",
+        "09000014",
+        "ea0308aa",
+        "0d000014",
+        "e95800d0",
+        "29411b91",
+        "2b2540a9",
+        "6901098a",
+        "2b01088a",
+        "690108ca",
+        "4a010baa",
+        "ec0308cb",
+        "08010c8a",
+        "5f0100f1",
+        "0a018a9a",
+        "e8030baa",
+        "eb5800d0",
+        "6b7d43f9",
+        "1f010beb",
+        "61020054",
+        "e85800d0",
+        "08011c91",
+        "0b0140f9",
+        "5f010beb",
+        "c1010054",
+        "080540f9",
+        "3f0108eb",
+        "61010054",
+        "605a00f0",
+        "00400c91",
+        "b16cff97",
+        "e00314aa",
+        "fd7b44a9",
+        "f44f43a9",
+        "f65742a9",
+        "ff430191",
+        "ff2303d5",
+        "1a5e0514",
+        "a8008052",
+        "295a00d0",
+        "28c10fb9",
+        "605a00f0",
+        "00400c91",
+        "a46cff97",
+        "e00314aa",
+        "125e0594",
+        "285a00d0",
+        "02dd47f9",
+        "68c241b9",
+        "08050011",
+        "68c201b9",
+        "215a00d0",
+        "21c03e91",
+        "48008052",
+        "283068b8",
+        "1f050072",
+        "21040054",
+        "020800b4",
+        "280c48b2",
+        "4984fef0",
+        "294d47f9",
+        "087d48ca",
+        "aa3094d2",
+        "ca51aef2",
+        "2a65daf2",
+        "aaf6eff2",
+        "087d0a9b",
+        "086d48ca",
+        "aa899ad2",
+        "aa85b7f2",
+        "8adedbf2",
+        "4a3bf0f2",
+        "087d0a9b",
+        "0afd61d3",
+        "4801084a",
+        "4a84fef0",
+        "4aa14eb9",
+        "4a050051",
+        "4801080a",
+        "0a038052",
+        "087daa9b",
+        "1fc128eb",
+        "20c1288b",
+        "3001088b",
+        "b075e5f2",
+        "0000909a",
+        "03008052",
+        "04008052",
+        "bff50094",
+        "68c241b9",
+        "c8030034",
+        "08050071",
+        "68c201b9",
+        "81000054",
+        "68de40f9",
+        "08314139",
+        "68041037",
+        "fd7b44a9",
+        "f44f43a9",
+        "f65742a9",
+        "ff430191",
+        "ff0f5fd6",
+        "c89c8052",
+        "c917fe90",
+        "29f90891",
+        "ca17fe90",
+        "4a2d0a91",
+        "e9a300a9",
+        "ea0300f9",
+        "c017fe90",
+        "00600991",
+        "af8e2094",
+        "5f2003d5",
+        "605a00f0",
+        "00400c91",
+        "4284fe90",
+        "42200691",
+        "e10313aa",
+        "f26bff97",
+        "6fffff17",
+        "45d22094",
+        "68f18052",
+        "4917fe90",
+        "297d0991",
+        "4a17fe90",
+        "4a710d91",
+        "e9a300a9",
+        "ea0300f9",
+        "4017fe90",
+        "00c40d91",
+        "9c8e2094",
+        "fd7b44a9",
+        "f44f43a9",
+        "f65742a9",
+        "ff430191",
+        "ff2303d5",
+        "396e0514"
+      ],
+      "reviewed_identity": {
+        "original": "0xfffffe000ad6e204",
+        "original_size": 860,
+        "original_sha256": "7bda8e0b4f6cdc0985487571d01f178f6adebbc67f9bb2d24c3d951fa640b660",
+        "native_symbol": "_sched_disable_acc_rail",
+        "native_size": 608,
+        "native_sha256": "b137d4c6251e9b738b6b7ecc2e292bfc783bc5d865cb68ffe1a78621ba493025",
+        "evidence": "void(unsigned int die_id, unsigned int die_cluster_id): same w0/w1 topology lookup as enable, ANDs pcs_required_online_pmgr with complement cpu_mask under scheduler spinlock, records reason 5 and signals sched_update_powered_cores_wakeup/thread asynchronously. osfmk/kern/sched_prim.c:7964. This differs deliberately from synchronous enable and is not bound by function adjacency alone. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+      }
+    },
+    {
+      "original": "0xfffffe000aebcc3c",
+      "output": "0xfffffff00aebcc3c",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.driver.AppleARMPlatform": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.driver.AppleARMPlatform",
+          "site": "0xfffffe0007f856b8",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleARMPlatform",
+              "pc": "0xfffffe00087153e0",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe00087153dc",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.AppleARMPlatform",
+                  "pc": "0xfffffe00086c2214",
+                  "kind": "b"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [
+        {
+          "module": "com.apple.kernel",
+          "pc": "0xfffffe000b558930",
+          "kind": "bl"
+        }
+      ],
+      "direct_address_xrefs": [],
+      "size": 352,
+      "sha256": "814c52a693f36b4ba9338e02c33484aabf1ebf2db1cfb91192330fc6430f8ce1",
+      "words": [
+        "7f2303d5",
+        "f44fbea9",
+        "fd7b01a9",
+        "fd430091",
+        "74aa8a52",
+        "740aaa72",
+        "88d038d5",
+        "13dd40f9",
+        "894f00d0",
+        "29411c91",
+        "7f0209eb",
+        "81040054",
+        "8a7efeb0",
+        "4b8144b9",
+        "ab06f836",
+        "894f00d0",
+        "2bb543f9",
+        "e9030baa",
+        "cafa3cd5",
+        "0bdd40f9",
+        "6b2d40f9",
+        "7f0109eb",
+        "61ffff54",
+        "4801098b",
+        "69530090",
+        "287902f9",
+        "08008092",
+        "894f00d0",
+        "29c12291",
+        "aa4e0090",
+        "48dd00f9",
+        "344500b9",
+        "884e00f0",
+        "1ffd0cb9",
+        "bf3b03d5",
+        "280140f9",
+        "e80000b4",
+        "a9ca9952",
+        "89b5b872",
+        "09b10fb9",
+        "884f00d0",
+        "085944f9",
+        "1f1103b9",
+        "47821a94",
+        "37650094",
+        "20008052",
+        "1bf4f797",
+        "1be6f797",
+        "74e601b9",
+        "884e00f0",
+        "09fd4cb9",
+        "89000034",
+        "5f2003d5",
+        "09fd4cb9",
+        "c9ffff35",
+        "e00313aa",
+        "014a8152",
+        "14e6f797",
+        "68d240f9",
+        "c80000b4",
+        "a9ca9952",
+        "89b5b872",
+        "09b10fb9",
+        "68d240f9",
+        "1f1103b9",
+        "20008052",
+        "07f4f797",
+        "0a0080d2",
+        "6b050091",
+        "8c5100b0",
+        "8cc12a91",
+        "04000014",
+        "4a050091",
+        "5f010beb",
+        "a0f8ff54",
+        "8d110a8b",
+        "90010dca",
+        "1f264af2",
+        "40000054",
+        "4d14f9f2",
+        "ad0540f9",
+        "bf0100f1",
+        "a41149fa",
+        "a0feff54",
+        "aee541b9",
+        "df01146b",
+        "c1ffff54",
+        "f1ffff17"
+      ],
+      "reviewed_identity": {
+        "original": "0xfffffe000aebcc3c",
+        "original_size": 352,
+        "original_sha256": "814c52a693f36b4ba9338e02c33484aabf1ebf2db1cfb91192330fc6430f8ce1",
+        "native_symbol": "_ml_arm_sleep",
+        "native_size": 272,
+        "native_sha256": "f1e9a4eea026ab86720e573d41d1ddce5ada31597351f489fea2195e9e41ae1d",
+        "evidence": "void(void), noreturn. BootCpuData selects the primary path; waits for every other CpuDataEntries sleep token 0x50535553; stores timebase into wake_abstime, resets time with UINT64_MAX, cleans the secondary CPU data and writes CoreSight unlock 0xc5acce55/+0xfb0 then zero/+0x310 before arm64_prepare_for_sleep(true). Native implements the same state machine with its own CPU data offsets. osfmk/arm64/cpu.c ml_arm_sleep, lines 1024 onward. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+      }
+    },
+    {
+      "original": "0xfffffe000aebdee4",
+      "output": "0xfffffff00aebdee4",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.driver.AppleARMPlatform": 1,
+        "com.apple.driver.AppleARMWatchdogTimer": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.driver.AppleARMPlatform",
+          "site": "0xfffffe0007f85670",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleARMPlatform",
+              "pc": "0xfffffe0008715350",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe000871534c",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.AppleARMPlatform",
+                  "pc": "0xfffffe00086f7108",
+                  "kind": "bl"
+                },
+                {
+                  "module": "com.apple.driver.AppleARMPlatform",
+                  "pc": "0xfffffe00086f72ac",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "module": "com.apple.driver.AppleARMWatchdogTimer",
+          "site": "0xfffffe0007f87320",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleARMWatchdogTimer",
+              "pc": "0xfffffe000871af98",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe000871af94",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.AppleARMWatchdogTimer",
+                  "pc": "0xfffffe0008717180",
+                  "kind": "bl"
+                },
+                {
+                  "module": "com.apple.driver.AppleARMWatchdogTimer",
+                  "pc": "0xfffffe0008717b7c",
+                  "kind": "bl"
+                },
+                {
+                  "module": "com.apple.driver.AppleARMWatchdogTimer",
+                  "pc": "0xfffffe0008717c2c",
+                  "kind": "bl"
+                },
+                {
+                  "module": "com.apple.driver.AppleARMWatchdogTimer",
+                  "pc": "0xfffffe0008717c44",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "module": "com.apple.driver.AppleConvergedIPCBBControl",
+          "site": "0xfffffe0007fe1f48",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": false,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleConvergedIPCBBControl",
+              "pc": "0xfffffe0008a77fe8",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe0008a77fe4",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.AppleConvergedIPCBBControl",
+                  "pc": "0xfffffe0008a4b850",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "module": "com.apple.driver.AppleT8142CLPC",
+          "site": "0xfffffe00082175c8",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": false,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984ed48",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe000984ed44",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.AppleT8142CLPC",
+                  "pc": "0xfffffe000980c2f4",
+                  "kind": "bl"
+                },
+                {
+                  "module": "com.apple.driver.AppleT8142CLPC",
+                  "pc": "0xfffffe000980c3b8",
+                  "kind": "bl"
+                },
+                {
+                  "module": "com.apple.driver.AppleT8142CLPC",
+                  "pc": "0xfffffe000980d1e8",
+                  "kind": "bl"
+                },
+                {
+                  "module": "com.apple.driver.AppleT8142CLPC",
+                  "pc": "0xfffffe000980eac8",
+                  "kind": "bl"
+                },
+                {
+                  "module": "com.apple.driver.AppleT8142CLPC",
+                  "pc": "0xfffffe000980ec1c",
+                  "kind": "bl"
+                },
+                {
+                  "module": "com.apple.driver.AppleT8142CLPC",
+                  "pc": "0xfffffe0009823c80",
+                  "kind": "bl"
+                },
+                {
+                  "module": "com.apple.driver.AppleT8142CLPC",
+                  "pc": "0xfffffe000983a6bc",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [],
+      "direct_address_xrefs": [],
+      "size": 16,
+      "sha256": "7a19bae6d03d743d2533c0a4a80daae82d83cc1f203fead056edf43aaab50ae4",
+      "words": [
+        "5f2403d5",
+        "88d038d5",
+        "00614379",
+        "c0035fd6"
+      ],
+      "reviewed_identity": {
+        "original": "0xfffffe000aebdee4",
+        "original_size": 16,
+        "original_sha256": "7a19bae6d03d743d2533c0a4a80daae82d83cc1f203fead056edf43aaab50ae4",
+        "native_symbol": "_cpu_number",
+        "native_size": 28,
+        "native_sha256": "d8446ed5fd81fc76332764efd715d53e17cbed3dd7ed8ab0500695e646b7cbed",
+        "evidence": "int(void): TPIDR_EL1 current_thread then zero-extended 16-bit machine.cpu_number; original +0x1b0, native +0x238 after current_thread(). Both retained import veneers have no input arguments and use w0 as CPU index. osfmk/arm/cpu_common.c:881 explicitly returns current_thread()->machine.cpu_number. No private offset is transplanted. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+      }
+    },
+    {
+      "original": "0xfffffe000aebdef4",
+      "output": "0xfffffff00aebdef4",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.driver.AppleARMPlatform": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.driver.AppleARMPlatform",
+          "site": "0xfffffe0007f85700",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleARMPlatform",
+              "pc": "0xfffffe0008715470",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe000871546c",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.AppleARMPlatform",
+                  "pc": "0xfffffe00086d588c",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "module": "com.apple.driver.AppleEmbeddedPCIE",
+          "site": "0xfffffe0008030f10",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": false,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleEmbeddedPCIE",
+              "pc": "0xfffffe0008beef90",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe0008beef8c",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.AppleEmbeddedPCIE",
+                  "pc": "0xfffffe0008be73a0",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [],
+      "direct_address_xrefs": [],
+      "size": 16,
+      "sha256": "560bda14a018312ca80f25649beeb2eefdb1d5017a37a5f8120001e903845c24",
+      "words": [
+        "5f2403d5",
+        "485300f0",
+        "007942f9",
+        "c0035fd6"
+      ],
+      "reviewed_identity": {
+        "original": "0xfffffe000aebdef4",
+        "original_size": 16,
+        "original_sha256": "560bda14a018312ca80f25649beeb2eefdb1d5017a37a5f8120001e903845c24",
+        "native_symbol": "_ml_get_wake_timebase",
+        "native_size": 16,
+        "native_sha256": "41bbf629395a9d18e3f835045ae13dbeb3feb643533e518a5eea36f518557299",
+        "evidence": "uint64_t(void): loads the exact 8-byte global written by the proven ml_arm_sleep boot-CPU path, original 0xfffffe000b9284f0, native 0xfffffff007fffd38. osfmk/arm/cpu_common.c:901 returns wake_abstime. Corroborated by producer and consumer, not merely a leaf load shape. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+      }
+    },
+    {
+      "original": "0xfffffe000b2a1694",
+      "output": "0xfffffff00b2a1694",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.security.Image4": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.security.Image4",
+          "site": "0xfffffe0008479bd8",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.security.Image4",
+              "pc": "0xfffffe000a9f35fc",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe000a9f35f8",
+              "direct_callers": [
+                {
+                  "module": "com.apple.security.Image4",
+                  "pc": "0xfffffe000a9e2694",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [],
+      "direct_address_xrefs": [],
+      "size": 120,
+      "sha256": "69c79bbdc700d2f455f9d929843b25f8c0833633985a4f2d6ec2bccea2a5125c",
+      "words": [
+        "7f2303d5",
+        "ff4302d1",
+        "fd7b08a9",
+        "fd030291",
+        "e80300aa",
+        "ff3b00f9",
+        "00e4006f",
+        "e08302ad",
+        "e08301ad",
+        "e00b803d",
+        "89068052",
+        "e92300b9",
+        "29008052",
+        "e99b0039",
+        "69008052",
+        "e92f00b9",
+        "e18b00a9",
+        "e0830091",
+        "e80300f9",
+        "3a000094",
+        "e0000034",
+        "e86b4079",
+        "1fad0071",
+        "61000054",
+        "e0734079",
+        "02000014",
+        "e0ff9f52",
+        "fd7b48a9",
+        "ff430291",
+        "ff0f5fd6"
+      ],
+      "reviewed_identity": null
+    },
+    {
+      "original": "0xfffffe000b2a170c",
+      "output": "0xfffffff00b2a170c",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.security.Image4": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.security.Image4",
+          "site": "0xfffffe0008479bd0",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.security.Image4",
+              "pc": "0xfffffe000a9f35ec",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe000a9f35e8",
+              "direct_callers": [
+                {
+                  "module": "com.apple.security.Image4",
+                  "pc": "0xfffffe000a9e2b6c",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [],
+      "direct_address_xrefs": [],
+      "size": 108,
+      "sha256": "72abaa8d166a02ed91abdb764de5358615cc43a6144af1530a34805e4b37726b",
+      "words": [
+        "7f2303d5",
+        "ff0302d1",
+        "fd7b07a9",
+        "fdc30191",
+        "ff3300f9",
+        "00e4006f",
+        "e00302ad",
+        "e00301ad",
+        "e007803d",
+        "a8068052",
+        "e81300b9",
+        "28008052",
+        "e85b0039",
+        "e81f00b9",
+        "e00300f9",
+        "e0430091",
+        "1f000094",
+        "e0000034",
+        "e84b4079",
+        "1fad0071",
+        "61000054",
+        "e0534079",
+        "02000014",
+        "e0ff9f52",
+        "fd7b47a9",
+        "ff030291",
+        "ff0f5fd6"
+      ],
+      "reviewed_identity": null
+    },
+    {
+      "original": "0xfffffe000b2a1778",
+      "output": "0xfffffff00b2a1778",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.security.Image4": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.security.Image4",
+          "site": "0xfffffe0008479bc0",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.security.Image4",
+              "pc": "0xfffffe000a9f35cc",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe000a9f35c8",
+              "direct_callers": [
+                {
+                  "module": "com.apple.security.Image4",
+                  "pc": "0xfffffe000a9e2dd0",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [],
+      "direct_address_xrefs": [],
+      "size": 32,
+      "sha256": "13bd742d02bb1495cfee51cb979a14cc8344c577a22a3bc2ab1a70cf7242a03a",
+      "words": [
+        "5f2403d5",
+        "a00000b4",
+        "810000b4",
+        "620000b4",
+        "430000b4",
+        "f5070014",
+        "60008052",
+        "c0035fd6"
+      ],
+      "reviewed_identity": null
+    },
+    {
+      "original": "0xfffffe000b2a1798",
+      "output": "0xfffffff00b2a1798",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.security.Image4": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.security.Image4",
+          "site": "0xfffffe0008479bc8",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.security.Image4",
+              "pc": "0xfffffe000a9f35dc",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe000a9f35d8",
+              "direct_callers": [
+                {
+                  "module": "com.apple.security.Image4",
+                  "pc": "0xfffffe000a9e2e00",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [],
+      "direct_address_xrefs": [],
+      "size": 24,
+      "sha256": "65e3aad993658c7e93ff1fd83b806f92ee085967b4d56758e274b0332cb05499",
+      "words": [
+        "5f2403d5",
+        "600000b4",
+        "410000b4",
+        "3d080014",
+        "60008052",
+        "c0035fd6"
+      ],
+      "reviewed_identity": null
+    },
+    {
+      "original": "0xfffffe000b433e68",
+      "output": "0xfffffff00b433e68",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.driver.AppleARMPlatform": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.driver.AppleARMPlatform",
+          "site": "0xfffffe0007f855c0",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleARMPlatform",
+              "pc": "0xfffffe00087151f0",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe00087151ec",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.AppleARMPlatform",
+                  "pc": "0xfffffe00086c3ab4",
+                  "kind": "bl"
+                },
+                {
+                  "module": "com.apple.driver.AppleARMPlatform",
+                  "pc": "0xfffffe00086c44dc",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [
+        {
+          "module": "com.apple.kernel",
+          "pc": "0xfffffe000b50a0d4",
+          "kind": "b"
+        }
+      ],
+      "direct_address_xrefs": [],
+      "size": 480,
+      "sha256": "91b4b349d67b60fd5ef3dfa03764dbfe66a8e4dd6b4f7e293b39589dca72bf9c",
+      "words": [
+        "7f2303d5",
+        "ff8303d1",
+        "f44f0ca9",
+        "fd7b0da9",
+        "fd430391",
+        "f30304aa",
+        "00e4006f",
+        "e00304ad",
+        "e00301ad",
+        "e8830091",
+        "e00302ad",
+        "e02b803d",
+        "e00303ad",
+        "ff5b00f9",
+        "89118052",
+        "e92700b9",
+        "09510191",
+        "eadefd90",
+        "40e9c33d",
+        "e043873c",
+        "00c106f8",
+        "6a008052",
+        "0a4106f8",
+        "cadefdf0",
+        "404143fd",
+        "e0c303fc",
+        "10d10091",
+        "ea830832",
+        "ea5f00b9",
+        "f0a9ebf2",
+        "11048052",
+        "110ac1da",
+        "f14305f8",
+        "014107f8",
+        "e2930239",
+        "10110191",
+        "ea6f00b9",
+        "f0a9ebf2",
+        "11058052",
+        "110ac1da",
+        "f14306f8",
+        "03c107f8",
+        "650100b4",
+        "e82300a9",
+        "c8defdf0",
+        "008943fd",
+        "e00b00fd",
+        "e90f00f9",
+        "e1030091",
+        "31a79dd2",
+        "b1083fd7",
+        "20080035",
+        "09000014",
+        "e82300a9",
+        "c8defdf0",
+        "008943fd",
+        "e00b00fd",
+        "e90f00f9",
+        "e1030091",
+        "556b0394",
+        "00070035",
+        "e0578052",
+        "0000bc72",
+        "e82740b9",
+        "1f510171",
+        "61060054",
+        "e84345f8",
+        "a9f09dd2",
+        "098caff2",
+        "0985def2",
+        "c9ecf7f2",
+        "1f0109eb",
+        "81050054",
+        "e84340b9",
+        "1f050071",
+        "21050054",
+        "e84346f8",
+        "1f0500f1",
+        "c1040054",
+        "f4c346f8",
+        "f40200b4",
+        "900240f9",
+        "f10314aa",
+        "31b4f9f2",
+        "301ac1da",
+        "088e43f8",
+        "e00314aa",
+        "90fffff2",
+        "10093fd7",
+        "a82700b0",
+        "08412391",
+        "1f0008eb",
+        "80000054",
+        "000840f9",
+        "a0ffffb5",
+        "140080d2",
+        "e0c346f8",
+        "740200f9",
+        "1f0000f1",
+        "801a40fa",
+        "c0000054",
+        "00008052",
+        "0e000014",
+        "00008052",
+        "7f0200f9",
+        "0b000014",
+        "100040f9",
+        "f10300aa",
+        "31b4f9f2",
+        "301ac1da",
+        "088e42f8",
+        "f050e7f2",
+        "10093fd7",
+        "e0578052",
+        "0000bc72",
+        "000c0011",
+        "fd7b4da9",
+        "f44f4ca9",
+        "ff830391",
+        "ff0f5fd6"
+      ],
+      "reviewed_identity": null
+    },
+    {
+      "original": "0xfffffe000b4b6724",
+      "output": "0xfffffff00b4b6724",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.iokit.IOSurface": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.iokit.IOSurface",
+          "site": "0xfffffe00083b6238",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.iokit.IOSurface",
+              "pc": "0xfffffe000a45a7c0",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe000a45a7bc",
+              "direct_callers": [
+                {
+                  "module": "com.apple.iokit.IOSurface",
+                  "pc": "0xfffffe000a459f70",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [
+        {
+          "module": "com.apple.kernel",
+          "pc": "0xfffffe000b4b5ba8",
+          "kind": "bl"
+        }
+      ],
+      "direct_address_xrefs": [],
+      "size": 308,
+      "sha256": "c378259811821b6a5a228380edfe89cab21a3f9a336cd1a4d34a3409a129d92a",
+      "words": [
+        "7f2303d5",
+        "ff0301d1",
+        "f65701a9",
+        "f44f02a9",
+        "fd7b03a9",
+        "fdc30091",
+        "f30300aa",
+        "80008052",
+        "20a8a072",
+        "fd91f597",
+        "80070034",
+        "54588052",
+        "1400bc72",
+        "700240f9",
+        "f10313aa",
+        "31b4f9f2",
+        "301ac1da",
+        "080e4af8",
+        "e00313aa",
+        "f0c7f3f2",
+        "10093fd7",
+        "1f0800f1",
+        "23060054",
+        "e00313aa",
+        "a0fcff97",
+        "e00313aa",
+        "9efcff97",
+        "680a40f9",
+        "680500b4",
+        "080d40f9",
+        "280500b4",
+        "f50313aa",
+        "35b4f9f2",
+        "700240f9",
+        "b01ac1da",
+        "080e4bf8",
+        "e00313aa",
+        "5072f6f2",
+        "10093fd7",
+        "ff7f00a9",
+        "700240f9",
+        "b01ac1da",
+        "080e4bf8",
+        "e00313aa",
+        "5072f6f2",
+        "10093fd7",
+        "000300b4",
+        "140080d2",
+        "f6030091",
+        "700240f9",
+        "b01ac1da",
+        "088e49f8",
+        "c2220091",
+        "e00313aa",
+        "e10314aa",
+        "03008052",
+        "5093ecf2",
+        "10093fd7",
+        "e00300f9",
+        "e80740f9",
+        "480100b4",
+        "1401148b",
+        "700240f9",
+        "b01ac1da",
+        "080e4bf8",
+        "e00313aa",
+        "5072f6f2",
+        "10093fd7",
+        "9f0200eb",
+        "83fdff54",
+        "14008052",
+        "e00314aa",
+        "fd7b43a9",
+        "f44f42a9",
+        "f65741a9",
+        "ff030191",
+        "ff0f5fd6"
+      ],
+      "reviewed_identity": {
+        "original": "0xfffffe000b4b6724",
+        "original_size": 308,
+        "original_sha256": "c378259811821b6a5a228380edfe89cab21a3f9a336cd1a4d34a3409a129d92a",
+        "native_symbol": "__ZN18IOMemoryDescriptor26ktraceEmitPhysicalSegmentsEv",
+        "native_size": 1588,
+        "native_sha256": "4a8092cb4ce14d81618a612fae6085e0d1fc3c0513e40189026d74e82deff51e",
+        "evidence": "IOReturn(this=x0): kdebug_debugid_enabled(0x05410004), preparation ID >=2, nonzero descriptor ID, private reserved state present, then iterates getPhysicalSegment(offset,&length,0) until zero length or getLength; returns kIOReturnBadArgument 0xe00002c2 or success. Public iokit/Kernel/IOMemoryDescriptor.cpp:3067 implements these exact gates and iteration with trace packing. Original optimization removes timestamp packing but retains gates/iteration. Native virtual dispatch uses the native descriptor layout; no original object field/vtable offsets are patched into it. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+      }
+    },
+    {
+      "original": "0xfffffe000b4ca1d0",
+      "output": "0xfffffff00b4ca1d0",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.driver.AppleARMPlatform": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.driver.AppleARMPlatform",
+          "site": "0xfffffe0007f854a8",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleARMPlatform",
+              "pc": "0xfffffe0008714fc0",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe0008714fbc",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.AppleARMPlatform",
+                  "pc": "0xfffffe00086c0ef4",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [],
+      "direct_address_xrefs": [],
+      "size": 72,
+      "sha256": "03a03eca25252f3fcb080642f48a996c379ba573e30af495175395c21d7dcd3f",
+      "words": [
+        "5f2403d5",
+        "28008052",
+        "080800b9",
+        "3050fed0",
+        "10c22d91",
+        "10420091",
+        "f10300aa",
+        "31b4f9f2",
+        "300ac1da",
+        "100000f9",
+        "e92200f0",
+        "29613f91",
+        "2a910091",
+        "4a0128b8",
+        "6a000035",
+        "290940f9",
+        "89ffffb5",
+        "c0035fd6"
+      ],
+      "reviewed_identity": {
+        "original": "0xfffffe000b4ca1d0",
+        "original_size": 72,
+        "original_sha256": "03a03eca25252f3fcb080642f48a996c379ba573e30af495175395c21d7dcd3f",
+        "native_symbol": "__ZN24IOCPUInterruptControllerC1Ev",
+        "native_size": 88,
+        "native_sha256": "3495dc7e231a514bf83235acb9cc8a5d4dab005793948f4ed3b19e0244fc3f91",
+        "evidence": "Default constructor with x0=this, returning the same object pointer. Writes refCount=1 at +8; signs vptr for __ZTV24IOCPUInterruptController+16 with address discriminator 0xcda1; increments __ZN24IOCPUInterruptController10gMetaClassE instanceCount at +0x24, traversing superClassLink on 0-to-1. Original vtable 0xfffffe0007ed0b70 and metaclass 0xfffffe000b929fd8 independently map to the same native class. Native base constructor chain only replaces intermediate vptrs, initializes refCount and invokes the same metaclass accounting; no class-specific data fields are initialized. Existing public OSDefineMetaClassAndStructors macro and native constructor chain are the evidence. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+      }
+    },
+    {
+      "original": "0xfffffe000b4ca260",
+      "output": "0xfffffff00b4ca260",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.driver.AppleARMPlatform": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.driver.AppleARMPlatform",
+          "site": "0xfffffe0007f85128",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleARMPlatform",
+              "pc": "0xfffffe00087148c0",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe00087148bc",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.AppleARMPlatform",
+                  "pc": "0xfffffe00086c21cc",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [],
+      "direct_address_xrefs": [],
+      "size": 136,
+      "sha256": "e7be7e9dcd4d91a03f8b936a712c0714928f89905fd418777134b443f7553c75",
+      "words": [
+        "7f2303d5",
+        "f657bda9",
+        "f44f01a9",
+        "fd7b02a9",
+        "fd830091",
+        "34280090",
+        "94e22791",
+        "950240f9",
+        "bf0214eb",
+        "60020054",
+        "13008052",
+        "a81a40b9",
+        "0221c05a",
+        "a80a40f9",
+        "a08642a9",
+        "a61240f9",
+        "030080d2",
+        "040080d2",
+        "050080d2",
+        "27008052",
+        "71ea84d2",
+        "11093fd7",
+        "7f020071",
+        "1300931a",
+        "b50240f9",
+        "bf0214eb",
+        "21feff54",
+        "02000014",
+        "13008052",
+        "e00313aa",
+        "fd7b42a9",
+        "f44f41a9",
+        "f657c3a8",
+        "ff0f5fd6"
+      ],
+      "reviewed_identity": {
+        "original": "0xfffffe000b4ca260",
+        "original_size": 136,
+        "original_sha256": "e7be7e9dcd4d91a03f8b936a712c0714928f89905fd418777134b443f7553c75",
+        "native_symbol": "_IOCPURunPlatformQuiesceActions",
+        "native_size": 196,
+        "native_sha256": "3fcb0ab7a6a92e190353678d448d22ba5684d9f74a8bbe6cac874f98176533df",
+        "evidence": "kern_return_t(void): iterates gActionQueues[kQueueQuiesce=2], 16-byte queue heads; callback fields action +0x10, priority +0x18, name +0x20, refcons +0x28/+0x30. Supplies x0/x1=refcons,w2=abs(priority),x3/x4/x5=0,x6=name,w7=ALLOW_NESTED_CALLOUTS=1. Authenticates callback with 0x2753, returns first nonzero result in w0. Active queue is exactly head+16; source iokit/Kernel/IOPlatformActions.cpp:136. Native preemption assertions/debug logging remain intact. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+      }
+    },
+    {
+      "original": "0xfffffe000b4ca2e8",
+      "output": "0xfffffff00b4ca2e8",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.driver.AppleARMPlatform": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.driver.AppleARMPlatform",
+          "site": "0xfffffe0007f85120",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleARMPlatform",
+              "pc": "0xfffffe00087148b0",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe00087148ac",
+              "direct_callers": [
+                {
+                  "module": "com.apple.driver.AppleARMPlatform",
+                  "pc": "0xfffffe00086c210c",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [],
+      "direct_address_xrefs": [],
+      "size": 136,
+      "sha256": "cf463d473fff64381f185a8f7df7a2cf2953d88c0aa6ab545427407b0cd4a113",
+      "words": [
+        "7f2303d5",
+        "f657bda9",
+        "f44f01a9",
+        "fd7b02a9",
+        "fd830091",
+        "34280090",
+        "94222891",
+        "950240f9",
+        "bf0214eb",
+        "60020054",
+        "13008052",
+        "a81a40b9",
+        "0221c05a",
+        "a80a40f9",
+        "a08642a9",
+        "a61240f9",
+        "030080d2",
+        "040080d2",
+        "050080d2",
+        "27008052",
+        "71ea84d2",
+        "11093fd7",
+        "7f020071",
+        "1300931a",
+        "b50240f9",
+        "bf0214eb",
+        "21feff54",
+        "02000014",
+        "13008052",
+        "e00313aa",
+        "fd7b42a9",
+        "f44f41a9",
+        "f657c3a8",
+        "ff0f5fd6"
+      ],
+      "reviewed_identity": {
+        "original": "0xfffffe000b4ca2e8",
+        "original_size": 136,
+        "original_sha256": "cf463d473fff64381f185a8f7df7a2cf2953d88c0aa6ab545427407b0cd4a113",
+        "native_symbol": "_IOCPURunPlatformActiveActions",
+        "native_size": 204,
+        "native_sha256": "7137b3937dd1472e43a49970cd3bbe8655a77c868bb803c48df611f17b2686af",
+        "evidence": "kern_return_t(void): same proven callback record offsets, eight-register callback ABI, 0x2753 discriminator, nested flag 1 and first-error reduction as QuiesceActions, but gActionQueues[kQueueActive=3], exactly 16 bytes after quiesce. iokit/Kernel/IOPlatformActions.cpp:145. Native additionally retains its own ml_hibernate_active_pre/post and assertions; no function body or check is removed. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+      }
+    },
+    {
+      "original": "0xfffffe000b5a3ba8",
+      "output": "0xfffffff00b5a3ba8",
+      "type": "function",
+      "section": {
+        "segment": "__TEXT_EXEC",
+        "name": "__text",
+        "va": 18446741874867392512,
+        "size": 9398168
+      },
+      "unresolved_owners": {
+        "com.apple.security.AppleImage4": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.security.AppleImage4",
+          "site": "0xfffffe00080e1950",
+          "section": "__DATA_CONST,__auth_got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.security.AppleImage4",
+              "pc": "0xfffffe000903a6bc",
+              "kind": "add",
+              "authenticated_stub": "0xfffffe000903a6b8",
+              "direct_callers": [
+                {
+                  "module": "com.apple.security.AppleImage4",
+                  "pc": "0xfffffe0009016fbc",
+                  "kind": "bl"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_calls": [],
+      "direct_address_xrefs": [],
+      "size": 16,
+      "sha256": "270e3f8691f72932d5b54c15ba75782fa0a900b4afe6ad4133552961da730434",
+      "words": [
+        "7f2303d5",
+        "fd7bbfa9",
+        "fd030091",
+        "01000094"
+      ],
+      "reviewed_identity": {
+        "original": "0xfffffe000b5a3ba8",
+        "original_size": 16,
+        "original_sha256": "270e3f8691f72932d5b54c15ba75782fa0a900b4afe6ad4133552961da730434",
+        "native_symbol": "_kernel_image4_storage_data",
+        "native_size": 8,
+        "native_sha256": "3a8bf209532ceeb2da30caddfbf0e798237a10bf1ca654ce971b28b55e5e9e62",
+        "evidence": "void*(size_t*): original 16-byte wrapper calls txm_image4_storage_data, whose exact diagnostic is unsupported AppleImage4 interface (txm.c). This is the public storage API selected through the kernel wrapper, not a general missing function mapped to panic. Selected AppleImage4 caller 0xfffffe0009016fbc passes &size, checks size>=0x390 and pointer alignment 8, then initializes its own storage. Native kernel wrapper calls xnu_image4_storage_data, which returns a real zero-initialized 8-aligned 0x1400-byte buffer at __xnu_image4_storage and writes size_t 0x1400. Source bsd/kern/code_signing/{txm.c,xnu.c}; monitor-specific semantics are NOT claimed by this storage binding. Public source revision ac9718fb1af618d5ce8678d0dc6e8a58f252216f."
+      }
+    },
+    {
+      "original": "0xfffffe000b8b3ce8",
+      "output": "0xfffffff00b8b3ce8",
+      "type": "data",
+      "section": {
+        "segment": "__DATA",
+        "name": "__common",
+        "va": 18446741874879954944,
+        "size": 507272
+      },
+      "unresolved_owners": {
+        "com.apple.iokit.IOHIDFamily": 1
+      },
+      "pointer_xrefs": [
+        {
+          "module": "com.apple.driver.AppleT8142CLPC",
+          "site": "0xfffffe00082178e8",
+          "section": "__DATA_CONST,__got",
+          "selected_unresolved": false,
+          "chain_fields": [
+            0,
+            null,
+            null,
+            null
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe0009821a78",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe0009821a8c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe0009822390",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe00098223d4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe0009822e3c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe0009822e58",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe00098390f0",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000983912c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe0009839240",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c138",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c19c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c1cc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c1fc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c22c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c268",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c2a4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c2e0",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c344",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c380",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c3bc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c3f8",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c434",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c46c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c4a4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c4dc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c514",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c54c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c584",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c850",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c88c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c8c8",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c910",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c958",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984c994",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984ca14",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984ca4c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984ca84",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cabc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984caf4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cb2c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cb64",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cb9c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cbd4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cc0c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cc44",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cc7c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984ccb4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984ccec",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cd1c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cd4c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cd7c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cdac",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cde4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984ce1c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984ce54",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cef8",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cf30",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cf68",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cfa4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984cfe0",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d01c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d058",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d094",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d0cc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d104",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d13c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d174",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d1ac",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d1e4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d21c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d280",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d2b8",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d2f0",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d328",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d360",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d398",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d3d0",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d434",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d470",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d4d4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d564",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d59c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d5d4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d60c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d644",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d67c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d6b4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d6ec",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d724",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d75c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d794",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d7cc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d804",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d868",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d8a0",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d8d8",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d910",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d948",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d980",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984d9b8",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984ddc0",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984e79c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984e7f4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.driver.AppleT8142CLPC",
+              "pc": "0xfffffe000984e830",
+              "kind": "ldst"
+            }
+          ]
+        },
+        {
+          "module": "com.apple.ExclaveKextClient",
+          "site": "0xfffffe0008292330",
+          "section": "__DATA_CONST,__got",
+          "selected_unresolved": false,
+          "chain_fields": [
+            0,
+            null,
+            null,
+            null
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.ExclaveKextClient",
+              "pc": "0xfffffe0009c46e1c",
+              "kind": "ldst"
+            }
+          ]
+        },
+        {
+          "module": "com.apple.iokit.IOHIDFamily",
+          "site": "0xfffffe00083586a8",
+          "section": "__DATA_CONST,__got",
+          "selected_unresolved": true,
+          "chain_fields": [
+            0,
+            null,
+            null,
+            null
+          ],
+          "code_xrefs": [
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1b3f04",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1b4748",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1b4b00",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1b6f8c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1b73c4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1b8028",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1bebc8",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1bf130",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1bf5dc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1bf6bc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1bf780",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1bf958",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c02c4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c04b0",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c0f38",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c0ffc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c12bc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c13ac",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c1f88",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c2038",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c2098",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c2274",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c2774",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c2800",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c2c00",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c3334",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c3388",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c38cc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c3990",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c3b20",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c3c78",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c3d44",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c400c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c419c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c48d4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c4968",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c4b94",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c5450",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c55d4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c5974",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c5b20",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c5ca0",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c5dd4",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c67fc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c6980",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c6d20",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c6ecc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c704c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c7180",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c7918",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c79a0",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c7edc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c848c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c8534",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c8b80",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c924c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c92d8",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c9c14",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1c9c9c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1ca728",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1ca7cc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1cea30",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1cf75c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1cfbcc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1cfdcc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1d0154",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1d016c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1d0790",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1d0df8",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1d0f4c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1d122c",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1d18f0",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1d9258",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1da154",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1db014",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1f3344",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1f3750",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1f58e0",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1f6104",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1f64bc",
+              "kind": "ldst"
+            },
+            {
+              "module": "com.apple.iokit.IOHIDFamily",
+              "pc": "0xfffffe000a1fb60c",
+              "kind": "ldst"
+            }
+          ]
+        }
+      ],
+      "direct_calls": [],
+      "direct_address_xrefs": [],
+      "reviewed_identity": {
+        "original": "0xfffffe000b8b3ce8",
+        "original_size": 4,
+        "original_alignment": 4,
+        "original_zerofill": true,
+        "original_bytes": "00000000",
+        "native_symbol": "_kext_assertions_enable",
+        "native_size": 4,
+        "native_alignment": 4,
+        "native_bytes": "01000000",
+        "evidence": "32-bit int assertion-enable object with natural alignment >=4, read as a 32-bit flag at 81 IOHIDFamily ADRP/GOT use sites; cold targets terminate in BRK 0xbffc with MACH_ASSERT descriptors. Also imported by AppleT8142CLPC and ExclaveKextClient. osfmk/kern/assert.h mach_assert_enabled() under APPLE_KEXT_ASSERTIONS reads this int; osfmk/kern/debug.c declares int kext_assertions_enable=FALSE in RELEASE and TRUE in DEVELOPMENT. Original __common section is S_ZEROFILL (virtual zero, not missing file bytes); native __data holds integer 1, so native assertions remain enabled. Source identity establishes sizeof(int)=4; observed read footprint is 4, not the following linker padding."
+      }
+    }
+  ]
+}
