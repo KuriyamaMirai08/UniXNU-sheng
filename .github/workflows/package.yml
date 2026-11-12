@@ -3,13 +3,14 @@ name: package
 # scripts/package.sh of this repository on a macOS runner, with the UniXNU and uefi-sheng
 # checkouts beside it, the layout board.toml names. The platform seed comes from the
 # repository secret UNIXNU_UNIQUE_CHIP_ID and is baked into the images, so the run's
-# artifacts belong to one device alone: download them, then delete the run.
+# outputs belong to one device alone. M4 keeps them and full logs on private disk;
+# the unchanged hosted path below retains its original artifact handling.
 
 on:
   workflow_dispatch:
     inputs:
       runner_location:
-        description: "UniXNU-M4: persistent official release without installation credentials; hosted: GitHub macOS"
+        description: "UniXNU-M4: private full package using Secrets; hosted: GitHub macOS"
         type: choice
         options: [UniXNU-M4, hosted]
         default: UniXNU-M4
@@ -23,10 +24,10 @@ on:
         type: boolean
         default: false
       data_seed_url:
-        description: "Optional original data.dbr URL for an existing installation; otherwise use the saved cache"
+        description: "Hosted only: original data.dbr URL. M4 must leave this empty and use Secrets/private transfer."
         type: string
       data_seed_sha256:
-        description: "Required SHA-256 when data_seed_url is supplied"
+        description: "Hosted only: SHA-256 for data_seed_url. M4 must leave this empty."
         type: string
 
 permissions:
@@ -41,7 +42,8 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' && inputs.runner_location == 'UniXNU-M4' &&
       !inputs.init_data && inputs.data_seed_url == '' && inputs.data_seed_sha256 == ''
-    permissions: {}
+    permissions:
+      contents: read
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 360
     concurrency:
@@ -59,10 +61,19 @@ jobs:
           test "$ACTUAL_RUNNER" = UniXNU-M4
           test "$(uname -m)" = arm64
           root="$HOME/Library/Caches/UniXNU-sheng/public-xnu-v1"
-          mkdir -p "$root/logs/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          umask 077
+          mkdir -p "$root"
+          chmod 700 "$root"
+          private="$HOME/Library/UniXNU-sheng-private"
+          private_run="$private/runs/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          for directory in "$private" "$private/runs" "$private_run"; do
+            test ! -L "$directory"
+            mkdir -p "$directory"
+            chmod 700 "$directory"
+          done
           echo "M4_ROOT=$root" >> "$GITHUB_ENV"
-          echo "M4_LOG_DIR=$root/logs/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
-          exec > >(tee -a "$root/logs/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/checkout.log") 2>&1
+          echo "M4_LOG_DIR=$private_run" >> "$GITHUB_ENV"
+          exec >> "$private_run/checkout.log" 2>&1
           export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
           device="$root/device"
           if [ ! -d "$device/.git" ]; then
@@ -106,13 +117,28 @@ jobs:
               echo "Source pin mismatch in $name; preserved checkout and output require review"; exit 1;
             }
           done
-      - name: Official dependency preparation, kernel build and prelink
+          git -C "$root/uefi-sheng" submodule update --init --recursive
+      - name: Private full package.sh release with persistent compilation cache
         env:
           OS_PROFILE: ${{ inputs.os }}
+          UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
+          GITHUB_TOKEN: ${{ github.token }}
+          M4_DATA_SEED_URL: ${{ secrets.M4_DATA_SEED_URL }}
+          M4_DATA_SEED_SHA256: ${{ secrets.M4_DATA_SEED_SHA256 }}
         run: |
           set -euo pipefail
           export PATH="/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/opt/bison/bin:$HOME/.cargo/bin:$PATH"
-          exec > >(tee -a "$M4_LOG_DIR/console.log") 2>&1
+          umask 077
+          private="$HOME/Library/UniXNU-sheng-private"
+          private_run="$private/runs/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          for directory in "$private" "$private/runs" "$private_run"; do
+            test ! -L "$directory"
+            mkdir -p "$directory"
+            chmod 700 "$directory"
+          done
+          # Official tools may log identities, Seed hashes and command arguments.
+          # Redirect everything before reading inputs; never tee this to GitHub.
+          exec >> "$private_run/console.log" 2>&1
           cd "$M4_ROOT/device"
           # Normalize only the exact known standalone-stage bootstrap mode.
           # Keep the proven cache-aware CoreCrypto builder and transport retry;
@@ -157,8 +183,6 @@ jobs:
               retired = root / 'retired-stage-overrides'
               retired.mkdir(exist_ok=True)
               fixture.rename(retired / ('prelink-' + hashlib.sha256(fixture.read_bytes()).hexdigest() + '.json'))
-          if any((root / 'out/sheng').glob('*/*/runtime/data.dbr')):
-              raise SystemExit('Installation seed already present; public rental-Mac execution is not authorized to read it')
           for base in (root / 'device', upstream):
               if (base / 'local.toml').exists():
                   raise SystemExit('Local source overrides require review before public rental-Mac execution')
@@ -166,46 +190,126 @@ jobs:
           PY
           # Same existing hosted compatibility fix; no replacement release driver.
           python3 scripts/prepare-package-ci.py --unixnu "$M4_ROOT/UniXNU"
-          # Do not inherit identity/Seed/PAT variables or an ignored private
-          # unixnu.local.toml. No --init-data, --skip-prelink or policy overrides.
-          env -i HOME="$HOME" USER="${USER:-a105}" LOGNAME="${LOGNAME:-a105}" \
-            PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" LANG=en_US.UTF-8 \
-            DEVELOPER_DIR="$DEVELOPER_DIR" UNIXNU_ROOT="$M4_ROOT/UniXNU" \
-            UNIXNU_DEVICE="$M4_ROOT/device" PYTHONUNBUFFERED=1 \
-            M4_ROOT="$M4_ROOT" OS_PROFILE="$OS_PROFILE" \
-            GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0= \
-            bash -euo pipefail -c '
-              args=(--os "$OS_PROFILE" --uefi "$M4_ROOT/uefi-sheng"
-                    --out "$M4_ROOT/out" --config "$M4_ROOT/public-build.toml" -j 4)
-              # Existing official commands: source deps, config/patch preflight,
-              # then the real kernel builder and its unchanged prelink checks.
-              python3 "$M4_ROOT/UniXNU/unixnu" fetch "${args[@]}"
-              bash scripts/package.sh "${args[@]}" --no-deps --check
-              python3 "$M4_ROOT/UniXNU/unixnu" build kernel "${args[@]}"
-              echo "Official kernel build/prelink completed. Stopping before runtime/payload/boot packaging; installation inputs require separate authorization."
-            '
-      - name: Retain public release logs after success or failure
-        if: always() && env.M4_LOG_DIR != ''
+          # Credentials are read from the step environment, never CLI arguments.
+          # The release itself is unchanged; only private input/output locations
+          # and the environment are provided here. No --init-data or skip flags.
+          python3 - "$M4_ROOT" "$OS_PROFILE" "$private" "$private_run" <<'PY'
+          import hashlib, os, pathlib, re, shutil, stat, subprocess, sys, tempfile, urllib.parse, urllib.request
+          root, os_profile, private, private_run = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3]), pathlib.Path(sys.argv[4])
+          os.umask(0o077)
+          for directory in (private, private / 'inputs', private / 'tmp', private_run):
+              if directory.is_symlink():
+                  raise SystemExit('Private directory must not be a symbolic link')
+              directory.mkdir(parents=True, exist_ok=True)
+              if directory.stat().st_uid != os.getuid():
+                  raise SystemExit('Private directory has an unexpected owner')
+              directory.chmod(0o700)
+          chip = os.environ.get('UNIXNU_UNIQUE_CHIP_ID', '')
+          expected = os.environ.get('M4_DATA_SEED_SHA256', '').lower()
+          if not re.fullmatch(r'[0-9a-fA-F]{8}', chip) or not re.fullmatch(r'[0-9a-f]{64}', expected):
+              raise SystemExit('Configure UNIXNU_UNIQUE_CHIP_ID and M4_DATA_SEED_SHA256 Secrets')
+          def digest(path):
+              with path.open('rb') as stream:
+                  return hashlib.file_digest(stream, 'sha256').hexdigest()
+          seed = private / 'inputs/data.dbr'
+          if seed.is_symlink():
+              raise SystemExit('Original Seed must be a regular private file')
+          if not seed.exists():
+              url = os.environ.get('M4_DATA_SEED_URL', '')
+              parsed = urllib.parse.urlsplit(url)
+              if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.fragment:
+                  raise SystemExit('Preinstall the original private Seed or configure M4_DATA_SEED_URL as an HTTPS Secret')
+              class HTTPSOnly(urllib.request.HTTPRedirectHandler):
+                  def redirect_request(self, request, fp, code, msg, headers, newurl):
+                      if urllib.parse.urlsplit(newurl).scheme != 'https':
+                          raise ValueError('Seed transfer requires HTTPS throughout')
+                      return super().redirect_request(request, fp, code, msg, headers, newurl)
+              fd, filename = tempfile.mkstemp(prefix='seed-download-', dir=private / 'inputs')
+              candidate = pathlib.Path(filename)
+              # Partial/mismatched downloads remain private for inspection;
+              # never replace or delete an existing original Seed.
+              with os.fdopen(fd, 'wb') as target, urllib.request.build_opener(HTTPSOnly()).open(url, timeout=120) as source:
+                  total = 0
+                  while chunk := source.read(1024 * 1024):
+                      total += len(chunk)
+                      if total > 64 * 1024 * 1024:
+                          raise ValueError('Seed exceeds the existing 64 MiB transfer bound')
+                      target.write(chunk)
+              if digest(candidate) != expected:
+                  raise SystemExit('Downloaded Seed digest mismatch; original file was not replaced')
+              os.link(candidate, seed)  # Atomic no-replace publication; retain the downloaded file too.
+          if not seed.is_file() or seed.stat().st_uid != os.getuid() or digest(seed) != expected:
+              raise SystemExit('Original Seed owner/type/digest mismatch; preserved for inspection')
+          seed.chmod(0o400)
+          build_config = private_run / 'build.toml'
+          build_config.write_text('[build]\n')
+          allowed = ('HOME', 'USER', 'LOGNAME', 'PATH', 'LANG', 'DEVELOPER_DIR', 'GITHUB_TOKEN')
+          environment = {key: os.environ[key] for key in allowed if key in os.environ}
+          environment.update(UNIXNU_UNIQUE_CHIP_ID=chip, UNIXNU_ROOT=str(root / 'UniXNU'),
+                             UNIXNU_DEVICE=str(root / 'device'), TMPDIR=str(private / 'tmp'),
+                             PYTHONUNBUFFERED='1', GIT_CONFIG_COUNT='1',
+                             GIT_CONFIG_KEY_0='credential.helper', GIT_CONFIG_VALUE_0='', GIT_TERMINAL_PROMPT='0')
+          os.environ.clear()
+          os.environ.update(environment)
+          options = ['--os', os_profile, '--uefi', str(root / 'uefi-sheng'), '--out', str(root / 'out'),
+                     '--config', str(build_config), '--data-ramdisk', str(seed), '-j', '4']
+          sys.path.insert(0, str(root / 'UniXNU/scripts'))
+          from unixnu.cli import parser
+          from unixnu.config import Context
+          context = Context(parser().parse_args(['release', '-D', str(root / 'device'), *options]))
+          work = context.work
+          state = private / 'state' / work.relative_to(root / 'out')
+          work.mkdir(parents=True, exist_ok=True)
+          state.mkdir(parents=True, exist_ok=True)
+          # Preserve the existing tree/build and all compiler paths. Move only
+          # sensitive outputs/logs, preserving existing files, then keep their
+          # official paths as symlinks. No cache or Seed is cleaned.
+          def private_path(source, destination, is_dir=True):
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              if destination.is_symlink():
+                  raise SystemExit('Private output destination must not be a symbolic link')
+              if source.is_symlink():
+                  if source.resolve() != destination.resolve():
+                      raise SystemExit('Existing output link points outside the expected private state')
+              elif source.exists():
+                  if destination.exists():
+                      raise SystemExit('Both old and private outputs exist; preserve both for manual review')
+                  source.rename(destination)
+              elif not destination.exists():
+                  destination.mkdir() if is_dir else destination.touch(mode=0o600)
+              source.symlink_to(destination, target_is_directory=is_dir) if not source.is_symlink() else None
+              if destination.is_dir() != is_dir or destination.stat().st_uid != os.getuid():
+                  raise SystemExit('Private output type/owner mismatch; preserved for review')
+              destination.chmod(0o700 if is_dir else 0o600)
+          for name in ('runtime', 'payload', 'boot', 'kernel', 'logs'):
+              private_path(work / name, state / name)
+          private_path(work / 'package.manifest.json', state / 'package.manifest.json', False)
+          runtime_seed = state / 'runtime/data.dbr'
+          if runtime_seed.exists() or runtime_seed.is_symlink():
+              if not runtime_seed.is_file() or digest(runtime_seed) != expected:
+                  raise SystemExit('Existing runtime Seed differs; neither Seed was removed')
+          else:
+              runtime_seed.symlink_to(seed)
+          command = ['bash', 'scripts/package.sh', *options]
+          result = subprocess.run(command, cwd=root / 'device', env=environment)
+          if digest(seed) != expected:
+              raise SystemExit('Original Seed integrity changed; stop and preserve all state')
+          if result.returncode:
+              raise SystemExit(result.returncode)
+          # Only a successful official release/verify gets a per-run output copy.
+          artifacts = private_run / 'artifacts'
+          artifacts.mkdir(mode=0o700)
+          for name, source in {'boot.img': work / 'boot/boot.img', 'payload.img': work / 'payload/payload.img',
+                               'kernel.macho': work / 'kernel/kernel.macho',
+                               'package.manifest.json': work / 'package.manifest.json'}.items():
+              shutil.copy2(source, artifacts / name)
+              (artifacts / name).chmod(0o600)
+          PY
+      - name: Private build status only (no log or image upload)
+        if: always()
         run: |
-          mkdir -p "$M4_LOG_DIR"
-          if compgen -G "$M4_ROOT/out/sheng/*/*/runtime/data.dbr" >/dev/null; then
-            exit 0  # Do not copy logs from a pre-existing private installation.
-          fi
-          for source in "$M4_ROOT"/out/sheng/*/*/logs; do
-            if [ -d "$source" ]; then
-              profile="$(basename "$(dirname "$(dirname "$source")")")"
-              config="$(basename "$(dirname "$source")")"
-              cp -R "$source" "$M4_LOG_DIR/$profile-$config"
-            fi
-          done
-      - name: Downloadable public build logs
-        if: always() && env.M4_LOG_DIR != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: m4-release-logs-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.M4_LOG_DIR }}/
-          retention-days: 14
-          if-no-files-found: warn
+          echo 'Full M4 logs, failure state and completed installation images stay on the Mac in the private directory.'
+          echo 'Retrieve them through your existing private SSH/SFTP access. No artifacts or caches are uploaded from this job.'
 
   reject-unsafe-m4-inputs:
     if: >-
