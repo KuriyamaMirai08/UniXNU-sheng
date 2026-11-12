@@ -168,6 +168,13 @@ kind = "source"
 reference = "reports/m4-prelink-interfaces.md"
 result = "Inventoried 19 failed slots as 18 targets with original hashes and static callers; exact-byte/source evidence recovered 11 functions and two typed objects, covering 14 references. A fail-closed pre-emission guard qualifies only the existing processor_info BASIC_INFO consumer and preserves native assertion-enable and authenticated panic-hook contents. Strict actual-input local emission now rejects five remaining IDL/TXM interfaces; no source/native rebuild, stub, closure deletion or checker relaxation."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-prelink-recovery-result.json"
+command = "workflow_dispatch prelink; Actions run 43140643800"
+revision = "410da46db04af6be5678478968b518abb4cf8854"
+result = "UniXNU-M4 confirmed 19 unresolved pointer references reduced to 5 after eleven new function identities and two typed objects. The BASIC_INFO-only caller guard and real Image4 storage checks passed. Native/reference hashes and 57-entry closure were unchanged; DATA 0x1e8000 passed collision checks with zero headroom. Strict output remains refused for one RPC and four TXM interfaces, without stubs, compilation, native relink or installation inputs."
+
 [[area]]
 id = "firmware"
 status = "implemented"
@@ -790,6 +797,13 @@ kind = "source"
 reference = "reports/m4-prelink-interfaces.md"
 result = "Inventoried 19 failed slots as 18 targets with original hashes and static callers; exact-byte/source evidence recovered 11 functions and two typed objects, covering 14 references. A fail-closed pre-emission guard qualifies only the existing processor_info BASIC_INFO consumer and preserves native assertion-enable and authenticated panic-hook contents. Strict actual-input local emission now rejects five remaining IDL/TXM interfaces; no source/native rebuild, stub, closure deletion or checker relaxation."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-prelink-recovery-result.json"
+command = "workflow_dispatch prelink; Actions run 43140643800"
+revision = "410da46db04af6be5678478968b518abb4cf8854"
+result = "UniXNU-M4 confirmed 19 unresolved pointer references reduced to 5 after eleven new function identities and two typed objects. The BASIC_INFO-only caller guard and real Image4 storage checks passed. Native/reference hashes and 57-entry closure were unchanged; DATA 0x1e8000 passed collision checks with zero headroom. Strict output remains refused for one RPC and four TXM interfaces, without stubs, compilation, native relink or installation inputs."
+
 [[area]]
 id = "diagnostics"
 status = "implemented"
@@ -842,6 +856,13 @@ result = "With cs-profile=1, exact cross-calls target the SpringBoard main threa
 kind = "source"
 reference = "reports/m4-prelink-interfaces.md"
 result = "Inventoried 19 failed slots as 18 targets with original hashes and static callers; exact-byte/source evidence recovered 11 functions and two typed objects, covering 14 references. A fail-closed pre-emission guard qualifies only the existing processor_info BASIC_INFO consumer and preserves native assertion-enable and authenticated panic-hook contents. Strict actual-input local emission now rejects five remaining IDL/TXM interfaces; no source/native rebuild, stub, closure deletion or checker relaxation."
+
+[[area.evidence]]
+kind = "host"
+reference = "reports/m4-prelink-recovery-result.json"
+command = "workflow_dispatch prelink; Actions run 43140643800"
+revision = "410da46db04af6be5678478968b518abb4cf8854"
+result = "UniXNU-M4 confirmed 19 unresolved pointer references reduced to 5 after eleven new function identities and two typed objects. The BASIC_INFO-only caller guard and real Image4 storage checks passed. Native/reference hashes and 57-entry closure were unchanged; DATA 0x1e8000 passed collision checks with zero headroom. Strict output remains refused for one RPC and four TXM interfaces, without stubs, compilation, native relink or installation inputs."
 
 [[area]]
 id = "arm64e-os"

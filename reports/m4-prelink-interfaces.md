@@ -143,3 +143,41 @@ to 5. `candidate_written=false`, `mapping_complete=false`, `stubbed={}`.
 No XNU compilation or native link was invoked. M4 validation is dispatched
 only after this actual binding improvement, and its result is recorded
 with the next evidence entry.
+
+## Actual M4 verification
+
+[Run 43140643800](https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43140643800)
+executed commit `410da46db04af6be5678478968b518abb4cf8854` on UniXNU-M4.
+The evidence guard passed on all 13 reviewed functions (two prior, eleven
+new) and both typed data objects, including the BASIC_INFO-only contract
+and real Image4 storage bounds. Formal strict emission then rejected
+exactly the same five unresolved pointers listed above: **19 -> 5**.
+No stubs, incomplete publication or native/reference rebuild occurred.
+
+[Recorded result](m4-prelink-recovery-result.json) includes the exact input
+digests, reviewed fixture digest, layout, missing targets, ABI guard
+receipt and relocation counters. DATA remains
+`[0xfffffff00b834000,0xfffffff00ba1c000)`, size `0x1e8000`, with the first
+retained Libm byte at its exclusive end: no overlap, zero growth headroom.
+The emitter relocated 111,618 native chain sites, kept 130,884 kext chain
+sites, rebound 81,130 kext pointers and 561 original adapter branches.
+
+The final failure JSON SHA-256 is
+`e52cceee6253cb9b5c5d2e3839fb39544449db1d20bc208fe0f51c1659f1fa31`.
+`candidate_written=false`, `mapping_complete=false`, `stubbed={}`. There
+is no qualified final prelink image or artifact hash. Failure directories,
+map, headers, archives and object caches remain under the existing Mac
+persistent root; logs/artifacts identify this run and attempt.
+
+Initial dispatch was rejected because GitHub automatically disabled the
+fork's workflows, although repository permissions still said enabled and
+package state was active. The GitHub Actions page's fork re-enable action
+restored the existing workflows; the authorized prelink dispatch then
+ran. Package and smoke jobs were skipped, and no scheduled workflow was
+introduced.
+
+Checks also passed locally: Python syntax, workflow actionlint and all 17
+structured porting areas. Negative evidence checks rejected an attempt
+to treat the native assertion flag as zero and a changed processor_info
+closure. Final runtime qualification, new flavor 3, the five unresolved
+IDL/TXM interfaces and device boot remain unverified.
