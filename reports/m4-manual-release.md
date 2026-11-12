@@ -77,3 +77,30 @@ this now-private build state.
 The original hosted fallback is unchanged. This revision received static
 validation only; no Actions build, Seed generation or device operation was
 started by the agent. The user starts each real run manually.
+
+## Package 65 checkout recovery
+
+Run 43153151789 stopped in checkout preparation before the official release.
+Its private checkout.log showed the generated unixnu.lock diff: adding
+IOHIDFamily e31e90a24c27ad6cbe981650d12a1a4124065b03 and resolving
+IOStorageFamily to 7edb88fbae296fb7c8ce2f64e115e116e566d51c. These match
+reports/ipados26-source-drivers.json. The original and retained lock blobs
+are e54efdc3f63d94f56660c47bfae0ced6af39810a and
+36c2b1847c35ea00dd67733caceff38cc219e07f respectively.
+
+The preparation guard accepts the original lock or precisely that retained
+resolution. It preserves the file in place. Unknown lock contents, staged
+lock edits, and other tracked source changes still stop preparation. Existing
+Ath12k validation, source pins, build cache paths and private Seed handling
+are unchanged. No clean, reset, lock rewrite or build command was added.
+
+`python scripts/test-m4-checkout.py` uses local Git fixtures to reproduce the
+original exit 1 and verify the repaired
+guard, rejection cases and a real checkout transition. Cache and private Seed
+fixtures retained their bytes and timestamps. This is not a real M4 build.
+
+After this fix, start a new Run workflow on the PR branch as described above.
+Do not use Re-run jobs on package 65: it uses the old commit and workflow.
+For an existing saved Seed leave init_data unchecked; first installation
+without a saved Seed still requires init_data=true. Leave both URL/SHA fields
+empty. The fix itself does not dispatch any workflow.

@@ -87,6 +87,20 @@ jobs:
           spec.loader.exec_module(ci)
           def git(repo, *argv):
               return subprocess.check_output(['git', '-C', str(repo), *argv], text=True).strip()
+          # Official fetch writes unixnu.lock. Keep only the exact retained
+          # family resolution observed in package #65 and audited in
+          # reports/ipados26-source-drivers.json; never reset it or the cache.
+          original_lock = subprocess.check_output(
+              ['git', '-C', str(device), 'show', 'HEAD:unixnu.lock'], text=True)
+          retained_lock = original_lock.replace(
+              '[source."IOStorageFamily"]\ncommit = "e45fbe30a7879e0b16e26dddb78538f1b00e0bff"',
+              '[source."IOHIDFamily"]\ncommit = "e31e90a24c27ad6cbe981650d12a1a4124065b03"\n\n'
+              '[source."IOStorageFamily"]\ncommit = "7edb88fbae296fb7c8ce2f64e115e116e566d51c"')
+          lock = device / 'unixnu.lock'
+          if (lock.is_symlink() or not lock.is_file()
+                  or lock.read_text() not in (original_lock, retained_lock)
+                  or git(device, 'diff', '--cached', '--name-only', 'HEAD', '--', 'unixnu.lock')):
+              raise SystemExit('Unreviewed unixnu.lock edits retained')
           repos = git(device, 'submodule', 'foreach', '--quiet', '--recursive', 'pwd').splitlines()
           for repo in map(pathlib.Path, repos):
               dirty = git(repo, 'diff', '--name-only', '--ignore-submodules=dirty', 'HEAD', '--').splitlines()
@@ -99,7 +113,8 @@ jobs:
               if (repo / dirty[0]).read_text() != ci.transform(original):
                   raise SystemExit('Unreviewed Ath12k edit retained')
           PY
-            git -C "$device" diff --exit-code --ignore-submodules=dirty HEAD --
+            # unixnu.lock was checked above; all other tracked edits still stop.
+            git -C "$device" diff --exit-code --ignore-submodules=dirty HEAD -- . ':(top,exclude)unixnu.lock'
           fi
           git -C "$device" fetch --depth 1 origin "$SOURCE_SHA"
           git -C "$device" checkout --detach "$SOURCE_SHA"

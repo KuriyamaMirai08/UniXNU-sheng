@@ -10,7 +10,7 @@ summary = "Xiaomi Pad 6S Pro 12.4 uses shared SM8550 support and board-owned sto
 id = "configuration"
 status = "implemented"
 components = []
-paths = ["board.toml", "feeds.toml", "configs/**", ".gitmodules", ".github/**", ".gitignore", "scripts/m4-compile-smoke.sh", "scripts/m4-xnu-corecrypto.sh", "scripts/m4-xnu-corecrypto.py", "scripts/m4-prelink.py", "scripts/m4-prelink-symbols.json", "scripts/m4_prelink_evidence.py", "scripts/prepare-corecrypto-cache.py"]
+paths = ["board.toml", "feeds.toml", "configs/**", ".gitmodules", ".github/**", ".gitignore", "scripts/m4-compile-smoke.sh", "scripts/m4-xnu-corecrypto.sh", "scripts/m4-xnu-corecrypto.py", "scripts/m4-prelink.py", "scripts/m4-prelink-symbols.json", "scripts/m4_prelink_evidence.py", "scripts/prepare-corecrypto-cache.py", "scripts/test-m4-checkout.py"]
 inputs = ["SM8550 profile, iPadOS 26.5.2 build 23F84, arm64e sheng_ipados26_defconfig and pinned component sources."]
 configuration = ["board.soc_source = sm8550; board.os_profile = ipados-26.5.2-23F84; schema_version = 2.", "The device owns ShengUfs, ShengHidInput, ShengNovatekTouch and ShengPreflight submodules."]
 procedure = ["Read https://unixnu.com/porting/device-repository and https://unixnu.com/porting/records.", "Run ./unixnu defconfig sheng_ipados26_defconfig -D ../UniXNU-sheng from UniXNU.", "Run ./unixnu status --json -D ../UniXNU-sheng and review profiles, components, source pins and patch order."]
@@ -23,6 +23,11 @@ next_action = ["Compare the effective status output whenever a profile, source o
 kind = "source"
 reference = "board.toml"
 result = "Implementation and configuration described in this section"
+
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-manual-release.md"
+result = "Package 65 failed before release because the tracked generated unixnu.lock was dirty. A local Git fixture reproduces its exact retained blob and exit 1; the preparation guard now accepts only the baseline or the reviewed two-family resolution. Unknown or staged lock edits and other source edits still fail. A checkout transition preserves cache/private fixtures and the retained lock; no M4 build or Actions dispatch was run."
 
 
 [[area.evidence]]
@@ -871,6 +876,11 @@ next_action = ["Add captured host or device evidence when repeating a checkpoint
 kind = "source"
 reference = "scripts/prepare-corecrypto-cache.py"
 result = "The pinned CoreCrypto transform records clang dependencies, compiler/command identity and object hashes; it preserves successful objects and failure logs across incremental retries without removing the original ABI and symbol checks."
+
+[[area.evidence]]
+kind = "source"
+reference = "scripts/test-m4-checkout.py"
+result = "The checkout regression fixture reproduces package 65's generated lock blob and original exit 1, accepts the reviewed resolution, rejects unknown/staged lock changes and other tracked edits, and checks retained lock/cache/private fixture contents and timestamps across a real Git checkout."
 
 [[area.evidence]]
 kind = "source"
