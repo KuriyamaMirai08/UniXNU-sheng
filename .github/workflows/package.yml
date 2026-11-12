@@ -132,7 +132,44 @@ jobs:
               echo "Source pin mismatch in $name; preserved checkout and output require review"; exit 1;
             }
           done
-          git -C "$root/uefi-sheng" submodule update --init --recursive
+          # Match official firmware.py: direct board-selected modules only.
+          # edk2/Mu_Basecore is supplied separately by official fetch; vendor
+          # Binaries/sheng is imported from verified firmware by preflight.
+          # Never descend into OpenSSL's tests, TLS fixtures or fuzz corpora.
+          /opt/homebrew/opt/python@3.13/libexec/bin/python3 - "$device" "$root/uefi-sheng" <<'PY'
+          import os, pathlib, signal, subprocess, sys, tomllib
+          device, uefi = map(pathlib.Path, sys.argv[1:])
+          firmware = tomllib.loads((device / 'board.toml').read_text())['firmware']
+          for path in firmware['submodules']:
+              print('Preparing direct UEFI submodule: ' + path, flush=True)
+              command = ['git', '-C', str(uefi), '-c', 'submodule.recurse=false',
+                         '-c', 'http.lowSpeedLimit=1024', '-c', 'http.lowSpeedTime=60',
+                         'submodule', 'update', '--init', '--checkout', '--depth', '1',
+                         '--jobs', '1', '--', path]
+              process = subprocess.Popen(command, start_new_session=True,
+                                         env=dict(os.environ, GIT_TERMINAL_PROMPT='0'))
+              try:
+                  code = process.wait(timeout=600)
+              except subprocess.TimeoutExpired:
+                  # Kill the whole git/fetch/index-pack group, retaining disk data.
+                  try:
+                      os.killpg(process.pid, signal.SIGTERM)
+                  except ProcessLookupError:
+                      pass
+                  try:
+                      process.wait(timeout=10)
+                  except subprocess.TimeoutExpired:
+                      pass
+                  # Children may outlive the git parent after SIGTERM.
+                  try:
+                      os.killpg(process.pid, signal.SIGKILL)
+                  except ProcessLookupError:
+                      pass
+                  process.wait()
+                  raise SystemExit('UEFI submodule timed out after 600s; data retained: ' + path)
+              if code:
+                  raise SystemExit(code)
+          PY
       - name: Private full package.sh release with persistent compilation cache
         env:
           OS_PROFILE: ${{ inputs.os }}

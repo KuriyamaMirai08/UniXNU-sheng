@@ -104,3 +104,29 @@ Do not use Re-run jobs on package 65: it uses the old commit and workflow.
 For an existing saved Seed leave init_data unchecked; first installation
 without a saved Seed still requires init_data=true. Leave both URL/SHA fields
 empty. The fix itself does not dispatch any workflow.
+
+## Package 66 UEFI checkout scope
+
+The M4 preparation follows board.toml firmware.submodules and the pinned
+UniXNU scripts/unixnu/firmware.py: Common/Mu, Common/Mu_OEM_Sample,
+Silicium-ACPI and Silicon/Silicium/OpensslPkg/Library/OpensslLib/openssl.
+Only these four direct gitlinks are initialized, without recursion. The
+official fetch separately supplies edk2/Mu_Basecore and its selected direct
+dependencies from UniXNU feeds.toml; firmware preflight imports Binaries/sheng.
+The duplicate uefi-sheng/Mu_Basecore and the Binaries submodule do not need
+initialization here. Existing copies are retained.
+
+OpenSSL's gost-engine, TLS tests, other test integrations and fuzz corpora
+are not inputs of the selected OpensslLib.inf. Preparation no longer traverses
+them. Each selected update uses depth 1, one job, HTTP low-speed limits of
+1024 bytes/s for 60 seconds, and a 600-second process-group deadline. Timeout
+terminates git/fetch/index-pack and stops; it does not delete Git data or retry.
+Existing full repositories are reused, not deliberately converted or cleaned.
+
+Local Git fixtures verified shallow direct checkout, disabled recursion even
+with submodule.recurse=true, repeat execution and unchanged cache/private/Git
+sentinels. A timeout test verified process-group termination and immediate
+failure. No full M4 release was run. If package 66 is still active, cancel it
+and wait for the runner to stop before starting a new manual workflow on the
+updated PR branch. Do not delete lock files or partial repositories while Git
+is running. Re-running the old job uses its old workflow revision.
