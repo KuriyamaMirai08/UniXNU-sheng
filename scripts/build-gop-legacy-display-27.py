@@ -379,7 +379,15 @@ extern "C" int boot_progress_prepare_scanout(void) {return 1;}
 extern "C" void boot_progress_cancel_scanout(void) {}
 extern "C" void boot_progress_stage(const char *) {}
 extern "C" int boot_progress_pulse_anchor(uintptr_t,uint64_t,unsigned,unsigned,unsigned) {return 0;}
-''')
+''' + ('''
+// These optional providers are not built for iPadOS 27. Local strong functions
+// avoid the weak-lookup chained binds unsupported by XnuPrelink.
+extern "C" void sheng_ethernet_probe(void) {}
+extern "C" void sheng_software_aes_probe(void) {}
+extern "C" __attribute__((weak)) const unsigned native_legacy_request_layout[6] = {17, 81, 984, 996, 1008, 2944};
+extern "C" bool ml_static_mfree_prepare(uintptr_t, size_t) { return false; }
+extern "C" kern_return_t iokit_physical_descriptor_close_notify(IOMemoryDescriptor *, void (*)(void *), void *) { return KERN_INVALID_ARGUMENT; }
+''' if not MACOS else ''))
 compile_cpp(support, OUT / 'LegacyDisplaySupport27.o')
 # The keystore state service (AppleKeyStoreState) and its probe, unchanged from iPadOS 17.
 keystore_source = ROOT / 'kits/sheng/KeyStoreProbe.cpp'
@@ -399,7 +407,8 @@ run([llvm / 'llvm-objcopy', '--remove-section=__DATA,__mod_init_func', '--global
 DEVICE = Path(os.environ.get('UNIXNU_DEVICE') or ROOT.parents[5] / 'UniXNU-sheng')
 # The UniXNU checkout's copy: it reads the OS profile next to it.
 # The HID source is the tree's refer link (a clean pinned clone of the feed), not a hand-placed copy.
-print(run(['python3', ROOT.parents[4] / 'scripts/build-sheng-source-drivers.py', '--tree', ROOT, '--device', DEVICE], text=True), end='')
+UNIXNU_ROOT = Path(os.environ.get('UNIXNU_ROOT') or ROOT.parents[4])
+print(run(['python3', UNIXNU_ROOT / 'scripts/build-sheng-source-drivers.py', '--tree', ROOT, '--device', DEVICE], text=True), end='')
 SRC = ROOT / 'build/sheng-source-drivers'
 hid_abi = json.loads(Path(__file__).resolve().with_name(f'hid-device-{BUILD}.json').read_text())
 hid_slots = [(int(t, 16), int(d, 16)) for t, d in hid_abi['slots']]
@@ -847,7 +856,7 @@ archive = OUT / 'libNativeLegacyDisplay.late.a'
 archive.unlink(missing_ok=True)
 run(['xcrun', 'ar', 'rcs', archive, late, OUT / 'original-bindings.o', OUT / 'original-addresses.o', OUT / 'LegacyDisplayProbe.o', OUT / 'LegacyDisplaySupport27.o', gop_late,
      OUT / 'KeyStoreProbe.o', keyevents_late, *input_objects])
-sources = [ROOT / 'drivers/GopFramebuffer/NativeLegacyDisplay.cpp', ROOT / 'drivers/GopFramebuffer/NativeLegacyRequest.h',
+sources = [Path(__file__), support, ROOT / 'drivers/GopFramebuffer/NativeLegacyDisplay.cpp', ROOT / 'drivers/GopFramebuffer/NativeLegacyRequest.h',
            ROOT / 'drivers/GopFramebuffer/NativeGOPPresenter.cpp', ROOT / 'drivers/GopFramebuffer/NativeGOPWire.h',
            ROOT / 'drivers/GopFramebuffer/NativeHalfCodes.h', source,
            ROOT / 'scripts' / ABI_PATH.name, keystore_source, ROOT / 'drivers/AppleKeyStoreState/NativeKeyStoreEvents.cpp',

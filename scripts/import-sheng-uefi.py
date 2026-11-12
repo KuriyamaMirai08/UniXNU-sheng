@@ -148,7 +148,14 @@ if link.is_dir() and (link / 'manifest.json').is_file() and (link / 'manifest.js
 else:
     if link.is_symlink() or link.exists():
         print(f'{link} holds older content; regenerating')
-        shutil.rmtree(link)
+        # A previous package may leave a symlink here; rmtree() rejects links.
+        # Remove only the link itself, never its cached firmware target.
+        if link.is_symlink():
+            link.unlink()
+        elif link.is_dir():
+            shutil.rmtree(link)
+        else:
+            raise SystemExit(f'Unexpected non-directory UEFI input: {link}')
     link.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(output, link, symlinks=True)
     print(f'Binaries/sheng <- {output}')

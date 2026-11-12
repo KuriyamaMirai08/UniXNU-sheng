@@ -3,11 +3,17 @@ name: package
 # scripts/package.sh of this repository on a macOS runner, with the UniXNU and uefi-sheng
 # checkouts beside it, the layout board.toml names. The platform seed comes from the
 # repository secret UNIXNU_UNIQUE_CHIP_ID and is baked into the images, so the run's
-# artifacts belong to one device alone: download them, then delete the run.
+# outputs belong to one device alone. M4 keeps them and full logs on private disk;
+# the unchanged hosted path below retains its original artifact handling.
 
 on:
   workflow_dispatch:
     inputs:
+      runner_location:
+        description: "UniXNU-M4: private full package using Secrets; hosted: GitHub macOS"
+        type: choice
+        options: [UniXNU-M4, hosted]
+        default: UniXNU-M4
       os:
         description: "OS profile of the images"
         type: choice
@@ -18,23 +24,369 @@ on:
         type: boolean
         default: false
       data_seed_url:
-        description: "Optional original data.dbr URL for an existing installation; otherwise use the saved cache"
+        description: "Hosted only: original data.dbr URL. M4 must leave this empty; first install uses init_data."
         type: string
       data_seed_sha256:
-        description: "Required SHA-256 when data_seed_url is supplied"
+        description: "Hosted only: SHA-256 for data_seed_url. M4 must leave this empty."
         type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: package-${{ github.ref }}
-  cancel-in-progress: true
+  group: package-${{ github.ref }}-${{ inputs.runner_location || 'hosted' }}
+  cancel-in-progress: ${{ inputs.runner_location != 'UniXNU-M4' }}
 
 jobs:
+  m4-package:
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.runner_location == 'UniXNU-M4' &&
+      inputs.data_seed_url == '' && inputs.data_seed_sha256 == ''
+    permissions:
+      contents: read
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 360
+    concurrency:
+      group: unixnu-m4-public-xnu
+      cancel-in-progress: false
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - name: Prepare persistent public checkout on UniXNU-M4
+        env:
+          ACTUAL_RUNNER: ${{ runner.name }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$ACTUAL_RUNNER" = UniXNU-M4
+          test "$(uname -m)" = arm64
+          root="$HOME/Library/Caches/UniXNU-sheng/public-xnu-v1"
+          umask 077
+          mkdir -p "$root"
+          chmod 700 "$root"
+          private="$HOME/Library/UniXNU-sheng-private"
+          private_run="$private/runs/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          for directory in "$private" "$private/runs" "$private_run"; do
+            test ! -L "$directory"
+            mkdir -p "$directory"
+            chmod 700 "$directory"
+          done
+          echo "M4_ROOT=$root" >> "$GITHUB_ENV"
+          echo "M4_LOG_DIR=$private_run" >> "$GITHUB_ENV"
+          exec >> "$private_run/checkout.log" 2>&1
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
+          device="$root/device"
+          if [ ! -d "$device/.git" ]; then
+            git clone --no-checkout --filter=blob:none https://github.com/KuriyamaMirai08/UniXNU-sheng.git "$device"
+          else
+            /opt/homebrew/opt/python@3.13/libexec/bin/python3 - "$device" <<'PY'
+          import importlib.util, pathlib, subprocess, sys
+          device = pathlib.Path(sys.argv[1])
+          spec = importlib.util.spec_from_file_location('ci', device / 'scripts/prepare-package-ci.py')
+          ci = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(ci)
+          def git(repo, *argv):
+              return subprocess.check_output(['git', '-C', str(repo), *argv], text=True).strip()
+          # Official fetch writes unixnu.lock. Keep only the exact retained
+          # family resolution observed in package #65 and audited in
+          # reports/ipados26-source-drivers.json; never reset it or the cache.
+          original_lock = subprocess.check_output(
+              ['git', '-C', str(device), 'show', 'HEAD:unixnu.lock'], text=True)
+          retained_lock = original_lock.replace(
+              '[source."IOStorageFamily"]\ncommit = "e45fbe30a7879e0b16e26dddb78538f1b00e0bff"',
+              '[source."IOHIDFamily"]\ncommit = "e31e90a24c27ad6cbe981650d12a1a4124065b03"\n\n'
+              '[source."IOStorageFamily"]\ncommit = "7edb88fbae296fb7c8ce2f64e115e116e566d51c"')
+          lock = device / 'unixnu.lock'
+          if (lock.is_symlink() or not lock.is_file()
+                  or lock.read_text() not in (original_lock, retained_lock)
+                  or git(device, 'diff', '--cached', '--name-only', 'HEAD', '--', 'unixnu.lock')):
+              raise SystemExit('Unreviewed unixnu.lock edits retained')
+          repos = git(device, 'submodule', 'foreach', '--quiet', '--recursive', 'pwd').splitlines()
+          for repo in map(pathlib.Path, repos):
+              dirty = git(repo, 'diff', '--name-only', '--ignore-submodules=dirty', 'HEAD', '--').splitlines()
+              if not dirty:
+                  continue
+              if (repo.resolve() != (device / 'drivers/Ath12kWifi').resolve()
+                      or dirty != ['tools/fetch-sources.py'] or git(repo, 'rev-parse', 'HEAD') != ci.ATH12K):
+                  raise SystemExit('Unreviewed source edits retained: ' + str(repo))
+              original = git(repo, 'show', 'HEAD:tools/fetch-sources.py') + '\n'
+              if (repo / dirty[0]).read_text() != ci.transform(original):
+                  raise SystemExit('Unreviewed Ath12k edit retained')
+          PY
+            # unixnu.lock was checked above; all other tracked edits still stop.
+            git -C "$device" diff --exit-code --ignore-submodules=dirty HEAD -- . ':(top,exclude)unixnu.lock'
+          fi
+          git -C "$device" fetch --depth 1 origin "$SOURCE_SHA"
+          git -C "$device" checkout --detach "$SOURCE_SHA"
+          git -C "$device" submodule update --init --recursive
+          for entry in \
+            'UniXNU 97437dcf7389484a0eeaa8067725ce743aff18ef UniXNU/UniXNU' \
+            'uefi-sheng 66421cb7bb5694843aec8de1ca3d1de4c20cca38 UniXNU/uefi-sheng'; do
+            read -r name revision repository <<< "$entry"
+            if [ ! -d "$root/$name/.git" ]; then
+              git clone --no-checkout --filter=blob:none "https://github.com/$repository.git" "$root/$name"
+              git -C "$root/$name" fetch --depth 1 origin "$revision"
+              git -C "$root/$name" checkout --detach FETCH_HEAD
+            fi
+            test "$(git -C "$root/$name" rev-parse HEAD)" = "$revision" || {
+              echo "Source pin mismatch in $name; preserved checkout and output require review"; exit 1;
+            }
+          done
+          # Match official firmware.py: direct board-selected modules only.
+          # edk2/Mu_Basecore is supplied separately by official fetch; vendor
+          # Binaries/sheng is imported from verified firmware by preflight.
+          # Never descend into OpenSSL's tests, TLS fixtures or fuzz corpora.
+          /opt/homebrew/opt/python@3.13/libexec/bin/python3 - "$device" "$root/uefi-sheng" <<'PY'
+          import os, pathlib, signal, subprocess, sys, tomllib
+          device, uefi = map(pathlib.Path, sys.argv[1:])
+          firmware = tomllib.loads((device / 'board.toml').read_text())['firmware']
+          for path in firmware['submodules']:
+              print('Preparing direct UEFI submodule: ' + path, flush=True)
+              command = ['git', '-C', str(uefi), '-c', 'submodule.recurse=false',
+                         '-c', 'http.lowSpeedLimit=1024', '-c', 'http.lowSpeedTime=60',
+                         'submodule', 'update', '--init', '--checkout', '--depth', '1',
+                         '--jobs', '1', '--', path]
+              process = subprocess.Popen(command, start_new_session=True,
+                                         env=dict(os.environ, GIT_TERMINAL_PROMPT='0'))
+              try:
+                  code = process.wait(timeout=600)
+              except subprocess.TimeoutExpired:
+                  # Kill the whole git/fetch/index-pack group, retaining disk data.
+                  try:
+                      os.killpg(process.pid, signal.SIGTERM)
+                  except ProcessLookupError:
+                      pass
+                  try:
+                      process.wait(timeout=10)
+                  except subprocess.TimeoutExpired:
+                      pass
+                  # Children may outlive the git parent after SIGTERM.
+                  try:
+                      os.killpg(process.pid, signal.SIGKILL)
+                  except ProcessLookupError:
+                      pass
+                  process.wait()
+                  raise SystemExit('UEFI submodule timed out after 600s; data retained: ' + path)
+              if code:
+                  raise SystemExit(code)
+          PY
+      - name: Private full package.sh release with persistent compilation cache
+        env:
+          OS_PROFILE: ${{ inputs.os }}
+          UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
+          GITHUB_TOKEN: ${{ github.token }}
+          INIT_DATA: ${{ inputs.init_data }}
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/opt/bison/bin:$HOME/.cargo/bin:$PATH"
+          umask 077
+          private="$HOME/Library/UniXNU-sheng-private"
+          private_run="$private/runs/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          for directory in "$private" "$private/runs" "$private_run"; do
+            test ! -L "$directory"
+            mkdir -p "$directory"
+            chmod 700 "$directory"
+          done
+          if [[ ! "$UNIXNU_UNIQUE_CHIP_ID" =~ ^(0[xX])?[0-9a-fA-F]{1,16}$ ]] || [[ ! "$UNIXNU_UNIQUE_CHIP_ID" =~ [1-9a-fA-F] ]]; then
+            echo '::error::Configure repository Secret UNIXNU_UNIQUE_CHIP_ID with the full nonzero 64-bit hexadecimal device identity (1-16 hex digits, optional 0x prefix).'
+            exit 1
+          fi
+          # Official tools may log identities, Seed hashes and command arguments.
+          # Redirect everything before reading inputs; never tee this to GitHub.
+          exec >> "$private_run/console.log" 2>&1
+          cd "$M4_ROOT/device"
+          # Normalize only the exact known standalone-stage bootstrap mode.
+          # Keep the proven cache-aware CoreCrypto builder and transport retry;
+          # reject other source changes instead of resetting a build directory.
+          python3 - "$M4_ROOT" <<'PY'
+          import hashlib, importlib.util, pathlib, subprocess, sys
+          root = pathlib.Path(sys.argv[1])
+          def module(name, path):
+              spec = importlib.util.spec_from_file_location(name, path)
+              value = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(value)
+              return value
+          ci = module('ci', root / 'device/scripts/prepare-package-ci.py')
+          crypto = module('crypto_cache', root / 'device/scripts/prepare-corecrypto-cache.py')
+          upstream = root / 'UniXNU'
+          dirty = set(subprocess.check_output(['git', '-C', str(upstream), 'diff', '--name-only', '--ignore-submodules=dirty', 'HEAD', '--'], text=True).splitlines())
+          if dirty - {'scripts/unixnu/kernel.py', 'scripts/build-corecrypto-14.py', 'scripts/fetch-adreno-inputs.py'}:
+              raise SystemExit('Unreviewed upstream source edits retained: ' + repr(sorted(dirty)))
+          def original(path):
+              return subprocess.check_output(['git', '-C', str(upstream), 'show', 'HEAD:' + path], text=True)
+          kernel = upstream / 'scripts/unixnu/kernel.py'
+          source = original('scripts/unixnu/kernel.py')
+          fixed = ci.transform_kernel_bootstrap(source)
+          staged = fixed.replace('if not record.is_file() or missing_headers:',
+                                 "if not record.is_file() or missing_headers or env.get('UNIXNU_XNU_COMPILE_STAGE') == '1':")
+          if kernel.read_text() not in (source, fixed, staged):
+              raise SystemExit('Unreviewed kernel builder edits retained')
+          if kernel.read_text() == staged:
+              kernel.write_text(fixed)
+          source = original('scripts/build-corecrypto-14.py')
+          if (upstream / 'scripts/build-corecrypto-14.py').read_text() not in (source, crypto.transform(source)):
+              raise SystemExit('Unreviewed CoreCrypto builder edits retained')
+          gpu = upstream / 'scripts/fetch-adreno-inputs.py'
+          if hashlib.sha256(gpu.read_bytes()).hexdigest() not in (
+                  'a854723a3a5530811aa628172b09096def25b6f319609b5f35dc29fe54b2fa15',
+                  '3e8b7aec9d8bb591839428b320f3e9fd25fc75ec56d2addb0a93f9b38efd6657'):
+              raise SystemExit('Unreviewed GPU fetcher edits retained')
+          fixture = upstream / 'kits/XnuPrelink/fixtures/fileset-24A446-sheng-m4-symbols.json'
+          if fixture.exists():
+              if fixture.read_bytes() != (root / 'device/scripts/m4-prelink-symbols.json').read_bytes():
+                  raise SystemExit('Unreviewed experimental prelink fixture retained')
+              retired = root / 'retired-stage-overrides'
+              retired.mkdir(exist_ok=True)
+              fixture.rename(retired / ('prelink-' + hashlib.sha256(fixture.read_bytes()).hexdigest() + '.json'))
+          for base in (root / 'device', upstream):
+              if (base / 'local.toml').exists():
+                  raise SystemExit('Local source overrides require review before public rental-Mac execution')
+          (root / 'public-build.toml').write_text('[build]\n')
+          PY
+          # Same existing hosted compatibility fix; no replacement release driver.
+          python3 scripts/prepare-package-ci.py --unixnu "$M4_ROOT/UniXNU"
+          # Credentials are read from the step environment, never CLI arguments.
+          # The release itself is unchanged; only private input/output locations
+          # and the environment are provided here. First install uses official --init-data.
+          python3 - "$M4_ROOT" "$OS_PROFILE" "$private" "$private_run" <<'PY'
+          import hashlib, os, pathlib, re, shutil, subprocess, sys
+          root, os_profile, private, private_run = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3]), pathlib.Path(sys.argv[4])
+          os.umask(0o077)
+          for directory in (private, private / 'inputs', private / 'tmp', private_run):
+              if directory.is_symlink():
+                  raise SystemExit('Private directory must not be a symbolic link')
+              directory.mkdir(parents=True, exist_ok=True)
+              if directory.stat().st_uid != os.getuid():
+                  raise SystemExit('Private directory has an unexpected owner')
+              directory.chmod(0o700)
+          chip = os.environ.get('UNIXNU_UNIQUE_CHIP_ID', '')
+          init_data = os.environ.get('INIT_DATA') == 'true'
+          if not re.fullmatch(r'(?:0[xX])?[0-9a-fA-F]{1,16}', chip) or int(chip, 16) == 0:
+              raise SystemExit('Configure repository Secret UNIXNU_UNIQUE_CHIP_ID: nonzero 64-bit hex, 1-16 digits, optional 0x prefix')
+          def digest(path):
+              with path.open('rb') as stream:
+                  return hashlib.file_digest(stream, 'sha256').hexdigest()
+          build_config = private_run / 'build.toml'
+          build_config.write_text('[build]\n')
+          allowed = ('HOME', 'USER', 'LOGNAME', 'PATH', 'LANG', 'DEVELOPER_DIR', 'GITHUB_TOKEN')
+          environment = {key: os.environ[key] for key in allowed if key in os.environ}
+          environment.update(UNIXNU_UNIQUE_CHIP_ID=chip, UNIXNU_ROOT=str(root / 'UniXNU'),
+                             UNIXNU_DEVICE=str(root / 'device'), TMPDIR=str(private / 'tmp'),
+                             PYTHONUNBUFFERED='1', GIT_CONFIG_COUNT='1',
+                             GIT_CONFIG_KEY_0='credential.helper', GIT_CONFIG_VALUE_0='', GIT_TERMINAL_PROMPT='0')
+          os.environ.clear()
+          os.environ.update(environment)
+          options = ['--os', os_profile, '--uefi', str(root / 'uefi-sheng'), '--out', str(root / 'out'),
+                     '--config', str(build_config), '-j', '4']
+          sys.path.insert(0, str(root / 'UniXNU/scripts'))
+          from unixnu.cli import parser
+          from unixnu.config import Context
+          context = Context(parser().parse_args(['release', '-D', str(root / 'device'), *options]))
+          work = context.work
+          state = private / 'state' / work.relative_to(root / 'out')
+          work.mkdir(parents=True, exist_ok=True)
+          state.mkdir(parents=True, exist_ok=True)
+          # Preserve the existing tree/build and all compiler paths. Move only
+          # sensitive outputs/logs, preserving existing files, then keep their
+          # official paths as symlinks. No cache or Seed is cleaned.
+          def private_path(source, destination, is_dir=True):
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              if destination.is_symlink():
+                  raise SystemExit('Private output destination must not be a symbolic link')
+              if source.is_symlink():
+                  if source.resolve() != destination.resolve():
+                      raise SystemExit('Existing output link points outside the expected private state')
+              elif source.exists():
+                  if destination.exists():
+                      raise SystemExit('Both old and private outputs exist; preserve both for manual review')
+                  source.rename(destination)
+              elif not destination.exists():
+                  destination.mkdir() if is_dir else destination.touch(mode=0o600)
+              source.symlink_to(destination, target_is_directory=is_dir) if not source.is_symlink() else None
+              if destination.is_dir() != is_dir or destination.stat().st_uid != os.getuid():
+                  raise SystemExit('Private output type/owner mismatch; preserved for review')
+              destination.chmod(0o700 if is_dir else 0o600)
+          for name in ('runtime', 'payload', 'boot', 'kernel', 'logs'):
+              private_path(work / name, state / name)
+          private_path(work / 'package.manifest.json', state / 'package.manifest.json', False)
+          runtime_seed = state / 'runtime/data.dbr'
+          saved_seed = private / 'inputs/data.dbr'
+          if saved_seed.is_symlink():
+              raise SystemExit('Saved Seed must be a regular private file')
+          seed = saved_seed if saved_seed.exists() else runtime_seed
+          checksum = private / 'inputs/data.dbr.sha256'
+          expected = None
+          if seed.is_file():
+              if seed.stat().st_uid != os.getuid():
+                  raise SystemExit('Saved Seed has an unexpected owner; retained unchanged')
+              expected = digest(seed)
+              if checksum.exists() and checksum.read_text().strip() != expected:
+                  raise SystemExit('Saved Seed digest mismatch; retained unchanged')
+              if runtime_seed.is_file() and digest(runtime_seed) != expected:
+                  raise SystemExit('Two different saved Seeds exist; both retained')
+              seed.chmod(0o400)
+              checksum.write_text(expected + '\n')
+              options += ['--data-ramdisk', str(seed)]
+          elif seed.exists() or runtime_seed.is_symlink():
+              raise SystemExit('Saved Seed is not a regular file; retained for review')
+          elif checksum.exists():
+              raise SystemExit('Previously recorded Seed is missing; restore it instead of generating a replacement')
+          elif not init_data:
+              raise SystemExit('First installation: select init_data=true in Run workflow; no saved Data seed exists')
+          elif os_profile != '27':
+              raise SystemExit('Automatic first-install Data generation is supported here for OS 27 only')
+          else:
+              # No --data-ramdisk: the official runtime creates runtime/data.dbr.
+              # Existing Seeds always take the reuse branch, even if still checked.
+              options += ['--init-data']
+          command = ['bash', 'scripts/package.sh', *options]
+          result = subprocess.run(command, cwd=root / 'device', env=environment)
+          # Preserve a Seed created before a later failure, too. No retry or cleanup.
+          if seed.is_file():
+              actual = digest(seed)
+              if expected is not None and actual != expected:
+                  raise SystemExit('Saved Seed integrity changed; stop and preserve all state')
+              seed.chmod(0o400)
+              checksum.write_text(actual + '\n')
+              if not saved_seed.exists():
+                  os.link(seed, saved_seed)
+          if result.returncode:
+              raise SystemExit(result.returncode)
+          if not seed.is_file():
+              raise SystemExit('Official release did not retain its Data seed')
+          # Only a successful official release/verify gets a per-run output copy.
+          artifacts = private_run / 'artifacts'
+          artifacts.mkdir(mode=0o700)
+          for name, source in {'boot.img': work / 'boot/boot.img', 'payload.img': work / 'payload/payload.img',
+                               'kernel.macho': work / 'kernel/kernel.macho',
+                               'package.manifest.json': work / 'package.manifest.json'}.items():
+              shutil.copy2(source, artifacts / name)
+              (artifacts / name).chmod(0o600)
+          PY
+      - name: Private build status only (no log or image upload)
+        if: always()
+        run: |
+          echo 'Full M4 logs, failure state and completed installation images stay on the Mac in the private directory.'
+          echo 'Retrieve them through your existing private SSH/SFTP access. No artifacts or caches are uploaded from this job.'
+
+  reject-unsafe-m4-inputs:
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.runner_location == 'UniXNU-M4' &&
+      (inputs.data_seed_url != '' || inputs.data_seed_sha256 != '')
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - run: |
+          echo 'UniXNU-M4 requires empty seed URL/SHA form fields. First installation: select init_data=true. No job was sent to the Mac.'
+          exit 1
+
   package:
+    # Original GitHub-hosted fallback.
+    if: github.event_name == 'workflow_dispatch' && (inputs.runner_location == 'hosted' || inputs.runner_location == '')
     runs-on: macos-26
     timeout-minutes: 360
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,15 +395,20 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU
+          ref: 97437dcf7389484a0eeaa8067725ce743aff18ef
           path: UniXNU
           submodules: recursive
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/uefi-sheng
+          ref: 66421cb7bb5694843aec8de1ca3d1de4c20cca38
           path: uefi-sheng
           submodules: recursive
       - name: tools
         run: |
+          test -d "$DEVELOPER_DIR"
+          xcrun clang --version
+          xcrun --sdk iphoneos --show-sdk-version
           brew install dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw
           {
             echo "$HOME/.cargo/bin"
@@ -103,10 +460,12 @@ jobs:
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/mesa-tu-ios27
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/fileset-reference
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/ios-obj
+            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/.cache/fakeroot
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/.cache/appsync-signer
             device/.cache/firmware/sheng
-          key: unixnu-heavy-build-${{ inputs.os }}-${{ github.sha }}
+          key: unixnu-heavy-build-${{ inputs.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
+            unixnu-heavy-build-${{ inputs.os }}-${{ github.sha }}-
             unixnu-heavy-build-${{ inputs.os }}-
       - name: prepare preserved Data seed
         if: inputs.os == '27'
@@ -133,6 +492,17 @@ jobs:
           if not path.is_file() and os.environ['INIT_DATA'] != 'true':
               raise SystemExit('No saved seed. Supply the ORIGINAL seed for an existing installation, or select init_data for a FIRST installation')
           PY
+      # Verify/extract the large stock ROM before a long kernel build. The tree's
+      # .cache/firmware is linked to this same device cache by unixnu tree.
+      - name: Stage verified sheng UEFI inputs early
+        working-directory: device
+        env:
+          UNIXNU_DEVICE: ${{ github.workspace }}/device
+          UNIXNU_UEFI: ${{ github.workspace }}/uefi-sheng
+        run: |
+          python3 scripts/download-sheng-firmware.py --connections 16
+          python3 scripts/extract-sheng-firmware.py --delete-archive
+          python3 scripts/import-sheng-uefi.py
       - name: package
         working-directory: device
         env:
@@ -146,104 +516,7 @@ jobs:
             args+=(--init-data)
           fi
 
-          echo "=== [1/4] 注入全链路修复补丁与缓存加速逻辑 ==="
-          python3 - <<'PY'
-          import pathlib
-
-          old_clone = '        subprocess.run(["git", "clone", "--depth", "1", "--branch", source["ref"],\n                        "--filter=blob:none", "--sparse", source["url"], str(directory)], check=True)'
-          new_clone = '\n'.join([
-              '        urls = [source["url"]]',
-              '        if "git.kernel.org" in source["url"]:',
-              '            urls.append(source["url"].replace("https://git.kernel.org/", "https://kernel.googlesource.com/"))',
-              '        for attempt in range(4):',
-              '            url = urls[attempt % len(urls)]',
-              '            try:',
-              '                import shutil as _shutil',
-              '                _shutil.rmtree(directory, ignore_errors=True)',
-              '                directory.mkdir(parents=True, exist_ok=True)',
-              '                subprocess.run(["git", "init", "-q", str(directory)], check=True)',
-              '                subprocess.run(["git", "-C", str(directory), "sparse-checkout", "set", "--no-cone", *source["paths"]], check=True)',
-              '                subprocess.run(["git", "-C", str(directory), "fetch", "--depth", "1", "--filter=blob:none", url, source["commit"]], check=True)',
-              '                subprocess.run(["git", "-C", str(directory), "checkout", "-q", "--detach", "FETCH_HEAD"], check=True)',
-              '                break',
-              '            except Exception as e:',
-              '                print(f"Fetch attempt {attempt+1} from {url} failed: {e}")',
-              '                if attempt == 3:',
-              '                    raise',
-          ])
-
-          old_gop = 'extern "C" int boot_progress_pulse_anchor(uintptr_t,uint64_t,unsigned,unsigned,unsigned) {return 0;}'
-          new_gop = '\n'.join([
-              old_gop,
-              'extern "C" __attribute__((weak)) void sheng_ethernet_probe(void) {}',
-              'extern "C" __attribute__((weak)) void sheng_software_aes_probe(void) {}',
-              'extern "C" __attribute__((weak)) const unsigned native_legacy_request_layout[6] = {17, 81, 984, 996, 1008, 2944};',
-              'extern "C" __attribute__((weak)) bool ml_static_mfree_prepare(uintptr_t, size_t) { return false; }',
-              'extern "C" __attribute__((weak)) kern_return_t iokit_physical_descriptor_close_notify(IOMemoryDescriptor *, void (*)(void *), void *) { return KERN_INVALID_ARGUMENT; }',
-          ])
-
-          for p in pathlib.Path('..').rglob('*.py'):
-              try:
-                  content = p.read_text()
-                  changed = False
-
-                  # 1. Git 镜像与 sparse-checkout 修复
-                  if old_clone in content:
-                      content = content.replace(old_clone, new_clone)
-                      changed = True
-                  if '"sparse-checkout", "add"' in content:
-                      content = content.replace('"sparse-checkout", "add"', '"sparse-checkout", "set", "--no-cone"')
-                      changed = True
-
-                  # 2. Mesa 补丁容错与校验短路
-                  old_apply = "run('git', '-C', mesa, 'apply', ROOT / patch)"
-                  if old_apply in content and "Bypassed patch apply error" not in content:
-                      new_apply = "try:\n                run('git', '-C', mesa, 'apply', ROOT / patch)\n            except Exception as e:\n                print('Bypassed patch apply error:', e)"
-                      content = content.replace(old_apply, new_apply)
-                      changed = True
-                  if "def validate_recorded_patches(" in content and "return True" not in content:
-                      content = content.replace("def validate_recorded_patches(", "def validate_recorded_patches(*args, **kwargs):\n    return True\ndef _orig_validate(")
-                      changed = True
-                  if "validate_recorded_patches(ROOT, mesa, pins)" in content:
-                      content = content.replace("validate_recorded_patches(ROOT, mesa, pins)", "pass # validate_recorded_patches(ROOT, mesa, pins)")
-                      changed = True
-                  if "validate_recorded_patches(ROOT, SOURCE, pins)" in content:
-                      content = content.replace("validate_recorded_patches(ROOT, SOURCE, pins)", "pass # validate_recorded_patches(ROOT, SOURCE, pins)")
-                      changed = True
-
-                  # 3. 补齐 arm64e 内核链接缺失的 5 个 weak_import 符号
-                  if old_gop in content and "sheng_ethernet_probe" not in content:
-                      content = content.replace(old_gop, new_gop)
-                      changed = True
-
-                  # 4. 短路 prelink 回归检查 (兼容新增的 11 个 USB kext 与 Xcode 26.6)
-                  if "def check_prelink_regressions(record, policy):" in content and "return True" not in content:
-                      content = content.replace("def check_prelink_regressions(record, policy):", "def check_prelink_regressions(record, policy):\n    return True")
-                      changed = True
-
-                  # 5. 直接复用已缓存的 LTO 参考内核、Rust metal2vulkan 桥接库与 Turnip 驱动
-                  if "def reusable(final, record, inputs):" in content and "if final.is_file():" not in content:
-                      content = content.replace("def reusable(final, record, inputs):", "def reusable(final, record, inputs):\n    if final.is_file():\n        return True")
-                      changed = True
-
-                  old_b1 = "with log.open('w') as stream:"
-                  old_b2 = "if result.returncode:\n    raise SystemExit(log.read_text()[-6000:])"
-                  if p.name == 'build-adreno-metal-bridge.py' and old_b1 in content and old_b2 in content and "release/libadreno_metal_bridge.a').is_file()" not in content:
-                      content = content.replace(old_b1, "if not (target_dir / triple / 'release/libadreno_metal_bridge.a').is_file():\n  with log.open('w') as stream:")
-                      content = content.replace(old_b2, "  if result.returncode:\n    raise SystemExit(log.read_text()[-6000:])")
-                      changed = True
-
-                  old_tu = "log = LOGS / ('mesa-tu-%s-configure.log' % args.target)"
-                  if p.name == 'build-turnip-darwin.py' and old_tu in content and "Turnip cached build reused" not in content:
-                      content = content.replace(old_tu, "if (OUT / 'src/freedreno/vulkan/libvulkan_freedreno.dylib').is_file():\n    print('PASS: Turnip cached build reused for %s' % args.target)\n    sys.exit(0)\n" + old_tu)
-                      changed = True
-
-                  if changed:
-                      p.write_text(content)
-                      print(f"Successfully patched: {p}")
-              except Exception as err:
-                  pass
-          PY
+          python3 scripts/prepare-package-ci.py --unixnu ../UniXNU
 
           echo "=== [2/4] 预拉取键盘与触控专有固件 (MCU_Upgrade.bin 等) ==="
           python3 scripts/extract-files.py
@@ -264,9 +537,10 @@ jobs:
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/mesa-tu-ios27
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/fileset-reference
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/build/xnu/ios-obj
+            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/.cache/fakeroot
             UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree/.cache/appsync-signer
             device/.cache/firmware/sheng
-          key: unixnu-heavy-build-${{ inputs.os }}-${{ github.sha }}
+          key: unixnu-heavy-build-${{ inputs.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: actions/cache/save@v4
         if: always() && inputs.os == '27' && steps.data-cache.outputs.cache-hit != 'true' && hashFiles('UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/runtime/data.dbr') != ''
         with:

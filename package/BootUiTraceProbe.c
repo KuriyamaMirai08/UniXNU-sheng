@@ -563,10 +563,22 @@ unsigned boot_stuck_rows(char rows[][120],unsigned max) {
 struct bt_kcpu {uint64_t tid,used;char name[28];};
 static struct bt_kcpu kcpu_published[BT_KCPU];
 static unsigned kcpu_published_count,kcpu_interval,kcpu_total_ms;
-static struct {uint64_t tid,time;} kcpu_seen[BT_KCPU_SEEN];
+struct bt_kcpu_seen {uint64_t tid,time;};
+static struct bt_kcpu_seen *kcpu_seen;
+// The boot-log writer is the sole caller, before it takes kernel_task's lock.
+// Keep the full table off static DATA: the 24A446 fileset is one 16 KiB page
+// short with this table in BSS. Allocation failure only skips this diagnostic.
+static bool prepare_kcpu_seen(void) {
+ if(kcpu_seen)return true;
+ struct bt_kcpu_seen *seen=(struct bt_kcpu_seen *)IOMallocAligned(sizeof(*seen)*BT_KCPU_SEEN,4096);
+ if(!seen)return false;
+ memset(seen,0,sizeof(*seen)*BT_KCPU_SEEN);
+ kcpu_seen=seen;return true;
+}
 void boot_kcpu_scan(unsigned seconds) {
  static unsigned last;
  if(seconds<last+10)return;
+ if(!prepare_kcpu_seen())return;
  const unsigned interval=seconds-last;last=seconds;
  if(!task_lock_try(kernel_task))return;
  struct bt_kcpu top[BT_KCPU];memset(top,0,sizeof(top));uint64_t total=0;thread_t thread;unsigned visited=0;

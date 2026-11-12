@@ -1,0 +1,11 @@
+diff --git a/fileset_layout.py b/fileset_layout.py
+--- a/fileset_layout.py
++++ b/fileset_layout.py
+@@ -108,6 +108,6 @@ class Layout:
+         self.roots.pop('__TEXT_BOOT_EXEC', None)
+         code['size'] = code['filesize'] = code_end - code['va']
+-        self.reserve('__DATA', self.roots['__DATA']['va'])
++        self.reserve('__DATA', self.hole('__DATA', self.segment('__DATA')['size']))
+         link = self.roots['__LINKEDIT']
+         for name in ('__LINKINFO', '__LINKEDIT'):
+             self.reserve(name, self.allocate(self.segment(name)['size']))
