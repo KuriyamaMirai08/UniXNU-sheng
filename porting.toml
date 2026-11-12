@@ -175,6 +175,11 @@ command = "workflow_dispatch prelink; Actions run 43140643800"
 revision = "410da46db04af6be5678478968b518abb4cf8854"
 result = "UniXNU-M4 confirmed 19 unresolved pointer references reduced to 5 after eleven new function identities and two typed objects. The BASIC_INFO-only caller guard and real Image4 storage checks passed. Native/reference hashes and 57-entry closure were unchanged; DATA 0x1e8000 passed collision checks with zero headroom. Strict output remains refused for one RPC and four TXM interfaces, without stubs, compilation, native relink or installation inputs."
 
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-manual-release.md"
+result = "The manual package form now selects UniXNU-M4 or unchanged hosted macOS. M4 calls existing package.sh/release with persistent public-xnu-v1 sources/output, retains error logs, normalizes only the known forced standalone bootstrap mode and retires its extra prelink fixture. Official prelink policy/order remain unchanged. Sensitive inputs are not forwarded, and the original runtime Seed requirement may stop before kernel compilation. No workflow build was dispatched for this configuration-only change."
+
 [[area]]
 id = "firmware"
 status = "implemented"
@@ -803,6 +808,11 @@ reference = "reports/m4-prelink-recovery-result.json"
 command = "workflow_dispatch prelink; Actions run 43140643800"
 revision = "410da46db04af6be5678478968b518abb4cf8854"
 result = "UniXNU-M4 confirmed 19 unresolved pointer references reduced to 5 after eleven new function identities and two typed objects. The BASIC_INFO-only caller guard and real Image4 storage checks passed. Native/reference hashes and 57-entry closure were unchanged; DATA 0x1e8000 passed collision checks with zero headroom. Strict output remains refused for one RPC and four TXM interfaces, without stubs, compilation, native relink or installation inputs."
+
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-manual-release.md"
+result = "The manual package form now selects UniXNU-M4 or unchanged hosted macOS. M4 calls existing package.sh/release with persistent public-xnu-v1 sources/output, retains error logs, normalizes only the known forced standalone bootstrap mode and retires its extra prelink fixture. Official prelink policy/order remain unchanged. Sensitive inputs are not forwarded, and the original runtime Seed requirement may stop before kernel compilation. No workflow build was dispatched for this configuration-only change."
 
 [[area]]
 id = "diagnostics"

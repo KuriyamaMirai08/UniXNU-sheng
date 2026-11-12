@@ -1,18 +1,5 @@
 name: Prebuild audit (no full package)
 on:
-  push:
-    paths:
-      - '.github/workflows/prebuild-audit.yml'
-      - 'scripts/audit-cached-prelink.py'
-      - 'scripts/audit-fixtures/**'
-      - 'scripts/check-package-readiness.py'
-      - 'scripts/prepare-package-ci.py'
-      - 'scripts/test-ci-prelink-layout.py'
-      - 'scripts/build-gop-legacy-display-27.py'
-      - 'scripts/firmware_cache.py'
-      - 'scripts/test-firmware-cache.py'
-      - 'scripts/test-kcpu-allocation.py'
-      - 'package/BootUiTraceProbe.c'
   workflow_dispatch:
 permissions:
   contents: read

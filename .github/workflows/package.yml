@@ -9,15 +9,10 @@ on:
   workflow_dispatch:
     inputs:
       runner_location:
-        description: "hosted: device-bound package; self-hosted: public-source compilation on UniXNU-M4"
+        description: "UniXNU-M4: persistent official release without installation credentials; hosted: GitHub macOS"
         type: choice
-        options: [hosted, self-hosted]
-        default: hosted
-      self_hosted_stage:
-        description: "M4 compilation stage (no device keys or installation Seed)"
-        type: choice
-        options: [prelink, native-link, xnu-corecrypto, smoke]
-        default: prelink
+        options: [UniXNU-M4, hosted]
+        default: UniXNU-M4
       os:
         description: "OS profile of the images"
         type: choice
@@ -39,49 +34,12 @@ permissions:
 
 concurrency:
   group: package-${{ github.ref }}-${{ inputs.runner_location || 'hosted' }}
-  cancel-in-progress: ${{ inputs.runner_location != 'self-hosted' }}
+  cancel-in-progress: ${{ inputs.runner_location != 'UniXNU-M4' }}
 
 jobs:
-  m4-smoke:
-    # No secrets, seed cache, artifacts or authenticated checkout on the rental Mac.
-    # Reject sensitive dispatch fields BEFORE assigning a job (and its event file).
+  m4-package:
     if: >-
-      github.event_name == 'workflow_dispatch' &&
-      inputs.runner_location == 'self-hosted' &&
-      inputs.self_hosted_stage == 'smoke' &&
-      !inputs.init_data && inputs.data_seed_url == '' && inputs.data_seed_sha256 == ''
-    permissions: {}
-    runs-on: [self-hosted, macOS, ARM64]
-    timeout-minutes: 45
-    concurrency:
-      group: unixnu-m4-public-smoke
-      cancel-in-progress: false
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
-    steps:
-      - name: Require the registered M4
-        env:
-          ACTUAL_RUNNER: ${{ runner.name }}
-        run: |
-          test "$ACTUAL_RUNNER" = UniXNU-M4 || { echo 'Expected UniXNU-M4; refusing another runner'; exit 1; }
-          test "$(uname -m)" = arm64
-      - name: Anonymous public source checkout
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-        run: |
-          # Never pass github.token, a PAT or persisted checkout credentials.
-          source_dir="$RUNNER_TEMP/unixnu-public-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          git -c credential.helper= clone --no-checkout --depth 1 https://github.com/KuriyamaMirai08/UniXNU-sheng.git "$source_dir"
-          git -C "$source_dir" -c credential.helper= fetch --depth 1 origin "$SOURCE_SHA"
-          git -C "$source_dir" checkout --detach FETCH_HEAD
-          echo "SMOKE_DEVICE=$source_dir" >> "$GITHUB_ENV"
-      - name: Check dependencies and compile public targets with persistent output
-        run: bash "$SMOKE_DEVICE/scripts/m4-compile-smoke.sh"
-
-  m4-xnu-corecrypto:
-    if: >-
-      github.event_name == 'workflow_dispatch' && inputs.runner_location == 'self-hosted' &&
-      (inputs.self_hosted_stage == 'xnu-corecrypto' || inputs.self_hosted_stage == 'native-link' || inputs.self_hosted_stage == 'prelink') && inputs.os == '27' &&
+      github.event_name == 'workflow_dispatch' && inputs.runner_location == 'UniXNU-M4' &&
       !inputs.init_data && inputs.data_seed_url == '' && inputs.data_seed_sha256 == ''
     permissions: {}
     runs-on: [self-hosted, macOS, ARM64]
@@ -91,9 +49,8 @@ jobs:
       cancel-in-progress: false
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
-      M4_STAGE: ${{ inputs.self_hosted_stage }}
     steps:
-      - name: Require the registered M4 and prepare persistent public checkout
+      - name: Prepare persistent public checkout on UniXNU-M4
         env:
           ACTUAL_RUNNER: ${{ runner.name }}
           SOURCE_SHA: ${{ github.sha }}
@@ -102,13 +59,15 @@ jobs:
           test "$ACTUAL_RUNNER" = UniXNU-M4
           test "$(uname -m)" = arm64
           root="$HOME/Library/Caches/UniXNU-sheng/public-xnu-v1"
-          mkdir -p "$root"
+          mkdir -p "$root/logs/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "M4_ROOT=$root" >> "$GITHUB_ENV"
+          echo "M4_LOG_DIR=$root/logs/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          exec > >(tee -a "$root/logs/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/checkout.log") 2>&1
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
           device="$root/device"
           if [ ! -d "$device/.git" ]; then
-            git -c credential.helper= clone --no-checkout --filter=blob:none https://github.com/KuriyamaMirai08/UniXNU-sheng.git "$device"
+            git clone --no-checkout --filter=blob:none https://github.com/KuriyamaMirai08/UniXNU-sheng.git "$device"
           else
-            # Preserve the exact reviewed Ath12k compatibility edit from a
-            # previous build. Reject every other tracked submodule edit.
             /opt/homebrew/opt/python@3.13/libexec/bin/python3 - "$device" <<'PY'
           import importlib.util, pathlib, subprocess, sys
           device = pathlib.Path(sys.argv[1])
@@ -124,36 +83,129 @@ jobs:
                   continue
               if (repo.resolve() != (device / 'drivers/Ath12kWifi').resolve()
                       or dirty != ['tools/fetch-sources.py'] or git(repo, 'rev-parse', 'HEAD') != ci.ATH12K):
-                  raise SystemExit('Unreviewed tracked changes retained in ' + str(repo))
+                  raise SystemExit('Unreviewed source edits retained: ' + str(repo))
               original = git(repo, 'show', 'HEAD:tools/fetch-sources.py') + '\n'
               if (repo / dirty[0]).read_text() != ci.transform(original):
-                  raise SystemExit('Unreviewed Ath12k fetcher edit retained')
+                  raise SystemExit('Unreviewed Ath12k edit retained')
           PY
             git -C "$device" diff --exit-code --ignore-submodules=dirty HEAD --
           fi
-          git -C "$device" -c credential.helper= fetch --depth 1 origin "$SOURCE_SHA"
+          git -C "$device" fetch --depth 1 origin "$SOURCE_SHA"
           git -C "$device" checkout --detach "$SOURCE_SHA"
-          echo "M4_ROOT=$root" >> "$GITHUB_ENV"
-          echo "M4_LOG_DIR=$root/logs/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
-      - name: Compile selected XNU stage with persistent archives and objects
-        run: bash "$M4_ROOT/device/scripts/m4-xnu-corecrypto.sh"
-      - name: Public compile logs and reports (never installation inputs)
+          git -C "$device" submodule update --init --recursive
+          for entry in \
+            'UniXNU 97437dcf7389484a0eeaa8067725ce743aff18ef UniXNU/UniXNU' \
+            'uefi-sheng 66421cb7bb5694843aec8de1ca3d1de4c20cca38 UniXNU/uefi-sheng'; do
+            read -r name revision repository <<< "$entry"
+            if [ ! -d "$root/$name/.git" ]; then
+              git clone --no-checkout --filter=blob:none "https://github.com/$repository.git" "$root/$name"
+              git -C "$root/$name" fetch --depth 1 origin "$revision"
+              git -C "$root/$name" checkout --detach FETCH_HEAD
+            fi
+            test "$(git -C "$root/$name" rev-parse HEAD)" = "$revision" || {
+              echo "Source pin mismatch in $name; preserved checkout and output require review"; exit 1;
+            }
+          done
+      - name: Official package.sh release with persistent output
+        env:
+          OS_PROFILE: ${{ inputs.os }}
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/opt/bison/bin:$HOME/.cargo/bin:$PATH"
+          exec > >(tee -a "$M4_LOG_DIR/console.log") 2>&1
+          cd "$M4_ROOT/device"
+          # Normalize only the exact known standalone-stage bootstrap mode.
+          # Keep the proven cache-aware CoreCrypto builder and transport retry;
+          # reject other source changes instead of resetting a build directory.
+          python3 - "$M4_ROOT" <<'PY'
+          import hashlib, importlib.util, pathlib, subprocess, sys
+          root = pathlib.Path(sys.argv[1])
+          def module(name, path):
+              spec = importlib.util.spec_from_file_location(name, path)
+              value = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(value)
+              return value
+          ci = module('ci', root / 'device/scripts/prepare-package-ci.py')
+          crypto = module('crypto_cache', root / 'device/scripts/prepare-corecrypto-cache.py')
+          upstream = root / 'UniXNU'
+          dirty = set(subprocess.check_output(['git', '-C', str(upstream), 'diff', '--name-only', '--ignore-submodules=dirty', 'HEAD', '--'], text=True).splitlines())
+          if dirty - {'scripts/unixnu/kernel.py', 'scripts/build-corecrypto-14.py', 'scripts/fetch-adreno-inputs.py'}:
+              raise SystemExit('Unreviewed upstream source edits retained: ' + repr(sorted(dirty)))
+          def original(path):
+              return subprocess.check_output(['git', '-C', str(upstream), 'show', 'HEAD:' + path], text=True)
+          kernel = upstream / 'scripts/unixnu/kernel.py'
+          source = original('scripts/unixnu/kernel.py')
+          fixed = ci.transform_kernel_bootstrap(source)
+          staged = fixed.replace('if not record.is_file() or missing_headers:',
+                                 "if not record.is_file() or missing_headers or env.get('UNIXNU_XNU_COMPILE_STAGE') == '1':")
+          if kernel.read_text() not in (source, fixed, staged):
+              raise SystemExit('Unreviewed kernel builder edits retained')
+          if kernel.read_text() == staged:
+              kernel.write_text(fixed)
+          source = original('scripts/build-corecrypto-14.py')
+          if (upstream / 'scripts/build-corecrypto-14.py').read_text() not in (source, crypto.transform(source)):
+              raise SystemExit('Unreviewed CoreCrypto builder edits retained')
+          gpu = upstream / 'scripts/fetch-adreno-inputs.py'
+          if hashlib.sha256(gpu.read_bytes()).hexdigest() not in (
+                  'a854723a3a5530811aa628172b09096def25b6f319609b5f35dc29fe54b2fa15',
+                  '3e8b7aec9d8bb591839428b320f3e9fd25fc75ec56d2addb0a93f9b38efd6657'):
+              raise SystemExit('Unreviewed GPU fetcher edits retained')
+          fixture = upstream / 'kits/XnuPrelink/fixtures/fileset-24A446-sheng-m4-symbols.json'
+          if fixture.exists():
+              if fixture.read_bytes() != (root / 'device/scripts/m4-prelink-symbols.json').read_bytes():
+                  raise SystemExit('Unreviewed experimental prelink fixture retained')
+              retired = root / 'retired-stage-overrides'
+              retired.mkdir(exist_ok=True)
+              fixture.rename(retired / ('prelink-' + hashlib.sha256(fixture.read_bytes()).hexdigest() + '.json'))
+          if any((root / 'out/sheng').glob('*/*/runtime/data.dbr')):
+              raise SystemExit('Installation seed already present; public rental-Mac execution is not authorized to read it')
+          for base in (root / 'device', upstream):
+              if (base / 'local.toml').exists():
+                  raise SystemExit('Local source overrides require review before public rental-Mac execution')
+          (root / 'public-build.toml').write_text('[build]\n')
+          PY
+          # Same existing hosted compatibility fix; no replacement release driver.
+          python3 scripts/prepare-package-ci.py --unixnu "$M4_ROOT/UniXNU"
+          # Do not inherit identity/Seed/PAT variables or an ignored private
+          # unixnu.local.toml. No --init-data, --skip-prelink or policy overrides.
+          env -i HOME="$HOME" USER="${USER:-a105}" LOGNAME="${LOGNAME:-a105}" \
+            PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" LANG=en_US.UTF-8 \
+            DEVELOPER_DIR="$DEVELOPER_DIR" UNIXNU_ROOT="$M4_ROOT/UniXNU" \
+            UNIXNU_DEVICE="$M4_ROOT/device" PYTHONUNBUFFERED=1 \
+            GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0= \
+            bash scripts/package.sh --os "$OS_PROFILE" --uefi "$M4_ROOT/uefi-sheng" \
+              --out "$M4_ROOT/out" --config "$M4_ROOT/public-build.toml" -j 4
+      - name: Retain public release logs after success or failure
+        if: always() && env.M4_LOG_DIR != ''
+        run: |
+          mkdir -p "$M4_LOG_DIR"
+          if compgen -G "$M4_ROOT/out/sheng/*/*/runtime/data.dbr" >/dev/null; then
+            exit 0  # Do not copy logs from a pre-existing private installation.
+          fi
+          for source in "$M4_ROOT"/out/sheng/*/*/logs; do
+            if [ -d "$source" ]; then
+              profile="$(basename "$(dirname "$(dirname "$source")")")"
+              config="$(basename "$(dirname "$source")")"
+              cp -R "$source" "$M4_LOG_DIR/$profile-$config"
+            fi
+          done
+      - name: Downloadable public build logs
         if: always() && env.M4_LOG_DIR != ''
         uses: actions/upload-artifact@v4
         with:
-          name: m4-xnu-corecrypto-${{ github.run_id }}-${{ github.run_attempt }}
+          name: m4-release-logs-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.M4_LOG_DIR }}/
-          retention-days: 7
+          retention-days: 14
           if-no-files-found: warn
 
-  reject-unsafe-smoke-inputs:
+  reject-unsafe-m4-inputs:
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.runner_location == 'self-hosted' &&
+      github.event_name == 'workflow_dispatch' && inputs.runner_location == 'UniXNU-M4' &&
       (inputs.init_data || inputs.data_seed_url != '' || inputs.data_seed_sha256 != '')
     runs-on: ubuntu-latest
     permissions: {}
     steps:
-      - run: echo 'Self-hosted smoke requires init_data=false and empty seed URL/SHA fields. No job was sent to the rental Mac.'; exit 1
+      - run: echo 'UniXNU-M4 requires init_data=false and empty seed URL/SHA. No job was sent to the rental Mac.'; exit 1
 
   package:
     # All secret/seed/cache/image steps stay inside this hosted-only job.
