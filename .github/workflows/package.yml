@@ -24,7 +24,7 @@ on:
         type: boolean
         default: false
       data_seed_url:
-        description: "Hosted only: original data.dbr URL. M4 must leave this empty and use Secrets/private transfer."
+        description: "Hosted only: original data.dbr URL. M4 must leave this empty; first install uses init_data."
         type: string
       data_seed_sha256:
         description: "Hosted only: SHA-256 for data_seed_url. M4 must leave this empty."
@@ -41,7 +41,7 @@ jobs:
   m4-package:
     if: >-
       github.event_name == 'workflow_dispatch' && inputs.runner_location == 'UniXNU-M4' &&
-      !inputs.init_data && inputs.data_seed_url == '' && inputs.data_seed_sha256 == ''
+      inputs.data_seed_url == '' && inputs.data_seed_sha256 == ''
     permissions:
       contents: read
     runs-on: [self-hosted, macOS, ARM64]
@@ -123,8 +123,7 @@ jobs:
           OS_PROFILE: ${{ inputs.os }}
           UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
           GITHUB_TOKEN: ${{ github.token }}
-          M4_DATA_SEED_URL: ${{ secrets.M4_DATA_SEED_URL }}
-          M4_DATA_SEED_SHA256: ${{ secrets.M4_DATA_SEED_SHA256 }}
+          INIT_DATA: ${{ inputs.init_data }}
         run: |
           set -euo pipefail
           export PATH="/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/opt/bison/bin:$HOME/.cargo/bin:$PATH"
@@ -136,6 +135,10 @@ jobs:
             mkdir -p "$directory"
             chmod 700 "$directory"
           done
+          if [[ ! "$UNIXNU_UNIQUE_CHIP_ID" =~ ^[0-9a-fA-F]{8}$ ]]; then
+            echo '::error::Configure repository Secret UNIXNU_UNIQUE_CHIP_ID with the actual eight hexadecimal digits for this device.'
+            exit 1
+          fi
           # Official tools may log identities, Seed hashes and command arguments.
           # Redirect everything before reading inputs; never tee this to GitHub.
           exec >> "$private_run/console.log" 2>&1
@@ -192,9 +195,9 @@ jobs:
           python3 scripts/prepare-package-ci.py --unixnu "$M4_ROOT/UniXNU"
           # Credentials are read from the step environment, never CLI arguments.
           # The release itself is unchanged; only private input/output locations
-          # and the environment are provided here. No --init-data or skip flags.
+          # and the environment are provided here. First install uses official --init-data.
           python3 - "$M4_ROOT" "$OS_PROFILE" "$private" "$private_run" <<'PY'
-          import hashlib, os, pathlib, re, shutil, stat, subprocess, sys, tempfile, urllib.parse, urllib.request
+          import hashlib, os, pathlib, re, shutil, subprocess, sys
           root, os_profile, private, private_run = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3]), pathlib.Path(sys.argv[4])
           os.umask(0o077)
           for directory in (private, private / 'inputs', private / 'tmp', private_run):
@@ -205,42 +208,12 @@ jobs:
                   raise SystemExit('Private directory has an unexpected owner')
               directory.chmod(0o700)
           chip = os.environ.get('UNIXNU_UNIQUE_CHIP_ID', '')
-          expected = os.environ.get('M4_DATA_SEED_SHA256', '').lower()
-          if not re.fullmatch(r'[0-9a-fA-F]{8}', chip) or not re.fullmatch(r'[0-9a-f]{64}', expected):
-              raise SystemExit('Configure UNIXNU_UNIQUE_CHIP_ID and M4_DATA_SEED_SHA256 Secrets')
+          init_data = os.environ.get('INIT_DATA') == 'true'
+          if not re.fullmatch(r'[0-9a-fA-F]{8}', chip):
+              raise SystemExit('Configure repository Secret UNIXNU_UNIQUE_CHIP_ID: eight hexadecimal digits')
           def digest(path):
               with path.open('rb') as stream:
                   return hashlib.file_digest(stream, 'sha256').hexdigest()
-          seed = private / 'inputs/data.dbr'
-          if seed.is_symlink():
-              raise SystemExit('Original Seed must be a regular private file')
-          if not seed.exists():
-              url = os.environ.get('M4_DATA_SEED_URL', '')
-              parsed = urllib.parse.urlsplit(url)
-              if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.fragment:
-                  raise SystemExit('Preinstall the original private Seed or configure M4_DATA_SEED_URL as an HTTPS Secret')
-              class HTTPSOnly(urllib.request.HTTPRedirectHandler):
-                  def redirect_request(self, request, fp, code, msg, headers, newurl):
-                      if urllib.parse.urlsplit(newurl).scheme != 'https':
-                          raise ValueError('Seed transfer requires HTTPS throughout')
-                      return super().redirect_request(request, fp, code, msg, headers, newurl)
-              fd, filename = tempfile.mkstemp(prefix='seed-download-', dir=private / 'inputs')
-              candidate = pathlib.Path(filename)
-              # Partial/mismatched downloads remain private for inspection;
-              # never replace or delete an existing original Seed.
-              with os.fdopen(fd, 'wb') as target, urllib.request.build_opener(HTTPSOnly()).open(url, timeout=120) as source:
-                  total = 0
-                  while chunk := source.read(1024 * 1024):
-                      total += len(chunk)
-                      if total > 64 * 1024 * 1024:
-                          raise ValueError('Seed exceeds the existing 64 MiB transfer bound')
-                      target.write(chunk)
-              if digest(candidate) != expected:
-                  raise SystemExit('Downloaded Seed digest mismatch; original file was not replaced')
-              os.link(candidate, seed)  # Atomic no-replace publication; retain the downloaded file too.
-          if not seed.is_file() or seed.stat().st_uid != os.getuid() or digest(seed) != expected:
-              raise SystemExit('Original Seed owner/type/digest mismatch; preserved for inspection')
-          seed.chmod(0o400)
           build_config = private_run / 'build.toml'
           build_config.write_text('[build]\n')
           allowed = ('HOME', 'USER', 'LOGNAME', 'PATH', 'LANG', 'DEVELOPER_DIR', 'GITHUB_TOKEN')
@@ -252,7 +225,7 @@ jobs:
           os.environ.clear()
           os.environ.update(environment)
           options = ['--os', os_profile, '--uefi', str(root / 'uefi-sheng'), '--out', str(root / 'out'),
-                     '--config', str(build_config), '--data-ramdisk', str(seed), '-j', '4']
+                     '--config', str(build_config), '-j', '4']
           sys.path.insert(0, str(root / 'UniXNU/scripts'))
           from unixnu.cli import parser
           from unixnu.config import Context
@@ -285,17 +258,50 @@ jobs:
               private_path(work / name, state / name)
           private_path(work / 'package.manifest.json', state / 'package.manifest.json', False)
           runtime_seed = state / 'runtime/data.dbr'
-          if runtime_seed.exists() or runtime_seed.is_symlink():
-              if not runtime_seed.is_file() or digest(runtime_seed) != expected:
-                  raise SystemExit('Existing runtime Seed differs; neither Seed was removed')
+          saved_seed = private / 'inputs/data.dbr'
+          if saved_seed.is_symlink():
+              raise SystemExit('Saved Seed must be a regular private file')
+          seed = saved_seed if saved_seed.exists() else runtime_seed
+          checksum = private / 'inputs/data.dbr.sha256'
+          expected = None
+          if seed.is_file():
+              if seed.stat().st_uid != os.getuid():
+                  raise SystemExit('Saved Seed has an unexpected owner; retained unchanged')
+              expected = digest(seed)
+              if checksum.exists() and checksum.read_text().strip() != expected:
+                  raise SystemExit('Saved Seed digest mismatch; retained unchanged')
+              if runtime_seed.is_file() and digest(runtime_seed) != expected:
+                  raise SystemExit('Two different saved Seeds exist; both retained')
+              seed.chmod(0o400)
+              checksum.write_text(expected + '\n')
+              options += ['--data-ramdisk', str(seed)]
+          elif seed.exists() or runtime_seed.is_symlink():
+              raise SystemExit('Saved Seed is not a regular file; retained for review')
+          elif checksum.exists():
+              raise SystemExit('Previously recorded Seed is missing; restore it instead of generating a replacement')
+          elif not init_data:
+              raise SystemExit('First installation: select init_data=true in Run workflow; no saved Data seed exists')
+          elif os_profile != '27':
+              raise SystemExit('Automatic first-install Data generation is supported here for OS 27 only')
           else:
-              runtime_seed.symlink_to(seed)
+              # No --data-ramdisk: the official runtime creates runtime/data.dbr.
+              # Existing Seeds always take the reuse branch, even if still checked.
+              options += ['--init-data']
           command = ['bash', 'scripts/package.sh', *options]
           result = subprocess.run(command, cwd=root / 'device', env=environment)
-          if digest(seed) != expected:
-              raise SystemExit('Original Seed integrity changed; stop and preserve all state')
+          # Preserve a Seed created before a later failure, too. No retry or cleanup.
+          if seed.is_file():
+              actual = digest(seed)
+              if expected is not None and actual != expected:
+                  raise SystemExit('Saved Seed integrity changed; stop and preserve all state')
+              seed.chmod(0o400)
+              checksum.write_text(actual + '\n')
+              if not saved_seed.exists():
+                  os.link(seed, saved_seed)
           if result.returncode:
               raise SystemExit(result.returncode)
+          if not seed.is_file():
+              raise SystemExit('Official release did not retain its Data seed')
           # Only a successful official release/verify gets a per-run output copy.
           artifacts = private_run / 'artifacts'
           artifacts.mkdir(mode=0o700)
@@ -314,14 +320,16 @@ jobs:
   reject-unsafe-m4-inputs:
     if: >-
       github.event_name == 'workflow_dispatch' && inputs.runner_location == 'UniXNU-M4' &&
-      (inputs.init_data || inputs.data_seed_url != '' || inputs.data_seed_sha256 != '')
+      (inputs.data_seed_url != '' || inputs.data_seed_sha256 != '')
     runs-on: ubuntu-latest
     permissions: {}
     steps:
-      - run: echo 'UniXNU-M4 requires init_data=false and empty seed URL/SHA. No job was sent to the rental Mac.'; exit 1
+      - run: |
+          echo 'UniXNU-M4 requires empty seed URL/SHA form fields. First installation: select init_data=true. No job was sent to the Mac.'
+          exit 1
 
   package:
-    # All secret/seed/cache/image steps stay inside this hosted-only job.
+    # Original GitHub-hosted fallback.
     if: github.event_name == 'workflow_dispatch' && (inputs.runner_location == 'hosted' || inputs.runner_location == '')
     runs-on: macos-26
     timeout-minutes: 360

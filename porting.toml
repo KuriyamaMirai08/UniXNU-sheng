@@ -190,6 +190,11 @@ kind = "source"
 reference = "reports/m4-manual-release.md"
 result = "The manually selected M4 job restores full unchanged package.sh/release using the existing identity Secret and an original Seed verified against a new SHA Secret, obtained by private local transfer or private HTTPS Secret. Compilation paths persist; sensitive state/logs/manifests/images use owner-only private storage and no M4 Artifact/shared-cache upload. Original Seeds/conflicting state are retained. This is configuration/static validation only: no Actions dispatch, package execution, retry or flashing."
 
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-manual-release.md"
+result = "M4 accepts init_data for first installation and invokes unchanged package.sh/release with --init-data only when no saved Seed exists. No Seed URL/hash Secret or advance transfer is required. Existing or newly generated Seeds persist with a local integrity record and are reused via --data-ramdisk on later runs, including after failure; compilation paths/caches remain unchanged. Identity Secret validation reports only the required name/format. Static checks only; no Actions dispatch."
+
 [[area]]
 id = "firmware"
 status = "implemented"
@@ -833,6 +838,11 @@ result = "M4 now invokes official fetch, package.sh --no-deps --check, then offi
 kind = "source"
 reference = "reports/m4-manual-release.md"
 result = "The manually selected M4 job restores full unchanged package.sh/release using the existing identity Secret and an original Seed verified against a new SHA Secret, obtained by private local transfer or private HTTPS Secret. Compilation paths persist; sensitive state/logs/manifests/images use owner-only private storage and no M4 Artifact/shared-cache upload. Original Seeds/conflicting state are retained. This is configuration/static validation only: no Actions dispatch, package execution, retry or flashing."
+
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-manual-release.md"
+result = "M4 accepts init_data for first installation and invokes unchanged package.sh/release with --init-data only when no saved Seed exists. No Seed URL/hash Secret or advance transfer is required. Existing or newly generated Seeds persist with a local integrity record and are reused via --data-ramdisk on later runs, including after failure; compilation paths/caches remain unchanged. Identity Secret validation reports only the required name/format. Static checks only; no Actions dispatch."
 
 [[area]]
 id = "diagnostics"
