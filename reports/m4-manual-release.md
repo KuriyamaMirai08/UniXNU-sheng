@@ -3,7 +3,7 @@
 Only a user workflow_dispatch starts package or prebuild audit. The package
 form selects `runner_location=UniXNU-M4` or the existing `hosted` path.
 Standalone smoke/compile/native-link/strict-prelink choices were removed
-from this form. No new release driver or build phase is introduced.
+from this form. Only the existing official CLI commands are used; no new build tool is introduced.
 
 ## Run from GitHub
 
@@ -72,24 +72,42 @@ or private `unixnu.local.toml` build inputs. Existing installation seed files an
 local source overrides cause a stop; they are not consumed or uploaded. Only
 public logs, not runtime directories or old image files, are uploaded.
 
-The command is the existing `scripts/package.sh --os ... --uefi ... --out ...
---config ... -j 4`, which calls `unixnu release`. Its order stays deps -> preflight
--> patches -> build -> pack -> verify. No target split, fake identity, new seed,
-validation bypass or private-interface development is included.
+The M4 job uses the official CLI's existing independent commands, sharing
+`--os`, `--uefi`, `--out`, `--config` and `-j 4` options:
 
-**For OS 27, the original release's runtime.prepare runs before kernel.build.**
-Without an authorized original Data seed it stops with the original missing-Seed
-error before reaching compilation, even when existing native objects are valid.
-Later payload ADT also requires the actual unique-chip-id. This workflow does
-not work around that ordering or promise a complete boot.img on the rental Mac.
-The public dependency/preflight work completed before that error is retained.
-A complete device-bound image needs an authorized trusted build environment and
-the proper installation inputs; do not upload them to this rental runner merely
-to get past the error.
+```sh
+python3 "$M4_ROOT/UniXNU/unixnu" fetch "${args[@]}"
+bash scripts/package.sh "${args[@]}" --no-deps --check
+python3 "$M4_ROOT/UniXNU/unixnu" build kernel "${args[@]}"
+```
+
+`fetch` prepares the same source dependencies as release's source-fetch step,
+without a bulk IPSW fetch. The unchanged package.sh calls `unixnu release`
+with its existing `--check` option: it generates the selected defconfig and
+resolves/lists the ordered patch series, then returns before runtime preparation.
+The official kernel builder applies those patches through its normal recipe.
+
+In pinned UniXNU `97437dcf7389484a0eeaa8067725ce743aff18ef`,
+`scripts/unixnu/cli.py:cmd_build` calls runtime.prepare only when `payload` or
+`runtime` is selected. `build kernel` selects neither: it runs the actual
+kernel.build followed by kernel.prelink. XNU, CoreCrypto, archive dispatch,
+native link and prelink validation are unchanged. No skip-prelink flag or
+altered allow-missing/regression policy is passed. A compiler or prelink
+error stops the job normally and retains the existing caches and logs.
+
+After successful kernel/prelink, the job explicitly stops before
+runtime/payload/boot packaging. A green M4 job qualifies only these public
+kernel commands, not a complete package or boot.img. The full official
+release still needs the original Data seed before its combined build, and
+payload ADT later requires the actual unique-chip-id. Those installation
+inputs remain unauthorized on the rental Mac. No fake identity, generated
+seed, validation bypass or private-interface development is included.
 
 ## Configuration-only validation
 
 This change is validated without dispatching a build. Checks cover actionlint,
 embedded Python/Bash syntax, manual-only build triggers, hosted-job preservation,
-job-selection/input isolation and the structured porting record. Actual execution
-and subsequent real errors are left for the user's next manual run.
+job-selection/input isolation and the structured porting record. The official
+CLI parser and command-dispatch source were also checked for the seed-free
+command sequence. Actual execution and subsequent real errors are
+left for the user's next manual run.

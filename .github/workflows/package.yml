@@ -106,7 +106,7 @@ jobs:
               echo "Source pin mismatch in $name; preserved checkout and output require review"; exit 1;
             }
           done
-      - name: Official package.sh release with persistent output
+      - name: Official dependency preparation, kernel build and prelink
         env:
           OS_PROFILE: ${{ inputs.os }}
         run: |
@@ -172,9 +172,18 @@ jobs:
             PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" LANG=en_US.UTF-8 \
             DEVELOPER_DIR="$DEVELOPER_DIR" UNIXNU_ROOT="$M4_ROOT/UniXNU" \
             UNIXNU_DEVICE="$M4_ROOT/device" PYTHONUNBUFFERED=1 \
+            M4_ROOT="$M4_ROOT" OS_PROFILE="$OS_PROFILE" \
             GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0= \
-            bash scripts/package.sh --os "$OS_PROFILE" --uefi "$M4_ROOT/uefi-sheng" \
-              --out "$M4_ROOT/out" --config "$M4_ROOT/public-build.toml" -j 4
+            bash -euo pipefail -c '
+              args=(--os "$OS_PROFILE" --uefi "$M4_ROOT/uefi-sheng"
+                    --out "$M4_ROOT/out" --config "$M4_ROOT/public-build.toml" -j 4)
+              # Existing official commands: source deps, config/patch preflight,
+              # then the real kernel builder and its unchanged prelink checks.
+              python3 "$M4_ROOT/UniXNU/unixnu" fetch "${args[@]}"
+              bash scripts/package.sh "${args[@]}" --no-deps --check
+              python3 "$M4_ROOT/UniXNU/unixnu" build kernel "${args[@]}"
+              echo "Official kernel build/prelink completed. Stopping before runtime/payload/boot packaging; installation inputs require separate authorization."
+            '
       - name: Retain public release logs after success or failure
         if: always() && env.M4_LOG_DIR != ''
         run: |

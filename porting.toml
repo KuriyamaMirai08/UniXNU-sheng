@@ -180,6 +180,11 @@ kind = "source"
 reference = "reports/m4-manual-release.md"
 result = "The manual package form now selects UniXNU-M4 or unchanged hosted macOS. M4 calls existing package.sh/release with persistent public-xnu-v1 sources/output, retains error logs, normalizes only the known forced standalone bootstrap mode and retires its extra prelink fixture. Official prelink policy/order remain unchanged. Sensitive inputs are not forwarded, and the original runtime Seed requirement may stop before kernel compilation. No workflow build was dispatched for this configuration-only change."
 
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-manual-release.md"
+result = "M4 now invokes official fetch, package.sh --no-deps --check, then official build kernel using the same persistent output/config options. The pinned CLI calls runtime.prepare only for payload/runtime, while build kernel performs the real kernel.build and kernel.prelink without Seed. Compilation and prelink errors remain fatal; successful public kernel work stops before sensitive runtime/payload packaging. No compiler/prelink logic changed and no Actions build was dispatched."
+
 [[area]]
 id = "firmware"
 status = "implemented"
@@ -813,6 +818,11 @@ result = "UniXNU-M4 confirmed 19 unresolved pointer references reduced to 5 afte
 kind = "source"
 reference = "reports/m4-manual-release.md"
 result = "The manual package form now selects UniXNU-M4 or unchanged hosted macOS. M4 calls existing package.sh/release with persistent public-xnu-v1 sources/output, retains error logs, normalizes only the known forced standalone bootstrap mode and retires its extra prelink fixture. Official prelink policy/order remain unchanged. Sensitive inputs are not forwarded, and the original runtime Seed requirement may stop before kernel compilation. No workflow build was dispatched for this configuration-only change."
+
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-manual-release.md"
+result = "M4 now invokes official fetch, package.sh --no-deps --check, then official build kernel using the same persistent output/config options. The pinned CLI calls runtime.prepare only for payload/runtime, while build kernel performs the real kernel.build and kernel.prelink without Seed. Compilation and prelink errors remain fatal; successful public kernel work stops before sensitive runtime/payload packaging. No compiler/prelink logic changed and no Actions build was dispatched."
 
 [[area]]
 id = "diagnostics"
