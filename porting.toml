@@ -195,6 +195,11 @@ kind = "source"
 reference = "reports/m4-manual-release.md"
 result = "M4 accepts init_data for first installation and invokes unchanged package.sh/release with --init-data only when no saved Seed exists. No Seed URL/hash Secret or advance transfer is required. Existing or newly generated Seeds persist with a local integrity record and are reused via --data-ramdisk on later runs, including after failure; compilation paths/caches remain unchanged. Identity Secret validation reports only the required name/format. Static checks only; no Actions dispatch."
 
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-manual-release.md"
+result = "M4 identity validation now accepts nonzero unsigned 64-bit hexadecimal values with 1-16 digits and optional 0x/0X prefix, matching the official devicetree.py u64 ADT encoding. Both M4 validation sites reject zero/overflow and pass the original value unchanged, retaining high bits. Only workflow validation and documentation changed; no Actions build was dispatched."
+
 [[area]]
 id = "firmware"
 status = "implemented"
@@ -843,6 +848,11 @@ result = "The manually selected M4 job restores full unchanged package.sh/releas
 kind = "source"
 reference = "reports/m4-manual-release.md"
 result = "M4 accepts init_data for first installation and invokes unchanged package.sh/release with --init-data only when no saved Seed exists. No Seed URL/hash Secret or advance transfer is required. Existing or newly generated Seeds persist with a local integrity record and are reused via --data-ramdisk on later runs, including after failure; compilation paths/caches remain unchanged. Identity Secret validation reports only the required name/format. Static checks only; no Actions dispatch."
+
+[[area.evidence]]
+kind = "source"
+reference = "reports/m4-manual-release.md"
+result = "M4 identity validation now accepts nonzero unsigned 64-bit hexadecimal values with 1-16 digits and optional 0x/0X prefix, matching the official devicetree.py u64 ADT encoding. Both M4 validation sites reject zero/overflow and pass the original value unchanged, retaining high bits. Only workflow validation and documentation changed; no Actions build was dispatched."
 
 [[area]]
 id = "diagnostics"

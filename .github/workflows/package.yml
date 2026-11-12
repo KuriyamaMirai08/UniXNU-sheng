@@ -135,8 +135,8 @@ jobs:
             mkdir -p "$directory"
             chmod 700 "$directory"
           done
-          if [[ ! "$UNIXNU_UNIQUE_CHIP_ID" =~ ^[0-9a-fA-F]{8}$ ]]; then
-            echo '::error::Configure repository Secret UNIXNU_UNIQUE_CHIP_ID with the actual eight hexadecimal digits for this device.'
+          if [[ ! "$UNIXNU_UNIQUE_CHIP_ID" =~ ^(0[xX])?[0-9a-fA-F]{1,16}$ ]] || [[ ! "$UNIXNU_UNIQUE_CHIP_ID" =~ [1-9a-fA-F] ]]; then
+            echo '::error::Configure repository Secret UNIXNU_UNIQUE_CHIP_ID with the full nonzero 64-bit hexadecimal device identity (1-16 hex digits, optional 0x prefix).'
             exit 1
           fi
           # Official tools may log identities, Seed hashes and command arguments.
@@ -209,8 +209,8 @@ jobs:
               directory.chmod(0o700)
           chip = os.environ.get('UNIXNU_UNIQUE_CHIP_ID', '')
           init_data = os.environ.get('INIT_DATA') == 'true'
-          if not re.fullmatch(r'[0-9a-fA-F]{8}', chip):
-              raise SystemExit('Configure repository Secret UNIXNU_UNIQUE_CHIP_ID: eight hexadecimal digits')
+          if not re.fullmatch(r'(?:0[xX])?[0-9a-fA-F]{1,16}', chip) or int(chip, 16) == 0:
+              raise SystemExit('Configure repository Secret UNIXNU_UNIQUE_CHIP_ID: nonzero 64-bit hex, 1-16 digits, optional 0x prefix')
           def digest(path):
               with path.open('rb') as stream:
                   return hashlib.file_digest(stream, 'sha256').hexdigest()

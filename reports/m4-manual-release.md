@@ -6,7 +6,12 @@ and `init_data=true` for the first installation. Leave both legacy
 `data_seed_url` and `data_seed_sha256` form fields empty.
 
 The only required repository Secret is `UNIXNU_UNIQUE_CHIP_ID`: the actual
-eight hexadecimal digits for this device. A missing or invalid value produces
+nonzero unsigned 64-bit hexadecimal identity for this device: 1-16 hex digits,
+with an optional `0x`/`0X` prefix. Keep all high bits and leading zeros from
+`/sys/devices/soc0/serial_number`; do not truncate to eight digits. The value
+is passed unchanged to the official builder, which encodes it as little-endian
+64-bit ADT `unique-chip-id`. Zero, invalid hex and values longer than 16 digits
+are rejected. A missing or invalid value produces
 a public error naming the required Secret without printing its value.
 `M4_DATA_SEED_SHA256`, `M4_DATA_SEED_URL` and advance Seed transfer are not
 required by the M4 job.
