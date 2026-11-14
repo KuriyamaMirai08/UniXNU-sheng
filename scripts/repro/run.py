@@ -13,6 +13,25 @@ from preserve import apply
 
 DEVICE='1281f0f4eb010da0b3c2d9f1c5684e9566fe318f'
 FRAMEWORK='97437dcf7389484a0eeaa8067725ce743aff18ef'
+DRIVER_HELPER_SHA256='e3ca14afe6c14b0745385da7399c4380a90be2237ad331bf64156dde29ddcc73'
+
+def configure_source_paths(device, framework, evidence):
+    """Bind archive builders to this attempt's verified framework checkout."""
+    device = Path(device).resolve(strict=True)
+    framework = Path(framework).resolve(strict=True)
+    helper = framework / 'scripts/build-sheng-source-drivers.py'
+    if not helper.is_file() or not helper.resolve().is_relative_to(framework):
+        raise RuntimeError('Missing or external pinned source-driver helper: '+str(helper))
+    digest = hashlib.sha256(helper.read_bytes()).hexdigest()
+    if digest != DRIVER_HELPER_SHA256:
+        raise RuntimeError('Pinned source-driver helper identity mismatch: '+digest)
+    os.environ['UNIXNU_ROOT'] = str(framework)
+    os.environ['UNIXNU_DEVICE'] = str(device)
+    record = dict(framework_commit=FRAMEWORK, device_commit=DEVICE,
+                  UNIXNU_ROOT=str(framework), UNIXNU_DEVICE=str(device),
+                  helper=str(helper), helper_sha256=digest)
+    (Path(evidence)/'source-paths.json').write_text(json.dumps(record,indent=2)+'\n')
+    return record
 
 def main():
     root=Path(os.environ['RUNNER_TEMP'])/'unixnu-repro'/f"{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"/'current'
@@ -95,6 +114,7 @@ def main():
             if subprocess.check_output(['git','-C',str(dest),'rev-parse','HEAD'],text=True).strip()!=sha: raise RuntimeError('SHA mismatch')
             if any(dest.rglob('local.toml')): raise RuntimeError('Undeclared local.toml')
         device=root/'device'; fw=root/'UniXNU'
+        configure_source_paths(device,fw,evidence)
         shutil.copyfile(device/'unixnu.lock',evidence/'unixnu.lock.before')
         (root/'build.toml').write_text('[build]\n')
         step('compatibility',['python3','scripts/prepare-package-ci.py','--unixnu',str(fw)],device)

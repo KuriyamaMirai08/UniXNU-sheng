@@ -10,7 +10,7 @@ summary = "Xiaomi Pad 6S Pro 12.4 uses shared SM8550 support and board-owned sto
 id = "configuration"
 status = "implemented"
 components = []
-paths = ["board.toml", "feeds.toml", "configs/**", ".gitmodules", ".github/**", ".gitignore", "scripts/m4-compile-smoke.sh", "scripts/m4-xnu-corecrypto.sh", "scripts/m4-xnu-corecrypto.py", "scripts/m4-prelink.py", "scripts/m4-prelink-symbols.json", "scripts/m4_prelink_evidence.py", "scripts/prepare-corecrypto-cache.py", "scripts/test-m4-checkout.py"]
+paths = ["board.toml", "feeds.toml", "configs/**", ".gitmodules", ".github/**", ".gitignore", "scripts/m4-compile-smoke.sh", "scripts/m4-xnu-corecrypto.sh", "scripts/m4-xnu-corecrypto.py", "scripts/m4-prelink.py", "scripts/m4-prelink-symbols.json", "scripts/m4_prelink_evidence.py", "scripts/prepare-corecrypto-cache.py", "scripts/test-m4-checkout.py", "scripts/repro/**", "reports/clean-kernel-b1.md"]
 inputs = ["SM8550 profile, iPadOS 26.5.2 build 23F84, arm64e sheng_ipados26_defconfig and pinned component sources."]
 configuration = ["board.soc_source = sm8550; board.os_profile = ipados-26.5.2-23F84; schema_version = 2.", "The device owns ShengUfs, ShengHidInput, ShengNovatekTouch and ShengPreflight submodules."]
 procedure = ["Read https://unixnu.com/porting/device-repository and https://unixnu.com/porting/records.", "Run ./unixnu defconfig sheng_ipados26_defconfig -D ../UniXNU-sheng from UniXNU.", "Run ./unixnu status --json -D ../UniXNU-sheng and review profiles, components, source pins and patch order."]
@@ -216,6 +216,11 @@ reference = "reports/clean-kernel-b1.md"
 command = "workflow_dispatch prebuild-audit.yml; Actions run 43606241244"
 revision = "ff9ee74c8e7ef65e5aad94ec119f2c1203877a48"
 result = "Fresh hosted B1 compiled 957 XNU objects and stopped at the designed bootstrap missing-archive link. Full attempt archive was downloaded and SHA-256 checked. The follow-up experiment accepts only the exact reviewed 12-symbol bootstrap failure with fresh complete link inputs; final link and prelink errors remain fatal. It uses a fresh runner and no restored project objects."
+
+[[area.evidence]]
+kind = "source"
+reference = "scripts/repro/run.py"
+result = "The clean-build harness sets UNIXNU_ROOT and UNIXNU_DEVICE to its verified fresh checkouts before archive builders run. It rejects a missing, external or modified source-driver helper and records the pinned helper hash and source paths. A child-process regression covers the sibling out/UniXNU layout that failed in run 43607616395. This changes experiment path configuration; complete native link and prelink remain to be verified."
 
 [[area]]
 id = "firmware"
