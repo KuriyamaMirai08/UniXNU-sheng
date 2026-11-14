@@ -229,6 +229,13 @@ command = "workflow_dispatch prebuild-audit.yml; Actions run 43614112246"
 revision = "9c58f07b5bc2cdd0b0b955f063b286d514f77b1c"
 result = "All three source-path regressions passed on macOS. The isolated build stopped before compilation when the DriverKit crypto-header contents API returned HTTP 403 rate limit exceeded. The complete attempt archive was downloaded and SHA-256 verified. Both experiment entry points now provide the contents-read job token to the existing host-restricted header fetcher; source tags and Git blob checks are retained. Native link and prelink remain unverified."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/clean-kernel-b1.md"
+command = "workflow_dispatch prebuild-audit.yml; Actions run 43615501493; offline archive and Mach-O acceptance"
+revision = "0f16f7de8ddf583458967d1a7239c8b101542bfe"
+result = "A fresh standard hosted macos-26 ARM64 VM completed all 92 XNU patches, two 529-source CoreCrypto builds, all 20 archive steps, normal native link, fresh RELEASE/LTO comparison and official prelink. The complete archive SHA-256 and actual output identities were verified offline. Native arm64e executables have no undefined symbols; the final fileset has 49 file-backed entries, valid mappings and 242499 root fixups, and its native HMAC matches actual relocated code. Final SHA-256 is 4c8a0e7e9c786aa95bc7bafd8b938ea0db2866b33d3d888be5e0362b460a70a4. The unchanged experimental policy retains 2 missing sites and 19 stubbed entries; existing comparison placeholders and 67 omitted forced exports are disclosed. Runtime, strict zero-gap prelink, repeat-build identity and device boot remain unqualified."
+
 [[area]]
 id = "firmware"
 status = "implemented"
