@@ -32,3 +32,16 @@ source-paths.json records these inputs. scripts/repro/test_paths.py checks
 child-process inheritance, a missing or changed helper and an external symlink.
 Each subsequent attempt starts with a new hosted runner and empty project
 objects. Original errors, repair diffs, validation and artifacts are retained.
+
+Unattended repair round 1, run 43614112246, passed all three path regressions
+on macOS, including the external-symlink case. Source-path evidence identifies
+the intended helper. The build then stopped before compilation while restoring
+DriverKit crypto headers: GitHub's anonymous contents API returned HTTP 403,
+rate limit exceeded. Its complete attempt SHA-256 is
+173962b97b4a6d3ad6d5bd7be5badb8e43ba77161f3df6a8614a5ef8e07caede.
+
+Both experimental workflow entries now pass the job's contents-read token to
+the isolated build step, as the package workflow already does. The pinned
+prepare-xnu-source.py sends it only to GitHub API/raw hosts. Header source tags
+and Git blob verification are retained. The token is absent from process
+arguments and evidence records. No project objects are restored for round 2.

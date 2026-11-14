@@ -29,6 +29,8 @@ jobs:
           echo /opt/homebrew/opt/bison/bin >> "$GITHUB_PATH"
           rustup toolchain install 1.98.0 --profile minimal --component rust-src
       - name: Isolated source build with failure preservation
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 -B scripts/repro/test_paths.py -v
           python3 scripts/repro/run.py

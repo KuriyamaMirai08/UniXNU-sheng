@@ -222,6 +222,13 @@ kind = "source"
 reference = "scripts/repro/run.py"
 result = "The clean-build harness sets UNIXNU_ROOT and UNIXNU_DEVICE to its verified fresh checkouts before archive builders run. It rejects a missing, external or modified source-driver helper and records the pinned helper hash and source paths. A child-process regression covers the sibling out/UniXNU layout that failed in run 43607616395. This changes experiment path configuration; complete native link and prelink remain to be verified."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/clean-kernel-b1.md"
+command = "workflow_dispatch prebuild-audit.yml; Actions run 43614112246"
+revision = "9c58f07b5bc2cdd0b0b955f063b286d514f77b1c"
+result = "All three source-path regressions passed on macOS. The isolated build stopped before compilation when the DriverKit crypto-header contents API returned HTTP 403 rate limit exceeded. The complete attempt archive was downloaded and SHA-256 verified. Both experiment entry points now provide the contents-read job token to the existing host-restricted header fetcher; source tags and Git blob checks are retained. Native link and prelink remain unverified."
+
 [[area]]
 id = "firmware"
 status = "implemented"
