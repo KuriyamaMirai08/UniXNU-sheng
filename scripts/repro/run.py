@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import time
+import threading
 from pathlib import Path
 from preserve import apply
 
@@ -28,12 +29,19 @@ def main():
     states=[]
     deadline=time.monotonic()+300*60
     def step(name,argv,cwd=root):
+        print('REPRO stage started: '+name,flush=True)
         row=dict(stage=name,argv=list(map(str,argv)),cwd=str(cwd),start=time.time(),status='running')
         states.append(row)
         (evidence/'stages.json').write_text(json.dumps(states,indent=2))
         try:
             with (evidence/(name+'.log')).open('wb') as stream:
                 process=subprocess.Popen(argv,cwd=cwd,stdout=stream,stderr=subprocess.STDOUT,start_new_session=True)
+                stop=threading.Event()
+                def progress():
+                    while not stop.wait(30):
+                        path=evidence/(name+'.log')
+                        print('REPRO stage running: '+name+' log_bytes='+str(path.stat().st_size),flush=True)
+                thread=threading.Thread(target=progress,daemon=True); thread.start()
                 try:
                     code=process.wait(timeout=max(1,deadline-time.monotonic()))
                 except subprocess.TimeoutExpired:
@@ -45,6 +53,8 @@ def main():
                     process.wait()
                     row['timeout']=True
                     raise RuntimeError('Attempt reached 300-minute build budget: '+name)
+                finally:
+                    stop.set(); thread.join()
             row.update(returncode=code,status='passed' if code==0 else 'failed')
             if code: raise RuntimeError('First failed stage: '+name)
         except BaseException:
@@ -52,6 +62,7 @@ def main():
         finally:
             row['end']=time.time()
             (evidence/'stages.json').write_text(json.dumps(states,indent=2))
+            print('REPRO stage ended: '+name+' '+row['status'],flush=True)
     try:
         step('environment',['bash','-c','sw_vers; uname -a; sysctl hw.memsize hw.ncpu; df -k; xcodebuild -version; xcrun clang --version; xcrun --sdk iphoneos --show-sdk-version; brew list --versions; rustc +1.98.0 --version; cargo +1.98.0 --version'])
         tools={}
