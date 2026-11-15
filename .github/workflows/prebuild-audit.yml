@@ -12,6 +12,11 @@ on:
         required: false
         type: boolean
         default: false
+      full_release:
+        description: Run the clean author release with strict candidate prelink
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
   actions: read
@@ -19,8 +24,12 @@ concurrency:
   group: unixnu-platform-rpc-validation
   cancel-in-progress: false
 jobs:
+  candidate:
+    if: inputs.full_release == true
+    uses: ./.github/workflows/sheng-clean-release.yml
+    secrets: inherit
   rpc:
-    if: inputs.inputs_only != true
+    if: inputs.inputs_only != true && inputs.full_release != true
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -53,6 +62,7 @@ jobs:
           retention-days: 7
 
   inputs:
+    if: inputs.full_release != true
     runs-on: macos-26
     timeout-minutes: 10
     steps:
