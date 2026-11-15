@@ -1,4 +1,4 @@
-"""Extract only failure logs and state from a retained release archive.
+"""Preserve bounded layout replay inputs from a retained release archive.
 
 Archived source is never executed, links are never followed, and large build
 inputs/outputs remain in the original archive. This is an evidence reader.
@@ -11,19 +11,27 @@ from pathlib import Path, PurePosixPath
 
 
 def selected(path):
+    """Select exact replay inputs; never include runtime identity or key material."""
     parts = path.parts
-    if not parts:
-        return False
-    if parts[0] == "evidence":
+    name = path.name
+    if parts and parts[0] == "evidence":
         return True
-    if "out" not in parts:
-        return False
-    if "logs" in parts and path.suffix in (".log", ".json", ".txt"):
+    if parts and parts[0] == "baseline-evidence":
+        return name in ("kernel.py", "native.macho")
+    if str(path).startswith("UniXNU/kits/XnuPrelink/"):
+        return path.suffix in (".py", ".json", ".md")
+    if str(path) == "out/ipsw/24A446/kernelcache.decompressed":
         return True
-    return parts[-1] in (".config", "inputs.json", "generated.json", "package.manifest.json") or (
-        any(part.startswith((".sheng-evidence-", ".prelink-")) for part in parts)
-        and path.suffix in (".json", ".log")
-    )
+    if str(path).startswith("out/sheng/ipados-27.0.1-24A446/sheng_ipados27/"):
+        if name in ("mach.development.bcm2837.unstripped.noctf", "mach.release.bcm2837.unstripped.noctf", ".config"):
+            return True
+        if "logs" in parts and path.suffix in (".log", ".json", ".txt"):
+            return True
+        if "kernel" in parts and path.suffix in (".py", ".json", ".log"):
+            return True
+        if "fileset-reference" in parts and "source" not in parts and "lto-obj" not in parts:
+            return name in ("native-stubs.c", "native-stubs.o", "lto-command.json", "source-sha256.json", "lto-build.log", "inputs.json", "omitted-unavailable-forced-exports.json")
+    return False
 
 
 def main():
@@ -44,6 +52,8 @@ def main():
             entries.append(dict(path=entry.name, bytes=entry.size, type=entry.type.decode("ascii")))
             if not entry.isfile() or not selected(path):
                 continue
+            if sum(row["bytes"] for row in extracted) + entry.size > 1024**3:
+                raise ValueError("Selected replay inputs exceed 1 GiB")
             destination = output.joinpath(*path.parts).resolve()
             if not destination.is_relative_to(output) or destination.exists():
                 raise ValueError("Duplicate or escaped destination: " + entry.name)

@@ -18,7 +18,7 @@ on:
         type: boolean
         default: false
       failure_evidence:
-        description: Extract retained run 43715522445 logs only, without building
+        description: Preserve retained run 43715522445 layout inputs without building
         required: false
         type: boolean
         default: false
@@ -138,15 +138,18 @@ jobs:
               raise SystemExit('Retained failure archive identity changed')
           print('Original failure archive SHA-256 verified')
           PY
-      - name: Extract only original error logs and state
+      - name: Extract original layout inputs and seal hidden files
         run: |
           python3 -B scripts/repro/read-release-failure.py --archive "$RUNNER_TEMP/failure-input/attempt.tar.gz" --output "$RUNNER_TEMP/failure-logs" > "$RUNNER_TEMP/failure-extraction.log"
           cp "$RUNNER_TEMP/failure-extraction.log" "$RUNNER_TEMP/failure-logs/"
-          tail -n 60 "$RUNNER_TEMP/failure-logs/evidence/release.log"
+          tar -C "$RUNNER_TEMP/failure-logs" -czf "$RUNNER_TEMP/layout-inputs.tar.gz" .
+          sha256sum "$RUNNER_TEMP/layout-inputs.tar.gz" > "$RUNNER_TEMP/layout-inputs.sha256"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: retained-failure-43715522445-${{ github.run_id }}
-          path: ${{ runner.temp }}/failure-logs/
+          name: layout-inputs-43715522445-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/layout-inputs.tar.gz
+            ${{ runner.temp }}/layout-inputs.sha256
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
