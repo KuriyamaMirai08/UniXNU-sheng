@@ -1,165 +1,45 @@
-name: Platform RPC ABI validation
+name: Extract completed boot delivery
 on:
   workflow_dispatch:
-    inputs:
-      inspect_serializable:
-        description: Inspect serialization annotation without compiling
-        required: false
-        type: boolean
-        default: false
-      inputs_only:
-        description: Inspect the original Seed without repeating completed object checks
-        required: false
-        type: boolean
-        default: false
-      full_release:
-        description: Run the clean author release with strict candidate prelink
-        required: false
-        type: boolean
-        default: false
-      failure_evidence:
-        description: Preserve retained run 43715522445 layout inputs without building
-        required: false
-        type: boolean
-        default: false
 permissions:
   contents: read
   actions: read
-concurrency:
-  group: unixnu-platform-rpc-validation
-  cancel-in-progress: false
 jobs:
-  candidate:
-    if: inputs.full_release == true && inputs.failure_evidence != true
-    uses: ./.github/workflows/sheng-clean-release.yml
-    secrets: inherit
-  rpc:
-    if: inputs.inputs_only != true && inputs.full_release != true && inputs.failure_evidence != true
-    runs-on: macos-26
-    timeout-minutes: 60
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - name: Restore the retained successful build artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/rpc-input"
-          gh run download 43615501493 --repo "$GITHUB_REPOSITORY" --name clean-kernel-b1-43615501493-1 --dir "$RUNNER_TEMP/rpc-input"
-      - name: Generate the retained IDL and check actual compatibility objects
-        env:
-          INSPECT_SERIALIZABLE: ${{ inputs.inspect_serializable }}
-        run: |
-          args=()
-          if [[ "$INSPECT_SERIALIZABLE" == "true" ]]; then
-            args+=(--inspect-serializable)
-          fi
-          python3 -B scripts/validate-platform-rpc.py --archive "$RUNNER_TEMP/rpc-input/attempt.tar.gz" --work "$RUNNER_TEMP/rpc-work" --evidence "$RUNNER_TEMP/rpc-evidence" "${args[@]}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: platform-rpc-validation-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/rpc-evidence/
-          if-no-files-found: warn
-          retention-days: 7
-
-  inputs:
-    if: inputs.full_release != true && inputs.failure_evidence != true
-    runs-on: macos-26
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - name: Select the original seed cache without exposing identity
-        id: seed-key
-        env:
-          SEED: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 - <<'PY'
-          import hashlib, json, os, re, subprocess
-          seed = os.environ['SEED']
-          if not re.fullmatch(r'(?:0[xX])?[0-9a-fA-F]{1,16}', seed) or not int(seed, 16):
-              raise SystemExit('UNIXNU_UNIQUE_CHIP_ID must be a nonzero hexadecimal u64')
-          caches = json.loads(subprocess.check_output(['gh', 'api', 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/actions/caches?per_page=100']))
-          original = next(item for item in caches['actions_caches'] if item['id'] == 10286437494)
-          if original['ref'] != 'refs/heads/main' or original['size_in_bytes'] != 596036:
-              raise SystemExit('Original installation seed cache identity changed')
-          print('::add-mask::' + original['key'])
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
-              stream.write('key=' + original['key'] + '\n')
-          print('Restoring the archived original installation seed; current cache namespace differs')
-          PY
-      - uses: actions/cache/restore@v4
-        id: seed
-        with:
-          path: |
-            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/runtime/data.dbr
-            UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/runtime/inputs.json
-          key: ${{ steps.seed-key.outputs.key }}
-          fail-on-cache-miss: true
-      - name: Check the preserved seed integrity
-        run: |
-          python3 scripts/inspect-candidate-seed.py \
-            --seed UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/runtime/data.dbr \
-            --expected-uuid 0191D543-CA44-47C8-BBE4-33C208D23230 \
-            --evidence "$RUNNER_TEMP/seed-evidence"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: preserved-candidate-seed-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/seed-evidence/
-          if-no-files-found: warn
-          retention-days: 1
-
-  failure-evidence:
-    if: inputs.failure_evidence == true
+  extract:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Retrieve the completed failure archive without building
+      - name: Retrieve original successful build without rebuilding
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p "$RUNNER_TEMP/failure-input"
-          gh run download 43715522445 --repo "$GITHUB_REPOSITORY" --name sheng-clean-candidate-43715522445-1 --dir "$RUNNER_TEMP/failure-input"
-          python3 - "$RUNNER_TEMP/failure-input/attempt.tar.gz" <<'PY'
-          import hashlib, sys
-          with open(sys.argv[1], 'rb') as stream:
-              digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-          if digest != '4554a485da7e450dbdf282f0f0cf8e95e3729c9291de9cac4ec0ee2c59b51e04':
-              raise SystemExit('Retained failure archive identity changed')
-          print('Original failure archive SHA-256 verified')
+          mkdir -p "$RUNNER_TEMP/input"
+          gh run download 43731472664 --repo "$GITHUB_REPOSITORY" --name sheng-clean-candidate-43731472664-1 --dir "$RUNNER_TEMP/input"
+          python3 - "$RUNNER_TEMP/input" <<'PY'
+          import hashlib,sys
+          from pathlib import Path
+          p=Path(sys.argv[1]); expected=(p/'SHA256SUMS.txt').read_text().split()[0]
+          with (p/'attempt.tar.gz').open('rb') as f: actual=hashlib.file_digest(f,'sha256').hexdigest()
+          if actual!=expected: raise ValueError('Original archive checksum mismatch')
+          print('Verified original archive:',actual)
           PY
-      - name: Extract original layout inputs and seal hidden files
+      - name: Preserve actual delivery and hidden receipts
         run: |
-          python3 -B scripts/repro/read-release-failure.py --archive "$RUNNER_TEMP/failure-input/attempt.tar.gz" --output "$RUNNER_TEMP/failure-logs" > "$RUNNER_TEMP/failure-extraction.log"
-          cp "$RUNNER_TEMP/failure-extraction.log" "$RUNNER_TEMP/failure-logs/"
-          tar -C "$RUNNER_TEMP/failure-logs" -czf "$RUNNER_TEMP/layout-inputs.tar.gz" .
-          sha256sum "$RUNNER_TEMP/layout-inputs.tar.gz" > "$RUNNER_TEMP/layout-inputs.sha256"
-      - name: Measure original layout without changing the emitter
-        run: |
-          python3 -B scripts/repro/measure-retained-layout.py "$RUNNER_TEMP/failure-logs" scripts/clean-prelink-contract.json "$RUNNER_TEMP/layout-measurement.json"
+          python3 -B scripts/repro/extract-delivery.py --archive "$RUNNER_TEMP/input/attempt.tar.gz" --output "$RUNNER_TEMP/delivery" > "$RUNNER_TEMP/extraction.log"
+          tar -C "$RUNNER_TEMP/delivery" -czf "$RUNNER_TEMP/delivery.tar.gz" .
+          sha256sum "$RUNNER_TEMP/delivery.tar.gz" > "$RUNNER_TEMP/delivery.sha256"
+          cp "$RUNNER_TEMP/delivery/EXTRACTION.json" "$RUNNER_TEMP/EXTRACTION.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: layout-measurement-${{ github.run_id }}
-          path: ${{ runner.temp }}/layout-measurement.json
-          if-no-files-found: error
-          retention-days: 30
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: layout-inputs-43715522445-${{ github.run_id }}
+          name: boot-delivery-43731472664
           path: |
-            ${{ runner.temp }}/layout-inputs.tar.gz
-            ${{ runner.temp }}/layout-inputs.sha256
+            ${{ runner.temp }}/delivery.tar.gz
+            ${{ runner.temp }}/delivery.sha256
+            ${{ runner.temp }}/EXTRACTION.json
+            ${{ runner.temp }}/extraction.log
           if-no-files-found: error
           retention-days: 30
