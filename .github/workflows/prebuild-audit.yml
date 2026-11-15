@@ -17,6 +17,11 @@ on:
         required: false
         type: boolean
         default: false
+      failure_evidence:
+        description: Extract retained run 43715522445 logs only, without building
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
   actions: read
@@ -25,11 +30,11 @@ concurrency:
   cancel-in-progress: false
 jobs:
   candidate:
-    if: inputs.full_release == true
+    if: inputs.full_release == true && inputs.failure_evidence != true
     uses: ./.github/workflows/sheng-clean-release.yml
     secrets: inherit
   rpc:
-    if: inputs.inputs_only != true && inputs.full_release != true
+    if: inputs.inputs_only != true && inputs.full_release != true && inputs.failure_evidence != true
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -62,7 +67,7 @@ jobs:
           retention-days: 7
 
   inputs:
-    if: inputs.full_release != true
+    if: inputs.full_release != true && inputs.failure_evidence != true
     runs-on: macos-26
     timeout-minutes: 10
     steps:
@@ -110,3 +115,38 @@ jobs:
           path: ${{ runner.temp }}/seed-evidence/
           if-no-files-found: warn
           retention-days: 1
+
+  failure-evidence:
+    if: inputs.failure_evidence == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Retrieve the completed failure archive without building
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/failure-input"
+          gh run download 43715522445 --repo "$GITHUB_REPOSITORY" --name sheng-clean-candidate-43715522445-1 --dir "$RUNNER_TEMP/failure-input"
+          python3 - "$RUNNER_TEMP/failure-input/attempt.tar.gz" <<'PY'
+          import hashlib, sys
+          with open(sys.argv[1], 'rb') as stream:
+              digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+          if digest != '4554a485da7e450dbdf282f0f0cf8e95e3729c9291de9cac4ec0ee2c59b51e04':
+              raise SystemExit('Retained failure archive identity changed')
+          print('Original failure archive SHA-256 verified')
+          PY
+      - name: Extract only original error logs and state
+        run: |
+          python3 -B scripts/repro/read-release-failure.py --archive "$RUNNER_TEMP/failure-input/attempt.tar.gz" --output "$RUNNER_TEMP/failure-logs" > "$RUNNER_TEMP/failure-extraction.log"
+          cp "$RUNNER_TEMP/failure-extraction.log" "$RUNNER_TEMP/failure-logs/"
+          tail -n 60 "$RUNNER_TEMP/failure-logs/evidence/release.log"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: retained-failure-43715522445-${{ github.run_id }}
+          path: ${{ runner.temp }}/failure-logs/
+          if-no-files-found: error
+          retention-days: 7
