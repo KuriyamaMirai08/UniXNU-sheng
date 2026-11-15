@@ -144,6 +144,16 @@ jobs:
           cp "$RUNNER_TEMP/failure-extraction.log" "$RUNNER_TEMP/failure-logs/"
           tar -C "$RUNNER_TEMP/failure-logs" -czf "$RUNNER_TEMP/layout-inputs.tar.gz" .
           sha256sum "$RUNNER_TEMP/layout-inputs.tar.gz" > "$RUNNER_TEMP/layout-inputs.sha256"
+      - name: Measure original layout without changing the emitter
+        run: |
+          python3 -B scripts/repro/measure-retained-layout.py "$RUNNER_TEMP/failure-logs" scripts/clean-prelink-contract.json "$RUNNER_TEMP/layout-measurement.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: layout-measurement-${{ github.run_id }}
+          path: ${{ runner.temp }}/layout-measurement.json
+          if-no-files-found: error
+          retention-days: 30
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
