@@ -275,7 +275,9 @@ def main():
                          "libkern/libkern/c++/OSSerialize.h", "libkern/libkern/c++/OSUnserialize.h",
                          "libkern/libkern/c++/OSUnserializeXMLSharedImplementation.h"):
             exported = obj / "EXPORT_HDRS" / relative
-            exported.chmod(exported.stat().st_mode | 0o200)
+            exported.parent.mkdir(parents=True, exist_ok=True)
+            if exported.exists():
+                exported.chmod(exported.stat().st_mode | 0o200)
             shutil.copyfile(source / relative, exported)
         objects = evidence / "objects"
         objects.mkdir()

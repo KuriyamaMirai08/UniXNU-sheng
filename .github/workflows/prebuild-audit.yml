@@ -47,21 +47,28 @@ jobs:
           retention-days: 7
 
   inputs:
-    runs-on: ubuntu-latest
+    runs-on: macos-26
     timeout-minutes: 10
     steps:
       - name: Select the original seed cache without exposing identity
         id: seed-key
         env:
           SEED: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import hashlib, os, re
+          import hashlib, json, os, re, subprocess
           seed = os.environ['SEED']
           if not re.fullmatch(r'(?:0[xX])?[0-9a-fA-F]{1,16}', seed) or not int(seed, 16):
               raise SystemExit('UNIXNU_UNIQUE_CHIP_ID must be a nonzero hexadecimal u64')
+          caches = json.loads(subprocess.check_output(['gh', 'api', 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/actions/caches?per_page=100']))
+          original = next(item for item in caches['actions_caches'] if item['id'] == 10286437494)
+          if original['ref'] != 'refs/heads/main' or original['size_in_bytes'] != 596036:
+              raise SystemExit('Original installation seed cache identity changed')
+          print('::add-mask::' + original['key'])
           with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
-              stream.write('key=data-seed-v1-' + hashlib.sha256(seed.encode()).hexdigest()[:16] + '-27\n')
+              stream.write('key=' + original['key'] + '\n')
+          print('Restoring the archived original installation seed; current cache namespace differs')
           PY
       - uses: actions/cache/restore@v4
         id: seed
