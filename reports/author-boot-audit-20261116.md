@@ -42,6 +42,25 @@ final real link to succeed. A control-flow regression accepts the reconciled
 export case and refuses publication when the final link lacks a real provider.
 Neither test fixtures nor placeholder providers enter the production build.
 
+Run 43747167997's first link also has four real missing dependencies from the
+DEVELOPMENT archives: three signed-overflow minimal-runtime handlers and
+`mach_assert_jump_key`. XNU's RELEASE configuration does not select those
+providers. Its original `san/memory/ubsan_minimal.c` implements the handlers
+with real `brk #0xff00` traps, with the telemetry and initialization paths;
+`osfmk/kern/debug.c` defines the structured assertion jump key and its feature
+override lifecycle. These are not empty fallback functions or scalar substitutes.
+
+The private RELEASE comparison now selects the original `mach_assert` and
+`ubsan_minimal` options in `MASTER.arm64.bcm2837`. It retains the `release`
+option, `KERNEL_CONFIGS=RELEASE` and `BUILD_LTO=1`. This is an explicit comparison
+configuration difference from the upstream recipe, required by the genuine
+DEVELOPMENT archives. The source/SDK and script hashes plus the option select
+the build key. The receipt records before/after configuration and real source
+hashes; final publication requires all four real defined symbols. Strict
+prelink checks the receipt. The actual DEVELOPMENT native configuration and
+its assertion/sanitizer instrumentation remain unchanged. Four local
+publication regressions pass; the actual new Apple link is still required.
+
 ## Verification scope
 
 The new check executes the actual guarded GPU and RAM statement blocks with
