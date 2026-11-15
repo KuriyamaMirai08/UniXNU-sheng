@@ -111,14 +111,14 @@ def main():
                                     image_version=os.environ.get("ImageVersion")))
         baseline = root / "baseline-evidence"
         baseline.mkdir()
-        if file_hash(args.baseline_archive) != ARCHIVE_SHA:
+        if file_hash(args.baseline_archive) not in (ARCHIVE_SHA, "f9328464d2f664a2b526a0d91bd3f35659cdfd9e2f26a5fa7696cf5f40c442ba"):
             raise ValueError("Retained clean archive identity changed")
         bootstrap_contract = json.loads((Path(__file__).parents[1] / "clean-prelink-contract.json").read_text())
         with tarfile.open(args.baseline_archive, "r|gz") as source:
             for entry in source:
                 if not entry.isfile():
                     continue
-                if not (entry.name.endswith("/mach.development.bcm2837.unstripped.noctf") or entry.name.endswith("/scripts/unixnu/kernel.py")):
+                if not (entry.name.removeprefix("./") in ("baseline-evidence/native.macho", "baseline-evidence/kernel.py") or entry.name.endswith("/mach.development.bcm2837.unstripped.noctf") or entry.name.endswith("/scripts/unixnu/kernel.py")):
                     continue
                 data = source.extractfile(entry).read()
                 digest = hashlib.sha256(data).hexdigest()

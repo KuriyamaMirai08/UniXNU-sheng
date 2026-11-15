@@ -1,0 +1,56 @@
+--- a/libkern/image4/image4_v2.c
++++ b/libkern/image4/image4_v2.c
+@@ -82,7 +82,7 @@
+ SECURITY_READ_ONLY_LATE(const void *) _image4_v2_interface = NULL;
+ 
+ #pragma mark KPI
+-void
++__attribute__((minsize)) void
+ image4_v2_interface_register(const void *interface)
+ {
+ 	/* The retained security extension starts before __DATA_CONST lockdown.
+@@ -112,7 +112,7 @@
+ 	pal->copy_nonce_digest = sheng_image4_copy_nonce_digest;
+ }
+ 
+-static int
++__attribute__((minsize)) static int
+ sheng_image4_copy_nonce_digest(uint32_t domain, struct sheng_image4_digest *digest)
+ {
+ 	if (!digest) {
+@@ -152,7 +152,7 @@
+ 	return result;
+ }
+ 
+-int
++__attribute__((minsize)) int
+ image4_v2_set_nonce_digest(uint32_t domain, const void *digest, size_t length)
+ {
+ 	if (!digest || !length || length > SHENG_IMAGE4_DIGEST_BYTES ||
+@@ -176,7 +176,7 @@
+ 	return 0;
+ }
+ 
+-int
++__attribute__((minsize)) int
+ image4_v2_roll_nonce(uint32_t domain)
+ {
+ 	if (domain >= SHENG_IMAGE4_NONCE_DOMAINS) {
+@@ -194,7 +194,7 @@
+ 	return 0;
+ }
+ 
+-int
++__attribute__((minsize)) int
+ image4_v2_load_diavlo_root_ca(const void *manifest, size_t manifest_length,
+     const void *payload, size_t payload_length)
+ {
+@@ -210,7 +210,7 @@
+ 	return v2->load_root_ca(manifest, manifest_length, payload, payload_length);
+ }
+ 
+-int
++__attribute__((minsize)) int
+ image4_v2_load_local_policy(const void *manifest, size_t manifest_length)
+ {
+ 	if (!manifest || !manifest_length ||

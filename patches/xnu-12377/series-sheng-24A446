@@ -18,3 +18,4 @@ sheng-appsync-runtime.patch
 sheng-appsync-user-trust.patch
 driverkit-platform-function.patch
 sheng-image4-normal-runtime.patch
+sheng-image4-size.patch

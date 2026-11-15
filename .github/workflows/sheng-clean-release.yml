@@ -40,11 +40,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$RUNNER_TEMP/candidate-baseline"
-          gh run download 43615501493 --repo "$GITHUB_REPOSITORY" --name clean-kernel-b1-43615501493-1 --dir "$RUNNER_TEMP/candidate-baseline"
+          gh run download 43729102858 --repo "$GITHUB_REPOSITORY" --name layout-inputs-43715522445-43729102858 --dir "$RUNNER_TEMP/candidate-baseline"
       - name: Clean build and original full release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 -B scripts/repro/run-release.py --baseline-archive "$RUNNER_TEMP/candidate-baseline/attempt.tar.gz"
+        run: python3 -B scripts/repro/run-release.py --baseline-archive "$RUNNER_TEMP/candidate-baseline/layout-inputs.tar.gz"
       - name: Archive complete build and errors
         if: always() && env.CANDIDATE_ATTEMPT != ''
         run: |

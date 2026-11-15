@@ -21,6 +21,12 @@ next_action = ["Compare the effective status output whenever a profile, source o
 
 [[area.evidence]]
 kind = "host"
+reference = "reports/image4-size-optimization.md"
+command = "Existing Image4 host fixture, exact updated source, -O2"
+result = "37 checks pass for function-local minsize annotations; five panic conditions and real backend/mirror cases retained. Native size and final prelink qualification remain pending."
+
+[[area.evidence]]
+kind = "host"
 reference = "https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43676927240"
 command = "scripts/validate-platform-rpc.py with retained clean-build inputs"
 revision = "9f70595be6be3080db8afb9997ebd9598a533493"
