@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "source_boot_sha256": "49ec73741328e36b1165639662ca2f3f011e6dd57cb6c2c196cd4bc906d149d3",
+  "seed_sha256": "d42a14aa60f3c95d2c908de376aef2d2f940fa720cc8fee36fe0d3c6f3a18445",
+  "seed_uuid": "0191D543-CA44-47C8-BBE4-33C208D23230",
+  "encoded_bytes": 1220736,
+  "compressed_bytes": 611225,
+  "unique_chip_id_sha256": "fc5ee9fc27cf2a59e0372f7fe9b28162eb16e90b6e9eedc285aabbb9f030046a",
+  "chip_id": 33090,
+  "source_payload": "/EFI/UniXNU/Payloads/scratch-data.img",
+  "source_adt_sha256": "126d791c8665d993c23465e28e3ae30b171eb70b3b39fad0e50d4dc1dd8eef09",
+  "cached_seed_matches_installed": false,
+  "encrypted_input_sha256": "ccc085a84462348ea64ec9ab5210f3270b6d89eae9d3dda420cc45c25b631475",
+  "encrypted_input_bytes": 615806,
+  "encryption": "AES-256-GCM",
+  "secret_name": "UNIXNU_SHENG_CANDIDATE_INPUT_KEY_20261115"
+}

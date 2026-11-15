@@ -1,5 +1,29 @@
 The boot candidate branch starts at 3454f946be90bfe2fabd5aeb1d01a85ee72726cc.
-No complete replacement kernel or boot image exists at this checkpoint.
+The separate Sheng clean boot candidate workflow now selects its current
+device commit and enters the author's unchanged scripts/package.sh and
+unixnu release. A complete replacement kernel and boot image remain pending.
+
+Run 43711505839 passed six RPC compilation units, the actual Image4 kernel
+unit, partial linking and original OSSerialize fields, size and alignment.
+The grammar allocation flag now matches the successful original generated
+header. Host actual-source checks passed 35 wire cases and 37 Image4 state
+and error cases. Those results do not establish hardware or startup behavior.
+
+The candidate prelink keeps the original engine and regressions. It requires
+relocation-equivalent historical functions, the real panic handler, enabled
+assertions, five qualified new implementations, zero missing bindings,
+zero stubbed bindings and zero unproven kernel page references. Final import
+slots, their PAC fields and the Image4 BTI/B target are decoded independently.
+The author's mapping/loadable/runtime report fields keep their meanings.
+
+The cached Data seed has a different volume identity from installed boot
+49ec7374. Both are preserved. This candidate restores the exact installed
+scratch-data bytes and original identity through authenticated private inputs;
+the author runtime binds the actual Data UUID before compiling. The kernel
+and object caches are not restored into the fresh candidate build.
+
+RPC, XML and Image4 feature expansion is closed for this candidate. Further
+implementation is limited to a demonstrated build or packaging failure.
 
 The retained RPC compilation failed because MACH_PORT_VALID compares a numeric
 mach_port_name_t with the kernel's nullptr MACH_PORT_NULL. The isolated source

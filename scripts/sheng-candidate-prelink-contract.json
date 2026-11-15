@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "qualified_object_run": 43711505839,
+  "host_rpc_checks": 35,
+  "host_image4_checks": 37,
+  "prepared_sources": {
+    "config/IOKit.exports": "7b525410d966f12d384e2b230c6ef3fb3871fa38c5c4cad64b4c3836105559f4",
+    "config/Libkern.exports": "a7ef52a6d851ff4bef0f4c553ca4598fc2dd71144153cc75b74e83cbe009a204",
+    "libkern/c++/OSSerializeBinary.cpp": "66cda36749206fc6b32251e150d835138e59227b15bb525ec9bd910e9d591390",
+    "libkern/c++/OSUnserializeXML.cpp": "20f7364e1d9487eb5cb7e8caeb404b2e203022c84a83fefaad107038f5868560",
+    "libkern/c++/OSUnserializeXML.y": "87f0a62faf343f1bcd8c8e87af871ea418aa079a68db9f798cacc2028216e181",
+    "libkern/image4/image4_v2.c": "cedf8dcac16328af6ee0fe0a42a59c2c37e41874e47dd4e0fe35c0122769995d",
+    "libkern/libkern/c++/OSSerialize.h": "58d10f60c185ae521833c22fae23c7f3e3c396371545a5135f051ad4a2af11b7",
+    "libkern/libkern/c++/OSUnserialize.h": "ed93a6809934300e7af91745b268534e02264add80293ee9047ba729462784ba",
+    "libkern/libkern/c++/OSUnserializeXMLSharedImplementation.h": "e7e67fb430a0e89eec45b93d70a993a22055343a5274e5efde5c307261413063",
+    "iokit/DriverKit/IOService.iig": "59d6da1c372fba6a99f975019fbe2a017cd80b72cc8baa6aa921e9118baccf23",
+    "iokit/DriverKit/Makefile": "17c46355542917253a94abee3c02684a1cba9090892b1a4e1bbb4b9dade9ca45",
+    "iokit/DriverKit/restore_platform_rpc.py": "a48f7796ff2a52c24c2c7e4d59f87db3e951988e339d52537a96450bc59f1d28",
+    "iokit/IOKit/IOKitKeysPrivate.h": "c1271ab469a0c4e017c6394f718eff5ae05ad7fc03509a3924ed4f643af419f2",
+    "iokit/IOKit/IORPC.h": "fc2c7ef537953c84dbb30aa7e1d28783a96c58012752b3e2e0333355b0d68174",
+    "iokit/IOKit/IOUserServer.h": "1da50f4ee768751e3074623ead24bd8760ca97b8dcb4356c01f208732d14433a",
+    "iokit/Kernel/IOService.cpp": "4c1d6cadbf0556acd01874300a37a5f8f27a477a0d5a5520f278c45d194b0616",
+    "iokit/Kernel/IOUserServer.cpp": "306330a8598ffe1cdd439d55b6f17d67350d1b658fac02297dc198a64f785af3"
+  },
+  "new_functions": [
+    {
+      "original": "0xfffffe000b433e68",
+      "native_symbol": "__ZN9IOService20CallPlatformFunctionEP8OSStringbP12OSDictionaryPS3_PFiP15OSMetaClassBase5IORPCE",
+      "original_size": 480,
+      "original_sha256": "91b4b349d67b60fd5ef3dfa03764dbfe66a8e4dd6b4f7e293b39589dca72bf9c",
+      "evidence": "Observed typed 24A446 IOService platform dictionary RPC, ID bf66f4287c60ef85, bit8 wire flag, owning-task object conversion and typed provider handler. Source, six Apple objects and original object layout verified."
+    },
+    {
+      "original": "0xfffffe000b2a1694",
+      "native_symbol": "_image4_v2_set_nonce_digest",
+      "original_size": 120,
+      "original_sha256": "69c79bbdc700d2f455f9d929843b25f8c0833633985a4f2d6ec2bccea2a5125c",
+      "evidence": "Selector 0x34, w0 domain, borrowed digest buffer and size; native mirrors digest consumed by retained normal PAL verification. Original AppleImage4 query remains fallback."
+    },
+    {
+      "original": "0xfffffe000b2a170c",
+      "native_symbol": "_image4_v2_roll_nonce",
+      "original_size": 108,
+      "original_sha256": "72abaa8d166a02ed91abdb764de5358615cc43a6144af1530a34805e4b37726b",
+      "evidence": "Selector 0x35, w0 domain; retained Image4 rolls its genuine AppleImage4 nonce first, native mirrors invalidation for normal verification without generating a nonce."
+    },
+    {
+      "original": "0xfffffe000b2a1778",
+      "native_symbol": "_image4_v2_load_diavlo_root_ca",
+      "original_size": 32,
+      "original_sha256": "13bd742d02bb1495cfee51cb979a14cc8344c577a22a3bc2ab1a70cf7242a03a",
+      "evidence": "Selector 0x36, two borrowed buffers/lengths; delegates to authenticated retained normal root certificate verification callback 0x629a."
+    },
+    {
+      "original": "0xfffffe000b2a1798",
+      "native_symbol": "_image4_v2_load_local_policy",
+      "original_size": 24,
+      "original_sha256": "65e3aad993658c7e93ff1fd83b806f92ee085967b4d56758e274b0332cb05499",
+      "evidence": "Selector 0x37, borrowed buffer/length; delegates to authenticated retained normal local policy verification callback 0x50c7."
+    }
+  ],
+  "new_bindings": [
+    {
+      "owner": "com.apple.driver.AppleARMPlatform",
+      "original": "0xfffffe000b433e68",
+      "symbol": "__ZN9IOService20CallPlatformFunctionEP8OSStringbP12OSDictionaryPS3_PFiP15OSMetaClassBase5IORPCE",
+      "site": "0xfffffe0007f855c0"
+    },
+    {
+      "owner": "com.apple.security.Image4",
+      "original": "0xfffffe000b2a1694",
+      "symbol": "_image4_v2_set_nonce_digest",
+      "site": "0xfffffe0008479bd8"
+    },
+    {
+      "owner": "com.apple.security.Image4",
+      "original": "0xfffffe000b2a170c",
+      "symbol": "_image4_v2_roll_nonce",
+      "site": "0xfffffe0008479bd0"
+    },
+    {
+      "owner": "com.apple.security.Image4",
+      "original": "0xfffffe000b2a1778",
+      "symbol": "_image4_v2_load_diavlo_root_ca",
+      "site": "0xfffffe0008479bc0"
+    },
+    {
+      "owner": "com.apple.security.Image4",
+      "original": "0xfffffe000b2a1798",
+      "symbol": "_image4_v2_load_local_policy",
+      "site": "0xfffffe0008479bc8"
+    }
+  ],
+  "normal_pal_selector": "0xfffffe000a9e5230",
+  "runtime_qualified": false,
+  "no_new_stubs": true
+}

@@ -1,0 +1,59 @@
+name: Sheng clean boot candidate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: unixnu-sheng-clean-candidate
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 350
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install the original build tools
+        run: |
+          test -d "$DEVELOPER_DIR"
+          brew install dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw
+          python3 -m venv "$RUNNER_TEMP/candidate-python"
+          "$RUNNER_TEMP/candidate-python/bin/pip" install cryptography
+          echo "$RUNNER_TEMP/candidate-python/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          echo /opt/homebrew/opt/llvm/bin >> "$GITHUB_PATH"
+          echo /opt/homebrew/opt/lld/bin >> "$GITHUB_PATH"
+          echo /opt/homebrew/opt/bison/bin >> "$GITHUB_PATH"
+          rustup toolchain install 1.98.0 --profile minimal --component rust-src
+      - name: Restore the exact installed inputs privately
+        env:
+          UNIXNU_SHENG_CANDIDATE_INPUT_KEY_20261115: ${{ secrets.UNIXNU_SHENG_CANDIDATE_INPUT_KEY_20261115 }}
+        run: python3 scripts/prepare-sheng-candidate-inputs.py --output "$RUNNER_TEMP/installed-candidate-inputs"
+      - name: Restore baseline evidence only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/candidate-baseline"
+          gh run download 43615501493 --repo "$GITHUB_REPOSITORY" --name clean-kernel-b1-43615501493-1 --dir "$RUNNER_TEMP/candidate-baseline"
+      - name: Clean build and original full release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/repro/run-release.py --baseline-archive "$RUNNER_TEMP/candidate-baseline/attempt.tar.gz"
+      - name: Archive complete build and errors
+        if: always() && env.CANDIDATE_ATTEMPT != ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/candidate-upload"
+          tar --exclude=.git -czf "$RUNNER_TEMP/candidate-upload/attempt.tar.gz" -C "$CANDIDATE_ATTEMPT" .
+          shasum -a 256 "$RUNNER_TEMP/candidate-upload/attempt.tar.gz" > "$RUNNER_TEMP/candidate-upload/SHA256SUMS.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && env.CANDIDATE_ATTEMPT != ''
+        with:
+          name: sheng-clean-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/candidate-upload/
+          if-no-files-found: error
+          retention-days: 3

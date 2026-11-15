@@ -17,3 +17,4 @@ scripts/clean-prelink-symbols.json -text -eol whitespace=cr-at-eol
 *.bin binary
 *.a binary
 *.o binary
+*.aesgcm binary
