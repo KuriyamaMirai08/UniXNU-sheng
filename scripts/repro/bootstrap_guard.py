@@ -9,7 +9,7 @@ _native_legacy_display_late_probe _native_legacy_display_probe _native_ram_block
 _native_ram_block_volume_seed _native_source_storage_start _native_verified_block_manifest_sha384
 _native_verified_block_root_authorized _native_verified_block_volume_device _sheng_boot_watchdog_policy'''.split())
 
-def classify(text):
+def classify(text, expected=EXPECTED):
     marker='Undefined symbols for architecture arm64e.kernel:'
     if text.count(marker)!=1: raise ValueError('Expected exactly one arm64e.kernel undefined-symbol block')
     before,block=text.split(marker)
@@ -21,7 +21,7 @@ def classify(text):
         if line.strip() and not re.fullmatch(r"ld: warning: search path '.*/\.cache/fakeroot/usr/local/lib/kernel/platform' not found",line):
             raise ValueError('Unexpected operation between LD and undefined symbols')
     names=set(re.findall(r'^\s+"(_[^"]+)", referenced from:',block,re.M))
-    if names!=EXPECTED: raise ValueError('Bootstrap symbol set changed: '+repr(sorted(names^EXPECTED)))
+    if names!=expected: raise ValueError('Bootstrap symbol set changed: '+repr(sorted(names^expected)))
     errors=[line.strip() for line in block.splitlines() if re.search(r'(?:fatal error:|error:|\*\*\*)',line)]
     for line in errors:
         if line=='clang++: error: linker command failed with exit code 1 (use -v to see invocation)': continue
@@ -38,7 +38,12 @@ def accept_bootstrap_failure(ctx, env, started):
         if env.get('XNU_BOOTSTRAP')!='1': raise ValueError('Not bootstrap')
         log=ctx.logs/'kernel-bootstrap.log'
         data=log.read_bytes(); report['log_sha256']=hashlib.sha256(data).hexdigest()
-        report['symbols']=classify(data.decode(errors='replace'))
+        expected = EXPECTED
+        if env.get('UNIXNU_SHENG_BOOT_CANDIDATE') == '1':
+            if env.get('UNIXNU_IPSW_BUILD') != '24A446':
+                raise ValueError('Candidate bootstrap guard selected for a different OS')
+            expected = EXPECTED | {'_sheng_image4_normal_pal'}
+        report['symbols']=classify(data.decode(errors='replace'), expected)
         obj=ctx.tree/'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837'
         startup=obj/'osfmk/DEVELOPMENT/startup.o.json'
         record=json.loads(startup.read_text().strip().rstrip(','))

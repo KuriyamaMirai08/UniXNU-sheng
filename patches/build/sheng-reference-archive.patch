@@ -1,0 +1,27 @@
+diff --git a/scripts/build-fileset-release-reference.py b/scripts/build-fileset-release-reference.py
+index 5090d11..2e11317 100644
+--- a/scripts/build-fileset-release-reference.py
++++ b/scripts/build-fileset-release-reference.py
+@@ -58,6 +58,8 @@ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--tree', required=True, type=Path, help='prepared XNU build tree of the OS profile')
+     parser.add_argument('--lto', action='store_true', help='enable the RELEASE default link-time optimization')
++    parser.add_argument('--force-archive', action='append', default=[], type=Path,
++                        help='real additional archive needed by the selected source, relative to --tree')
+     options = parser.parse_args()
+     mode = 'lto' if options.lto else 'snapshot'
+     root = options.tree.resolve()
+@@ -68,6 +70,13 @@ def main():
+     archives = [root/'build/corecrypto-2023/libcorecrypto_kernel_noasm-namespaced.a']
+     forced = [root/f'build/{folder}/{name}' for folder,name in (
+         ('libpthread-kernel','libpthread_kernel.a'),('armdt-platform','libArmDTPlatform.a'),('armcpu','libArmCpu.a'))]
++    for relative in options.force_archive:
++        archive = (root / relative).resolve(strict=True)
++        if relative.is_absolute() or not archive.is_relative_to(root) or archive.suffix != '.a':
++            raise ValueError('Additional reference archives must be real archives within the selected tree')
++        if archive in forced or archive in archives:
++            raise ValueError('Duplicate additional reference archive')
++        forced.append(archive)
+     inputs = {
+         'mode': mode,
+         'script': file_hash(Path(__file__)),

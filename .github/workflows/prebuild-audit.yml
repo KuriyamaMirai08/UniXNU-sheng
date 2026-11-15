@@ -7,6 +7,11 @@ on:
         required: false
         type: boolean
         default: false
+      inputs_only:
+        description: Inspect the original Seed without repeating completed object checks
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
   actions: read
@@ -15,6 +20,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   rpc:
+    if: inputs.inputs_only != true
     runs-on: macos-26
     timeout-minutes: 60
     env:

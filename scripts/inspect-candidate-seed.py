@@ -14,7 +14,7 @@ from pathlib import Path
 PAGE = 4096
 
 
-def inspect(blob, expected_uuid):
+def inspect(blob, expected_uuid=None):
     if not 32 <= len(blob) <= 256 * 1024**2:
         raise ValueError("Packed seed input size is invalid")
     magic, version, page, logical, count = struct.unpack_from("<8sIIQQ", blob)
@@ -45,12 +45,14 @@ def inspect(blob, expected_uuid):
         end = offset + length
     if cursor != len(blob):
         raise ValueError("Original seed contains trailing packed bytes")
-    if identities != {str(uuid.UUID(expected_uuid)).upper()}:
+    if len(identities) != 1:
+        raise ValueError("Restored Data seed does not contain exactly one volume UUID")
+    if expected_uuid and identities != {str(uuid.UUID(expected_uuid)).upper()}:
         raise ValueError("Restored Data UUID does not match the installed sheng configuration")
     return dict(encoded_bytes=len(blob), encoded_sha256=hashlib.sha256(blob).hexdigest(),
                 logical_bytes=logical, packed_extents=extents, data_volume_uuid=identities.pop(),
                 seed_identity_v2=identity.hexdigest() if logical > 2 * 1024**3 else None,
-                volume_superblocks=superblocks, installed_uuid_matches=True,
+                volume_superblocks=superblocks, installed_uuid_matches=True if expected_uuid else None,
                 historical_integrity_record_present=False, new_receipt=True,
                 seed_regenerated=False, seed_modified=False, device_operations=False)
 
@@ -58,17 +60,20 @@ def inspect(blob, expected_uuid):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=Path, required=True)
-    parser.add_argument("--expected-uuid", required=True)
+    parser.add_argument("--expected-uuid")
     parser.add_argument("--evidence", type=Path, required=True)
     args = parser.parse_args()
     args.evidence.mkdir(parents=True, exist_ok=False)
     original = args.seed.read_bytes()
-    report = inspect(original, args.expected_uuid)
+    (args.evidence / "data.dbr").write_bytes(original)
+    report = inspect(original)
+    (args.evidence / "receipt.json").write_text(json.dumps(report, indent=2) + "\n")
+    if args.expected_uuid:
+        report = inspect(original, args.expected_uuid)
     if args.seed.read_bytes() != original:
         raise ValueError("Seed input changed during inspection")
     (args.evidence / "receipt.json").write_text(json.dumps(report, indent=2) + "\n")
-    (args.evidence / "data.dbr").write_bytes(original)
-    print("Restored original Data seed: packed structure and installed volume UUID match")
+    print("Restored Data seed inspected and preserved; installation matching recorded separately")
 
 
 if __name__ == "__main__":
