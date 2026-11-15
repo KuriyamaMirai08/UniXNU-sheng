@@ -205,11 +205,17 @@ def main():
                 a.splitlines(keepends=True), b.splitlines(keepends=True), fromfile="before/" + name, tofile="after/" + name)))
         for name in ("IOService.h", "IOService.iig.cpp"):
             for target in obj.rglob(name):
+                if target.parent.name != "DriverKit":
+                    continue
                 if not target.resolve().is_relative_to(work):
                     raise ValueError("Generated-header link escaped experiment")
+                target.chmod(target.stat().st_mode | 0o200)
                 shutil.copyfile(current_generated / name, target)
         for target in (tree / ".cache/fakeroot").rglob("IOService.h"):
             if "/DriverKit/" in str(target) or "/DriverKit.framework/" in str(target):
+                if not target.resolve().is_relative_to(work):
+                    raise ValueError("Framework-header link escaped experiment")
+                target.chmod(target.stat().st_mode | 0o200)
                 shutil.copyfile(current_generated / "IOService.h", target)
         objects = evidence / "objects"
         objects.mkdir()

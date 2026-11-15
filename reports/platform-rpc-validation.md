@@ -27,3 +27,10 @@ The original request uses three descriptors and object references, send size
 comparison. Image4 nonce/trust interfaces and an exact new boot image remain
 separate unresolved requirements. The emitter's `loadable=false` is a
 constant, not evidence of an observed loader rejection.
+
+Run `43676694678` verified the archive/compiler identities, byte-identical
+baseline generation, the exact new method ID and unchanged existing IDs.
+It stopped before compilation while replacing a read-only exported header.
+The validation script now replaces only DriverKit generated headers, with
+owner write permission in the isolated copy. The original IOKit class header
+is preserved. This failure is retained separately from kernel diagnostics.
