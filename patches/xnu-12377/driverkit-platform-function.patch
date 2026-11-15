@@ -164,7 +164,7 @@ index 5e28090..1a32fb9 100644
  #if defined(__x86_64__)
  	sCPULatencyFunctionName[kCpuDelayInterrupt] = OSSymbol::withCStringNoCopy(kIOPlatformFunctionHandlerMaxInterruptDelay);
 diff --git a/iokit/Kernel/IOUserServer.cpp b/iokit/Kernel/IOUserServer.cpp
-index 14d77fb..43c2d4d 100644
+index 14d77fb..db1115c 100644
 --- a/iokit/Kernel/IOUserServer.cpp
 +++ b/iokit/Kernel/IOUserServer.cpp
 @@ -53,6 +53,7 @@
@@ -226,7 +226,7 @@ index 14d77fb..43c2d4d 100644
 +		return value;
 +	}
 +	mach_port_name_t port = iokit_make_send_right(context->task, object, IKOT_UEXT_OBJECT);
-+	if (!MACH_PORT_VALID(port)) {
++	if (port == 0 || port == MACH_PORT_DEAD) {
 +		context->status = kIOReturnBadArgument;
 +		value->retain();
 +		return value;
