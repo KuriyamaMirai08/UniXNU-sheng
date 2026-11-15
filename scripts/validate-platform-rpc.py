@@ -326,7 +326,7 @@ def main():
         base_record = json.JSONDecoder().raw_decode(
             (obj / "DEVELOPMENT_ARM64_BCM2837/libkern/DEVELOPMENT/OSSerialize.cpo.json").read_text())[0]
         layouts = {}
-        for label, include in (("before", before / "libkern/libkern"), ("after", source / "libkern/libkern")):
+        for label, include in (("before", before / "libkern"), ("after", source / "libkern")):
             original_argv = [value.replace(OLD_ROOT, str(work)) for value in base_record["arguments"]]
             old_file = base_record["file"].replace(OLD_ROOT, str(work))
             actual = [compiler, "-I" + str(include), *original_argv[1:]]
@@ -351,6 +351,8 @@ def main():
         receipt["partial_link_returncode"] = run([
             "xcrun", "ld", "-r", "-arch", "arm64e", "-o", str(objects / "rpc-iokit.o"),
             *map(str, sorted(objects.glob("*.cpo")))], repo, evidence, "partial-link", required=False)
+        if receipt["partial_link_returncode"]:
+            raise ValueError("The actual compatibility objects failed partial linking")
         for unit in receipt["compiled_units"]:
             run(["xcrun", "otool", "-tvV", str(objects / (unit["name"] + ".cpo"))], repo, evidence,
                 "disassembly-" + unit["name"], required=False)

@@ -50,6 +50,9 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
       - name: Select the original seed cache without exposing identity
         id: seed-key
         env:
@@ -80,12 +83,14 @@ jobs:
           fail-on-cache-miss: true
       - name: Check the preserved seed integrity
         run: |
-          python3 - <<'PY'
-          import hashlib, json, pathlib
-          root = pathlib.Path('UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/runtime')
-          seed = root / 'data.dbr'
-          saved = json.loads((root / 'inputs.json').read_text())
-          if not seed.is_file() or hashlib.sha256(seed.read_bytes()).hexdigest() != saved['inputs']['data_ramdisk']['sha256']:
-              raise SystemExit('Original Data seed does not match its integrity record')
-          print('Original Data seed restored and verified; no regeneration')
-          PY
+          python3 scripts/inspect-candidate-seed.py \
+            --seed UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/runtime/data.dbr \
+            --expected-uuid 0191D543-CA44-47C8-BBE4-33C208D23230 \
+            --evidence "$RUNNER_TEMP/seed-evidence"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: preserved-candidate-seed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/seed-evidence/
+          if-no-files-found: warn
+          retention-days: 1

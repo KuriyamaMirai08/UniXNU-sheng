@@ -803,7 +803,7 @@ index 5d6f1de..efe86ba 100644
  	return result;
  }
 diff --git a/libkern/c++/OSUnserializeXML.y b/libkern/c++/OSUnserializeXML.y
-index 5efc45b..bca36f7 100644
+index 5efc45b..05e81b1 100644
 --- a/libkern/c++/OSUnserializeXML.y
 +++ b/libkern/c++/OSUnserializeXML.y
 @@ -56,7 +56,9 @@
@@ -853,6 +853,15 @@ index 5efc45b..bca36f7 100644
  static int              OSUnserializeerror(parser_state_t *state, const char *s);
  
  static int              yylex(YYSTYPE *lvalp, parser_state_t *state);
+@@ -136,7 +142,7 @@ __BEGIN_DECLS
+ __END_DECLS
+ 
+ #define malloc(size)         malloc_impl(size)
+-#define malloc_type(type)    kalloc_type(type, Z_SET_NOTSHARED)
++#define malloc_type(type)    kalloc_type(type, Z_SET_NOT_EARLY)
+ static inline void *
+ malloc_impl(size_t size)
+ {
 @@ -214,7 +220,7 @@ realloc_impl(void *addr, size_t osize, size_t nsize)
  %token SYNTAX_ERROR
  %% /* Grammar rules and actions follow */
@@ -1301,7 +1310,7 @@ index a6cded4..a674ce6 100644
   * @header
   *
 diff --git a/libkern/libkern/c++/OSUnserializeXMLSharedImplementation.h b/libkern/libkern/c++/OSUnserializeXMLSharedImplementation.h
-index fc7fa7d..db2747e 100644
+index fc7fa7d..0ecef11 100644
 --- a/libkern/libkern/c++/OSUnserializeXMLSharedImplementation.h
 +++ b/libkern/libkern/c++/OSUnserializeXMLSharedImplementation.h
 @@ -48,117 +48,87 @@
@@ -1506,15 +1515,6 @@ index fc7fa7d..db2747e 100644
  static int              OSUnserializeerror(parser_state_t *state, const char *s);
  
  static int              yylex(YYSTYPE *lvalp, parser_state_t *state);
-@@ -231,7 +204,7 @@ __BEGIN_DECLS
- __END_DECLS
- 
- #define malloc(size)         malloc_impl(size)
--#define malloc_type(type)    kalloc_type(type, Z_SET_NOT_EARLY)
-+#define malloc_type(type)    kalloc_type(type, Z_SET_NOTSHARED)
- static inline void *
- malloc_impl(size_t size)
- {
 @@ -239,7 +212,7 @@ malloc_impl(size_t size)
  		return NULL;
  	}
