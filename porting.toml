@@ -31,7 +31,7 @@ kind = "source"
 reference = "reports/author-boot-audit-20261116.md"
 command = "prepare-sheng-author-audit.py; check-sheng-optional-providers.py; clean release"
 revision = "1d0abd9fda19619997428dee020ccf609b473f12"
-result = "Candidate removes four synthesized optional function definitions and selects the upstream absent-provider branches from checked source capability inputs. Real request-layout data comes from the reviewed fixture. RELEASE comparison links real same-run storage, Adreno and display archives and refuses missing providers. Source guards and Python syntax were inspected; Apple-linker checks, full build and static acceptance are pending. No device operations or upstream-binary equality claim."
+result = "Candidate removes four synthesized optional function definitions and selects the upstream absent-provider branches from checked source capability inputs. Real request-layout data comes from the reviewed fixture. RELEASE comparison links real same-run storage, Adreno and display archives. It records the first link's undefined names, preserves the author's object-based forced-export reconciliation and requires the final real link to succeed. Local control-flow regressions accept unavailable forced-export reconciliation and refuse publication with a missing final provider. Actual Apple-linker checks, full build and static acceptance are pending. No device operations or upstream-binary equality claim."
 
 [[area.evidence]]
 kind = "host"

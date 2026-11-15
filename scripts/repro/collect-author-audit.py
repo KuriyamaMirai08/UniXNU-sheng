@@ -49,7 +49,8 @@ def selected(relative):
             return True
         if local.startswith("tree/build/xnu/fileset-reference/") and "source" not in parts and "lto-obj" not in parts:
             return name in ("inputs.json", "lto-command.json", "lto-build.log", "native-stubs.c",
-                            "missing-real-providers.json", "source-sha256.json", "omitted-unavailable-forced-exports.json")
+                            "missing-real-providers.json", "first-link-undefineds.json", "source-sha256.json",
+                            "omitted-unavailable-forced-exports.json")
         if local.startswith("tree/build/sheng-optional-providers/"):
             return True
         if local.startswith("tree/build/") and "xnu" not in parts:

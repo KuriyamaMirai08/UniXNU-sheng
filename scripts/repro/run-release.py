@@ -157,6 +157,8 @@ def main():
                                                "--evidence", evidence], device)
         step("framework-diff", ["git", "diff", "--binary"], framework)
         step("reference-builder-regressions", ["python3", "scripts/test-fileset-reference.py", "-v"], framework)
+        step("reference-final-link-regressions", ["python3", "scripts/test-author-audit-reference.py",
+                                                 "--builder", framework / "scripts/build-fileset-release-reference.py"], device)
         (root / "build.toml").write_text("[build]\n")
         common = ["--os", "27", "--out", root / "out", "--config", root / "build.toml", "--uefi", uefi, "-j", "3"]
         step("dependencies", ["python3", framework / "unixnu", "fetch", "-D", device, *common])

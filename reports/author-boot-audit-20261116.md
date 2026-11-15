@@ -2,8 +2,9 @@
 
 The existing images are this fork's build outputs, not an upstream author's
 published boot image. No downloadable, verifiable 24A446 upstream boot image
-was found in the upstream device, framework or UEFI releases, workflow runs or
-artifacts. The comparison source is the verified common ancestor
+was obtained from the upstream device, framework or UEFI release pages, the
+device package workflow runs or its retained artifacts. Other upstream
+workflows have porting-record runs; those are not boot releases. The comparison source is the verified common ancestor
 `82d9e23ade933aa9d6c9ea2f4f40045e2d985479`; it is not a binary release.
 
 The target remains `ipados-27.0.1-24A446/sheng_ipados27`, with a DEVELOPMENT
@@ -33,6 +34,13 @@ source-storage, Adreno and display archives built in this same clean run.
 Missing real providers fail; no native-stubs.c is generated. Original
 reference input hashing, source/SDK identity checks and forced-export evidence
 are retained.
+
+The first reference link may stop at unavailable forced exports named as
+`<initial-undefines>`. Preserve the author's subsequent object-symbol export
+list reconciliation, record every first-link undefined name and require the
+final real link to succeed. A control-flow regression accepts the reconciled
+export case and refuses publication when the final link lacks a real provider.
+Neither test fixtures nor placeholder providers enter the production build.
 
 ## Verification scope
 

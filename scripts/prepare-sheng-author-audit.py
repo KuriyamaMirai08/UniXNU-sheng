@@ -60,13 +60,14 @@ def transform(name, text):
     elif name == "scripts/build-fileset-release-reference.py":
         begin = text.index("    # The bring-up patch calls native hooks")
         end = text.index("    # Forced exports the built objects cannot provide:", begin)
-        text = text[:begin] + '''    # The comparison uses real compiled provider archives. Missing providers
-    # are an input error; never synthesize data or function placeholders.
+        text = text[:begin] + '''    # The comparison uses real compiled provider archives. Never synthesize
+    # data or function placeholders. The first link also names unavailable
+    # forced exports as <initial-undefines>; preserve the author's object-based
+    # export-list reconciliation before the mandatory final real link.
     build_log = (output / f'{mode}-build.log').read_text()
     missing = sorted(set(re.findall(r'^\\s+"(_[^" ]+)"', build_log, re.M)))
     if result.returncode and missing:
-        (output / 'missing-real-providers.json').write_text(json.dumps(missing, indent=2) + '\\n')
-        raise RuntimeError('RELEASE comparison lacks real providers: ' + ', '.join(missing))
+        (output / 'first-link-undefineds.json').write_text(json.dumps(missing, indent=2) + '\\n')
 ''' + text[end:]
     else:
         raise ValueError("Unknown framework transform: " + name)
