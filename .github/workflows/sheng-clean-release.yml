@@ -51,6 +51,20 @@ jobs:
           mkdir -p "$RUNNER_TEMP/candidate-upload"
           tar --exclude=.git -czf "$RUNNER_TEMP/candidate-upload/attempt.tar.gz" -C "$CANDIDATE_ATTEMPT" .
           shasum -a 256 "$RUNNER_TEMP/candidate-upload/attempt.tar.gz" > "$RUNNER_TEMP/candidate-upload/SHA256SUMS.txt"
+      - name: Collect images, full logs and source evidence
+        if: always() && env.CANDIDATE_ATTEMPT != ''
+        run: |
+          python3 scripts/repro/collect-author-audit.py --attempt "$CANDIDATE_ATTEMPT" --output "$RUNNER_TEMP/author-audit-delivery"
+          mkdir -p "$RUNNER_TEMP/author-audit-upload"
+          tar -C "$RUNNER_TEMP/author-audit-delivery" -czf "$RUNNER_TEMP/author-audit-upload/delivery.tar.gz" .
+          shasum -a 256 "$RUNNER_TEMP/author-audit-upload/delivery.tar.gz" > "$RUNNER_TEMP/author-audit-upload/SHA256SUMS.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && env.CANDIDATE_ATTEMPT != ''
+        with:
+          name: sheng-author-audit-delivery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/author-audit-upload/
+          if-no-files-found: error
+          retention-days: 30
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always() && env.CANDIDATE_ATTEMPT != ''
         with:

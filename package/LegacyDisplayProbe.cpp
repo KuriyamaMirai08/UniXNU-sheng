@@ -516,8 +516,18 @@ extern void sheng_gpu_power_probe(void);
 extern void sheng_wifi_probe(void);
 extern void sheng_bluetooth_probe(void) __attribute__((weak_import));
 extern void sheng_usb_probe(void) __attribute__((weak_import));
+#ifndef SHENG_HAS_ETHERNET
+#define SHENG_HAS_ETHERNET 1
+#endif
+#ifndef SHENG_HAS_SOFTWARE_AES
+#define SHENG_HAS_SOFTWARE_AES 1
+#endif
+#if SHENG_HAS_ETHERNET
 extern "C" void sheng_ethernet_probe(void) __attribute__((weak_import));   // macOS builds only (ShengEthernet.cpp)
+#endif
+#if SHENG_HAS_SOFTWARE_AES
 extern "C" void sheng_software_aes_probe(void) __attribute__((weak_import));   // macOS builds only (SoftwareAesProbe.cpp)
+#endif
 extern void sheng_adsp_probe(void);
 extern void sheng_battery_probe(void);
 extern void sheng_audio_probe(void);
@@ -601,7 +611,9 @@ void busyReport(void *, wait_result_t) {
 void native_legacy_display_late_probe(void) {
     {thread_t thread = nullptr; if (kernel_thread_start(busyReport, nullptr, &thread) == KERN_SUCCESS) thread_deallocate(thread);}
     // First: AppleImage4's start already waits for an IOAESAccelerator, holding its expert lock (SoftwareAesProbe.cpp).
+#if SHENG_HAS_SOFTWARE_AES
     if (sheng_software_aes_probe) sheng_software_aes_probe();
+#endif
     native_keystore_probe();
     sheng_cpufreq_probe();
     sheng_gpu_power_probe();
@@ -609,7 +621,9 @@ void native_legacy_display_late_probe(void) {
     sheng_wifi_probe();
     if (sheng_bluetooth_probe) sheng_bluetooth_probe();
     if (sheng_usb_probe) sheng_usb_probe();
+#if SHENG_HAS_ETHERNET
     if (sheng_ethernet_probe) sheng_ethernet_probe();
+#endif
     sheng_adsp_probe();
     sheng_battery_probe();
     sheng_audio_probe();

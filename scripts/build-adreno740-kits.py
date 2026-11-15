@@ -3,6 +3,7 @@
 import hashlib, json, subprocess, sys
 from pathlib import Path
 from kernel_target import TRIPLE
+from sheng_optional_providers import compiler_flags
 ROOT = Path(__file__).resolve().parents[1]
 c_recipe = json.loads((ROOT / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/bsd/DEVELOPMENT/bsd_init.o.json').read_text().strip().rstrip(','))
 cxx_recipe = json.loads((ROOT / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/iokit/DEVELOPMENT/IOPlatformExpert.cpo.json').read_text().strip().rstrip(','))
@@ -52,6 +53,7 @@ for source in sources:
                 '-Wno-unused-parameter', '-Wno-incompatible-sysroot', '-Wno-c99-designator',
                 '-Wno-reorder-init-list', '-Wno-deprecated-enum-enum-conversion',
                 '-Wno-unnecessary-virtual-specifier']
+    command += compiler_flags(ROOT)
     result = subprocess.run(command, cwd=recipe['directory'], capture_output=True, text=True)
     if result.returncode:
         sys.exit(str(source) + ':\n' + result.stderr[-2500:])

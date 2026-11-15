@@ -14,6 +14,7 @@ import struct
 import subprocess
 import sys
 from kernel_target import ARCH, IOS_VERSION, TRIPLE
+from sheng_optional_providers import compiler_flags
 # The OS profile's build selects the class fixtures: the reviewed iPadOS 27 ones, or the macOS 27.3 ones that
 # gen-board-abi.py writes from the symbols of the macOS collection.
 BUILD = os.environ.get('UNIXNU_IPSW_BUILD') or '24A446'
@@ -302,6 +303,7 @@ def compile_cpp(src, dst, extra=()):
         i += 1
     cmd += ['-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-Wno-unnecessary-virtual-specifier', '-Wno-c99-designator',
             '-Wno-reorder-init-list', '-Wno-deprecated-enum-enum-conversion', '-I', str(ROOT / '.cache/xnu-work/osfmk'), *extra]
+    cmd += compiler_flags(ROOT)
     run(cmd, cwd=r['directory'])
 
 
@@ -380,14 +382,11 @@ extern "C" void boot_progress_cancel_scanout(void) {}
 extern "C" void boot_progress_stage(const char *) {}
 extern "C" int boot_progress_pulse_anchor(uintptr_t,uint64_t,unsigned,unsigned,unsigned) {return 0;}
 ''' + ('''
-// These optional providers are not built for iPadOS 27. Local strong functions
-// avoid the weak-lookup chained binds unsupported by XnuPrelink.
-extern "C" void sheng_ethernet_probe(void) {}
-extern "C" void sheng_software_aes_probe(void) {}
-extern "C" __attribute__((weak)) const unsigned native_legacy_request_layout[6] = {17, 81, 984, 996, 1008, 2944};
-extern "C" bool ml_static_mfree_prepare(uintptr_t, size_t) { return false; }
-extern "C" kern_return_t iokit_physical_descriptor_close_notify(IOMemoryDescriptor *, void (*)(void *), void *) { return KERN_INVALID_ARGUMENT; }
-''' if not MACOS else ''))
+// Actual request offsets from the same reviewed fixture as the framebuffer.
+// Optional functions have no definitions here: the source/provider plan decides
+// whether their existing invocation branches are compiled.
+extern "C" const unsigned native_legacy_request_layout[6] = {LAYOUT_VALUES};
+'''.replace('LAYOUT_VALUES', ', '.join(str(R[key]) for key in ('rect0', 'rect1', 'masks', 'options', 'dims', 'surfaces'))) if not MACOS else ''))
 compile_cpp(support, OUT / 'LegacyDisplaySupport27.o')
 # The keystore state service (AppleKeyStoreState) and its probe, unchanged from iPadOS 17.
 keystore_source = ROOT / 'kits/sheng/KeyStoreProbe.cpp'

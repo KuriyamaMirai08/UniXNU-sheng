@@ -46,7 +46,7 @@ def main():
     deadline = time.monotonic() + 300 * 60
     stages = []
     os.environ.update(PYTHONUNBUFFERED="1", RUSTUP_TOOLCHAIN="1.98.0",
-                      UNIXNU_SHENG_BOOT_CANDIDATE="1", ZERO_AR_DATE="1")
+                      UNIXNU_SHENG_BOOT_CANDIDATE="1", UNIXNU_SHENG_AUTHOR_AUDIT="1", ZERO_AR_DATE="1")
 
     def save(name, value):
         (evidence / name).write_text(json.dumps(value, indent=2) + "\n")
@@ -153,6 +153,8 @@ def main():
         patch = device / "patches/build/sheng-reference-archive.patch"
         step("reference-patch-check", ["git", "apply", "--check", patch], framework)
         step("reference-patch", ["git", "apply", patch], framework)
+        step("optional-provider-source-guards", ["python3", "scripts/prepare-sheng-author-audit.py", "--unixnu", framework,
+                                               "--evidence", evidence], device)
         step("framework-diff", ["git", "diff", "--binary"], framework)
         step("reference-builder-regressions", ["python3", "scripts/test-fileset-reference.py", "-v"], framework)
         (root / "build.toml").write_text("[build]\n")
@@ -168,6 +170,8 @@ def main():
             raise ValueError("Precompiled build objects exist in the fresh tree")
         kit = tree / "kits/XnuPrelink"
         step("author-prelink-regressions", ["python3", "-m", "unittest", "test_fileset_emit", "test_fileset_layout", "test_fileset_match", "test_fileset_shape"], kit)
+        step("optional-provider-link-checks", ["python3", "scripts/check-sheng-optional-providers.py", "--tree", tree,
+                                              "--output", evidence / "optional-link"], device)
         # Fetch KernelCache before archive recipes, whose new PAL adapter needs
         # those exact bytes. Source build outputs remain empty at this point.
         step("kernelcache", ["python3", framework / "unixnu", "ipsw", "fetch", "KernelCache", "-D", device, *common])
@@ -186,6 +190,24 @@ def main():
         if file_hash(seed) != contract["seed_sha256"]:
             raise ValueError("Installed seed changed before release")
         step("release", ["bash", "scripts/package.sh", *common, "--no-deps", "--data-ramdisk", seed], device)
+        provider_plan = tree / "build/sheng-optional-providers/provider-plan.json"
+        if not provider_plan.is_file():
+            raise ValueError("Actual optional-provider build receipt is missing")
+        import sys
+        sys.path.insert(0, str(tree / "kits/XnuPrelink"))
+        from kc_image import Image
+        native_path = tree / "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf"
+        native_data = native_path.read_bytes()
+        native = Image(native_data)
+        names = {name for aliases in native.symbols().values() for name in aliases}
+        absent = json.loads(provider_plan.read_text())["absent_functions"]
+        if any(name in names for name in absent):
+            raise ValueError("An absent optional interface acquired a synthesized definition")
+        native.fixups()  # Preserve the author's rejection of imports and binds.
+        if list((tree / "build/xnu/fileset-reference").rglob("native-stubs.c")):
+            raise ValueError("The reference kernel contains synthesized placeholders")
+        save("optional-final-native.json", dict(absent_functions=absent, all_absent=True,
+                                               chained_fixups_accepted=True, native_sha256=file_hash(native_path)))
         manifest = root / "out/sheng/ipados-27.0.1-24A446/sheng_ipados27/package.manifest.json"
         result = json.loads(manifest.read_text())
         if result["runtime"]["data_volume_uuid"] != contract["seed_uuid"]:

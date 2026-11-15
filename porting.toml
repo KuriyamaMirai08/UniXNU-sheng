@@ -23,7 +23,15 @@ next_action = ["Compare the effective status output whenever a profile, source o
 kind = "host"
 reference = "reports/image4-size-optimization.md"
 command = "Existing Image4 host fixture, exact updated source, -O2"
+revision = "1d0abd9fda19619997428dee020ccf609b473f12"
 result = "37 checks pass for function-local minsize annotations; five panic conditions and real backend/mirror cases retained. Native size and final prelink qualification remain pending."
+
+[[area.evidence]]
+kind = "source"
+reference = "reports/author-boot-audit-20261116.md"
+command = "prepare-sheng-author-audit.py; check-sheng-optional-providers.py; clean release"
+revision = "1d0abd9fda19619997428dee020ccf609b473f12"
+result = "Candidate removes four synthesized optional function definitions and selects the upstream absent-provider branches from checked source capability inputs. Real request-layout data comes from the reviewed fixture. RELEASE comparison links real same-run storage, Adreno and display archives and refuses missing providers. Source guards and Python syntax were inspected; Apple-linker checks, full build and static acceptance are pending. No device operations or upstream-binary equality claim."
 
 [[area.evidence]]
 kind = "host"

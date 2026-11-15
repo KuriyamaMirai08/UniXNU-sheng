@@ -1,0 +1,49 @@
+# Boot source audit, 16 November 2026
+
+The existing images are this fork's build outputs, not an upstream author's
+published boot image. No downloadable, verifiable 24A446 upstream boot image
+was found in the upstream device, framework or UEFI releases, workflow runs or
+artifacts. The comparison source is the verified common ancestor
+`82d9e23ade933aa9d6c9ea2f4f40045e2d985479`; it is not a binary release.
+
+The target remains `ipados-27.0.1-24A446/sheng_ipados27`, with a DEVELOPMENT
+native kernel, RELEASE-LTO comparison and the original installed binding and
+Seed. Framework `97437dcf7389484a0eeaa8067725ce743aff18ef`, XnuPrelink
+`8f4f3866545727e2dc3d2c8cb60f8a87a9539c12` and UEFI
+`66421cb7bb5694843aec8de1ca3d1de4c20cca38` remain fixed.
+
+## Implementation corrections
+
+The generated LegacyDisplaySupport27.cpp supplied four strong, empty or
+fixed-return functions introduced by this fork's package-29 workaround. They
+made absent optional providers appear present and hid the GPU pager hook's
+absence. Remove those functions. Source guards preserve every actual provider
+and the upstream weak-import path by default. The isolated 24A446 build uses
+a checked capability header: the two kernel providers are absent from actual
+prepared source and the Ethernet/AES providers are only selected in macOS.
+An unexpected provider stops the build for a revised capability selection.
+
+The request-layout data is real ABI input. Generate its six values from the
+same reviewed 24A446 fixture as the framebuffer, as a strong constant; it is
+neither a function placeholder nor another device's identity.
+
+The upstream RELEASE comparison builder synthesized two scalar placeholders
+for callable hooks in the existing run. This candidate instead links the real
+source-storage, Adreno and display archives built in this same clean run.
+Missing real providers fail; no native-stubs.c is generated. Original
+reference input hashing, source/SDK identity checks and forced-export evidence
+are retained.
+
+## Verification scope
+
+The new check executes the actual guarded GPU and RAM statement blocks with
+absent and present test peers, uses Apple's arm64e kernel linker and the
+unchanged XnuPrelink parser, and requires a missing enabled provider to fail.
+Test peers are never inputs to a native or comparison kernel. Final native
+acceptance also requires all four symbols absent and no chained imports or
+binds. Strict complete mapping, collision detection, source hashes, real
+normal-Image4 branch, HMAC, trust and device binding checks remain required.
+
+Full clean compilation and static acceptance are pending. No device command
+is authorized or run by this audit. No author-binary equality or successful
+hardware boot is claimed.
