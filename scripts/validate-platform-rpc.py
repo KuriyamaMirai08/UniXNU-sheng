@@ -125,6 +125,8 @@ def main():
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--inspect-serializable", action="store_true",
+                        help="Inspect actual annotated IDL generation without object compilation")
     args = parser.parse_args()
     evidence = args.evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=True)
@@ -203,6 +205,31 @@ def main():
             a, b = (baseline_generated / name).read_text(), (current_generated / name).read_text()
             (evidence / (name + ".diff")).write_text("".join(difflib.unified_diff(
                 a.splitlines(keepends=True), b.splitlines(keepends=True), fromfile="before/" + name, tofile="after/" + name)))
+        if args.inspect_serializable:
+            # Inspect the actual generator's annotation contract before
+            # implementing the missing transport. Do not invent a flag name
+            # or treat generation as an accepted functional RPC.
+            declaration = source / "iokit/DriverKit/IOService.iig"
+            text = declaration.read_text()
+            marker = "\t\tOSDictionary ** outParam);"
+            if text.count(marker) != 1:
+                raise ValueError("Platform declaration inspection marker changed")
+            declaration.write_text(text.replace(marker,
+                "\t\tOSDictionary ** outParam) LOCAL IIG_SERIALIZABLE;", 1))
+            annotated = evidence / "serializable-generated"
+            generate(iig, sdk, source, obj, annotated, evidence, "iig-serializable")
+            annotated_ids = ids((annotated / "IOService.h").read_text())
+            receipt["serializable_method_id_matches"] = annotated_ids.get("IOService_CallPlatformFunction_ID") == RPC_ID
+            receipt["serializable_existing_ids_unchanged"] = all(annotated_ids.get(k) == v for k, v in old_ids.items())
+            for name in ("IOService.h", "IOService.iig.cpp"):
+                a, b = (current_generated / name).read_text(), (annotated / name).read_text()
+                (evidence / ("serializable-" + name + ".diff")).write_text("".join(difflib.unified_diff(
+                    a.splitlines(keepends=True), b.splitlines(keepends=True), fromfile="unannotated/" + name,
+                    tofile="serializable/" + name)))
+            receipt["status"] = "serializable_generation_inspected_no_compilation"
+            if not receipt["serializable_method_id_matches"] or not receipt["serializable_existing_ids_unchanged"]:
+                raise ValueError("Annotated generation changed method identities")
+            return 0
         for name in ("IOService.h", "IOService.iig.cpp"):
             for target in obj.rglob(name):
                 if target.parent.name != "DriverKit":

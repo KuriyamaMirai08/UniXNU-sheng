@@ -1,6 +1,12 @@
 name: Platform RPC ABI validation
 on:
   workflow_dispatch:
+    inputs:
+      inspect_serializable:
+        description: Inspect serialization annotation without compiling
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
   actions: read
@@ -24,8 +30,14 @@ jobs:
           mkdir -p "$RUNNER_TEMP/rpc-input"
           gh run download 43615501493 --repo "$GITHUB_REPOSITORY" --name clean-kernel-b1-43615501493-1 --dir "$RUNNER_TEMP/rpc-input"
       - name: Generate one IDL and compile three units
+        env:
+          INSPECT_SERIALIZABLE: ${{ inputs.inspect_serializable }}
         run: |
-          python3 -B scripts/validate-platform-rpc.py --archive "$RUNNER_TEMP/rpc-input/attempt.tar.gz" --work "$RUNNER_TEMP/rpc-work" --evidence "$RUNNER_TEMP/rpc-evidence"
+          args=()
+          if [[ "$INSPECT_SERIALIZABLE" == "true" ]]; then
+            args+=(--inspect-serializable)
+          fi
+          python3 -B scripts/validate-platform-rpc.py --archive "$RUNNER_TEMP/rpc-input/attempt.tar.gz" --work "$RUNNER_TEMP/rpc-work" --evidence "$RUNNER_TEMP/rpc-evidence" "${args[@]}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

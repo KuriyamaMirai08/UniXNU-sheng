@@ -20,6 +20,13 @@ limits = ["Local overrides can select a different source from the published pin;
 next_action = ["Compare the effective status output whenever a profile, source or component selection changes."]
 
 [[area.evidence]]
+kind = "host"
+reference = "https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/43676927240"
+command = "scripts/validate-platform-rpc.py with retained clean-build inputs"
+revision = "9f70595be6be3080db8afb9997ebd9598a533493"
+result = "Original IDL regeneration is byte-identical. Three actual arm64e units compile and partially link with the expected RPC exports. The unannotated wrapper still differs in request flag 0x100 and wrong-type output release. A generation-only SERIALIZABLE inspection mode now isolates those differences before transport implementation; no full kernel or boot image was built."
+
+[[area.evidence]]
 kind = "source"
 reference = "board.toml"
 result = "Implementation and configuration described in this section"
