@@ -147,6 +147,16 @@ def main():
         require(early == {k: int(v, 16) for k, v in contract["early_security_init"].items()}, "Early security contract changed")
         reference_receipt = json.loads(args.fileset_reference.with_suffix(".json").read_text())
         require(reference_receipt["sha256"] == sha(reference_data), "New reference build receipt differs")
+        require(reference_receipt["inputs"].get("native_diagnostics") is True,
+                "Reference did not select the genuine native archive diagnostics")
+        diagnostics = reference_receipt.get("native_archive_diagnostics") or {}
+        require(diagnostics.get("final_defined_symbols_verified") == sorted((
+            "___ubsan_handle_add_overflow_minimal", "___ubsan_handle_negate_overflow_minimal",
+            "___ubsan_handle_sub_overflow_minimal", "_mach_assert_jump_key")),
+            "Reference lacks the final genuine diagnostic provider evidence")
+        require(not diagnostics.get("synthesized_providers", True) and
+                not diagnostics.get("consumer_instrumentation_disabled", True),
+                "Reference diagnostic provider qualification is incomplete")
         for relative, expected in current["prepared_sources"].items():
             read_pinned(TREE / ".cache/xnu-work" / relative, expected, "Qualified prepared source " + relative)
         receipt.update(inputs=dict(native_sha256=sha(new_data), reference_sha256=sha(reference_data),

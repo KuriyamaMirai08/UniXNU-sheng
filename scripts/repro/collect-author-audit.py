@@ -56,7 +56,9 @@ def selected(relative):
         if local == "device-tree/hardware.dtb":
             return True
         if local.startswith("tree/.cache/xnu-work/"):
-            return local.removeprefix("tree/.cache/xnu-work/") in PREPARED
+            return local.removeprefix("tree/.cache/xnu-work/") in PREPARED or local.endswith((
+                "config/MASTER.arm64.bcm2837", "san/memory/ubsan_minimal.c", "san/memory/ubsan_minimal.h",
+                "san/conf/files.arm64", "osfmk/kern/debug.c", "osfmk/kern/assert.h", "osfmk/machine/static_if.h"))
         if local.startswith("tree/scripts/") and name in ("build-xnu-4k-baseline.sh", "build-gop-legacy-display-27.py",
                                                         "legacy-display-24A446.json", "seal-source-crypto-kernel.py"):
             return True
@@ -67,7 +69,13 @@ def selected(relative):
         if local.startswith("tree/build/xnu/fileset-reference/") and "source" not in parts and "lto-obj" not in parts:
             return name in ("inputs.json", "lto-command.json", "lto-build.log", "native-stubs.c",
                             "missing-real-providers.json", "first-link-undefineds.json", "source-sha256.json",
-                            "omitted-unavailable-forced-exports.json")
+                            "omitted-unavailable-forced-exports.json", "native-archive-diagnostics.json")
+        if local.startswith("tree/build/xnu/fileset-reference/") and "source" in parts:
+            return name in ("MASTER.arm64.bcm2837", "ubsan_minimal.c", "ubsan_minimal.h", "debug.c", "assert.h", "static_if.h")
+        if local.startswith("tree/build/xnu/fileset-reference/") and "lto-obj" in parts:
+            return name in ("mach_assert.h", "config_ubsan_minimal.h", "debug.cpo.json", "ubsan_minimal.o.json")
+        if name == "mach.release.bcm2837.unstripped.json":
+            return True
         if local.startswith("tree/build/sheng-optional-providers/"):
             return True
         if local.startswith("tree/build/") and "xnu" not in parts:

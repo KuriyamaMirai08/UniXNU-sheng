@@ -58,6 +58,77 @@ def transform(name, text):
         text = replace(text, "        command = build.compile_command(record, source, output, includes, flags)",
                        "        command = build.compile_command(record, source, output, includes, flags)\n        command += compiler_flags(tree)", name)
     elif name == "scripts/build-fileset-release-reference.py":
+        helper = '''
+NATIVE_DIAGNOSTIC_SYMBOLS = {
+    '___ubsan_handle_add_overflow_minimal',
+    '___ubsan_handle_negate_overflow_minimal',
+    '___ubsan_handle_sub_overflow_minimal',
+    '_mach_assert_jump_key',
+}
+
+
+def prepare_native_diagnostics(source, output):
+    """Select XNU's real diagnostics in the private RELEASE comparison only."""
+    config = source / 'config/MASTER.arm64.bcm2837'
+    before = config.read_bytes()
+    expected = 'dba44ba3ab4d913afa315d8c213461f62ee15d894ac71ce1ccee58fd304301ff'
+    if hashlib.sha256(before).hexdigest() != expected:
+        raise ValueError('Unexpected prepared RELEASE configuration for native archive diagnostics')
+    text = before.decode()
+    replacements = {
+        '#  KERNEL_RELEASE = [ KERNEL_BASE release ]': '#  KERNEL_RELEASE = [ KERNEL_BASE release mach_assert ]',
+        '#  VM_RELEASE =     [ VM_BASE ]': '#  VM_RELEASE =     [ VM_BASE ubsan_minimal ]',
+    }
+    for old, new in replacements.items():
+        if text.count(old) != 1:
+            raise ValueError('Missing or ambiguous XNU diagnostic configuration')
+        text = text.replace(old, new)
+    after = text.encode()
+    config.write_bytes(after)
+    implementations = {
+        name: file_hash(source / name) for name in (
+            'san/memory/ubsan_minimal.c', 'san/memory/ubsan_minimal.h',
+            'san/conf/files.arm64', 'osfmk/kern/debug.c', 'osfmk/kern/assert.h',
+            'osfmk/machine/static_if.h', 'osfmk/kern/startup.c', 'osfmk/arm64/sleh.c')
+    }
+    record = dict(enabled=True, scope='private RELEASE comparison, not the native kernel',
+                  kernel_configs='RELEASE', build_lto=True,
+                  added_config_options=['mach_assert', 'ubsan_minimal'],
+                  config_before_sha256=expected, config_after_sha256=hashlib.sha256(after).hexdigest(),
+                  genuine_implementation_sha256=implementations,
+                  required_symbols=sorted(NATIVE_DIAGNOSTIC_SYMBOLS),
+                  synthesized_providers=False, consumer_instrumentation_disabled=False)
+    (output / 'native-archive-diagnostics.json').write_text(json.dumps(record, indent=2) + '\\n')
+    return record
+
+'''
+        text = replace(text, '\ndef main():\n', '\n' + helper + '\ndef main():\n', name)
+        text = replace(text, "    options = parser.parse_args()\n",
+            "    parser.add_argument('--native-diagnostics', action='store_true',\n"
+            "                        help='select genuine XNU assertion and UBSan providers for DEVELOPMENT archives')\n"
+            "    options = parser.parse_args()\n", name)
+        text = replace(text, "    mode = 'lto' if options.lto else 'snapshot'\n",
+            "    if options.native_diagnostics and not options.lto:\n"
+            "        raise ValueError('Native archive diagnostics are qualified only for RELEASE-LTO')\n"
+            "    mode = 'lto' if options.lto else 'snapshot'\n", name)
+        text = replace(text, "        'mode': mode,\n",
+                       "        'mode': mode,\n        'native_diagnostics': options.native_diagnostics,\n", name)
+        text = replace(text, "        manifest = {str(p.relative_to(source)):",
+            "        if options.native_diagnostics:\n            prepare_native_diagnostics(source, output)\n"
+            "        manifest = {str(p.relative_to(source)):", name)
+        text = replace(text, "    built = output / f'{mode}-obj/RELEASE_ARM64_BCM2837/mach.release.bcm2837.unstripped'\n",
+            "    built = output / f'{mode}-obj/RELEASE_ARM64_BCM2837/mach.release.bcm2837.unstripped'\n"
+            "    qualification = None\n"
+            "    if options.native_diagnostics:\n"
+            "        listed = subprocess.run(['xcrun', 'nm', '-gUj', str(built)], capture_output=True, text=True, check=True)\n"
+            "        provided = set(listed.stdout.splitlines())\n"
+            "        if not NATIVE_DIAGNOSTIC_SYMBOLS <= provided:\n"
+            "            raise ValueError('Final RELEASE reference lacks genuine native archive diagnostic providers')\n"
+            "        qualification = json.loads((output / 'native-archive-diagnostics.json').read_text())\n"
+            "        qualification['final_defined_symbols_verified'] = sorted(NATIVE_DIAGNOSTIC_SYMBOLS)\n"
+            "        (output / 'native-archive-diagnostics.json').write_text(json.dumps(qualification, indent=2) + '\\n')\n", name)
+        text = replace(text, "'build': str(output)}, indent=2) + '\\n')",
+            "'build': str(output), 'native_archive_diagnostics': qualification}, indent=2) + '\\n')", name)
         begin = text.index("    # The bring-up patch calls native hooks")
         end = text.index("    # Forced exports the built objects cannot provide:", begin)
         text = text[:begin] + '''    # The comparison uses real compiled provider archives. Never synthesize
