@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "build_run": 43615501493,
+  "build_commit": "0f16f7de8ddf583458967d1a7239c8b101542bfe",
+  "profile": "ipados-27.0.1-24A446",
+  "native_target": "arm64e DEVELOPMENT_ARM64_BCM2837",
+  "source_framework": "97437dcf7389484a0eeaa8067725ce743aff18ef",
+  "inputs": {
+    "kernelcache": "38e6d9fa5f789b8228f4617ef4c6d2a3fd8ab564abdc9b62920f1db53fc1780a",
+    "native": "2d1071d451f27bcd330a688a2579bd789b9c5795b1d5e670239850629ec665d9",
+    "reference": "de0d880fdcfedad4e47ab0e03f8bcfa0947f78ae58f057ceaf87fed892629aac",
+    "map": "283af38ff4f636caab8444db9148d4ee57b2030e548215ac294ebcc934eb8d37"
+  },
+  "engine": {
+    "emit_prelink.py": "07ac0cbd44dc81deb51bd579eb1ae8d26c5c38022eb3e577662b16111e83f95b",
+    "fileset_emit.py": "d3d2f4785edfd310333cc7e023a8885ba4ac58762657963413a1fc284509f159",
+    "fileset_layout.py": "0799bffc6cbd37d7bcad438a93eb0dc721b05b6c43d2ff9b6cd0559099383cc9",
+    "fileset_match.py": "d87f4f10aeb306466948719f1674f26877b71bb1c60a4d8535687d2e1ff1a007",
+    "fileset_names.py": "6c6bd6cdf8f4029c13afb8c116d8069fbd8ed8f408ef66dec0b90b51fdc3da80",
+    "fileset_segmented.py": "1792a64da1282069c51d85863803ffdf8f505c547176c61b9279753c7778efaf",
+    "fileset_shape.py": "d256a5714846268554493de069f53b896d3d17e3afcd0ec343fb938734832ca1",
+    "kc_image.py": "2a2561308b27ace4e21dd4e45924bdeca937ee13047b7c6fd5ce580018f68747",
+    "native_prelink.py": "5bd80b8c63deec29b747c28253e02308a56d5f8cdb37c9d315e7c8af7012d017"
+  },
+  "engine_fixtures": {
+    "fileset-23F84-symbols.json": "63ebc5b6e549baf22898a070b7c2f9ebe8aa27505cd5effd9facf2c77f9ef644",
+    "fileset-24A446-symbols.json": "026fb497af4d9bc3afc28b6a22be3210ba52ae0c4b5193ce9b34a4b72792b5d8",
+    "fileset-26C5035r-symbols.json": "90cedab8cba99c7abdef1cc2739312d3016187206656391b8c1a456e5cdb6fd3"
+  },
+  "reviewed_fixture_sha256": "196223f5af8326b8d85f3a605364d915fcac47a6e9be952af0b0acb87129fff7",
+  "fixture_name": "fileset-24A446-sheng-clean-symbols.json",
+  "interface_guard_sha256": "34cb4517c44a1d399bec6d68294ad49cecfbafd4bcbe03b31b896625939db60e",
+  "regression_policy_sha256": "fb59f3227b13ab7f7b4e66c6600031385936051b011987c2d5f0dcdc27436b39",
+  "regression_source_sha256": "d60bc0abf45b1ce05ae74932ba26092e1c6c5a113a2b8ced7741178b6d3d2107",
+  "roots": [
+    "com.apple.AppleFSCompression.AppleFSCompressionTypeZlib",
+    "com.apple.driver.AppleARMPlatform",
+    "com.apple.driver.AppleARMWatchdogTimer",
+    "com.apple.driver.AppleAudioClockLibs",
+    "com.apple.driver.AppleEffaceableStorage",
+    "com.apple.driver.AppleIISController",
+    "com.apple.driver.AppleM2ScalerCSCDriver",
+    "com.apple.driver.AppleMobileFileIntegrity",
+    "com.apple.driver.ApplePMGR",
+    "com.apple.driver.IODARTFamily",
+    "com.apple.filesystems.apfs",
+    "com.apple.iokit.CoreAnalyticsFamily",
+    "com.apple.iokit.IOAVFamily",
+    "com.apple.iokit.IOAudio2Family",
+    "com.apple.iokit.IOCECFamily",
+    "com.apple.iokit.IOCryptoAcceleratorFamily",
+    "com.apple.iokit.IOGPUFamily",
+    "com.apple.iokit.IOHDCPFamily",
+    "com.apple.iokit.IOMobileGraphicsFamily",
+    "com.apple.iokit.IOReportFamily",
+    "com.apple.iokit.IOSlowAdaptiveClockingFamily",
+    "com.apple.iokit.IOStorageFamily",
+    "com.apple.iokit.IOSurface",
+    "com.apple.kec.Libm",
+    "com.apple.kec.corecrypto",
+    "com.apple.kext.AppleMatch",
+    "com.apple.kext.CoreTrust",
+    "com.apple.security.AppleImage4",
+    "com.apple.security.sandbox",
+    "com.apple.iokit.IOHIDFamily",
+    "com.apple.iokit.IOHIDEventDriver",
+    "com.apple.iokit.IOUSBDeviceFamily",
+    "com.apple.driver.AppleUSBXDCI",
+    "com.apple.driver.AppleUSBDeviceMux",
+    "com.apple.iokit.IOUSBHostFamily",
+    "com.apple.driver.usb.AppleUSBXHCI",
+    "com.apple.driver.usb.AppleUSBHub",
+    "com.apple.driver.usb.AppleUSBHostCompositeDevice",
+    "com.apple.driver.usb.IOUSBHostHIDDevice",
+    "com.apple.iokit.IOUSBMassStorageDriver",
+    "com.apple.iokit.IOSCSIArchitectureModelFamily",
+    "com.apple.iokit.IOSCSIBlockCommandsDevice",
+    "!com.apple.driver.AppleOnboardSerial",
+    "!com.apple.driver.AppleSMC"
+  ],
+  "early_security_init": {
+    "com.apple.driver.AppleMobileFileIntegrity": "0xfffffe00092551ac"
+  },
+  "bindings": [
+    {
+      "owner": "com.apple.driver.AppleARMWatchdogTimer",
+      "original": "0xfffffe00070446a8",
+      "symbol": "_PE_arm_debug_panic_hook",
+      "site": "0xfffffe0007f873f0"
+    },
+    {
+      "owner": "com.apple.driver.AppleARMWatchdogTimer",
+      "original": "0xfffffe000ad53f60",
+      "symbol": "_processor_info",
+      "site": "0xfffffe0007f873b0"
+    },
+    {
+      "owner": "com.apple.driver.ApplePMGR",
+      "original": "0xfffffe000ad6df18",
+      "symbol": "_sched_enable_acc_rail",
+      "site": "0xfffffe0008153010"
+    },
+    {
+      "owner": "com.apple.driver.ApplePMGR",
+      "original": "0xfffffe000ad6e204",
+      "symbol": "_sched_disable_acc_rail",
+      "site": "0xfffffe0008153008"
+    },
+    {
+      "owner": "com.apple.iokit.IOGPUFamily",
+      "original": "0xfffffe000ae14d08",
+      "symbol": "_vm_map_page_size",
+      "site": "0xfffffe0008333940"
+    },
+    {
+      "owner": "com.apple.driver.AppleARMPlatform",
+      "original": "0xfffffe000aebcc3c",
+      "symbol": "_ml_arm_sleep",
+      "site": "0xfffffe0007f856b8"
+    },
+    {
+      "owner": "com.apple.driver.AppleARMPlatform",
+      "original": "0xfffffe000aebdee4",
+      "symbol": "_cpu_number",
+      "site": "0xfffffe0007f85670"
+    },
+    {
+      "owner": "com.apple.driver.AppleARMWatchdogTimer",
+      "original": "0xfffffe000aebdee4",
+      "symbol": "_cpu_number",
+      "site": "0xfffffe0007f87320"
+    },
+    {
+      "owner": "com.apple.driver.AppleARMPlatform",
+      "original": "0xfffffe000aebdef4",
+      "symbol": "_ml_get_wake_timebase",
+      "site": "0xfffffe0007f85700"
+    },
+    {
+      "owner": "com.apple.iokit.IOCryptoAcceleratorFamily",
+      "original": "0xfffffe000aec5fe0",
+      "symbol": "_ml_stack_remaining",
+      "site": "0xfffffe0008313cc0"
+    },
+    {
+      "owner": "com.apple.iokit.IOSurface",
+      "original": "0xfffffe000b4b6724",
+      "symbol": "__ZN18IOMemoryDescriptor26ktraceEmitPhysicalSegmentsEv",
+      "site": "0xfffffe00083b6238"
+    },
+    {
+      "owner": "com.apple.driver.AppleARMPlatform",
+      "original": "0xfffffe000b4ca1d0",
+      "symbol": "__ZN24IOCPUInterruptControllerC1Ev",
+      "site": "0xfffffe0007f854a8"
+    },
+    {
+      "owner": "com.apple.driver.AppleARMPlatform",
+      "original": "0xfffffe000b4ca260",
+      "symbol": "_IOCPURunPlatformQuiesceActions",
+      "site": "0xfffffe0007f85128"
+    },
+    {
+      "owner": "com.apple.driver.AppleARMPlatform",
+      "original": "0xfffffe000b4ca2e8",
+      "symbol": "_IOCPURunPlatformActiveActions",
+      "site": "0xfffffe0007f85120"
+    },
+    {
+      "owner": "com.apple.security.AppleImage4",
+      "original": "0xfffffe000b5a3ba8",
+      "symbol": "_kernel_image4_storage_data",
+      "site": "0xfffffe00080e1950"
+    },
+    {
+      "owner": "com.apple.iokit.IOHIDFamily",
+      "original": "0xfffffe000b8b3ce8",
+      "symbol": "_kext_assertions_enable",
+      "site": "0xfffffe00083586a8"
+    }
+  ],
+  "known_remaining": {
+    "com.apple.driver.AppleARMPlatform": {
+      "0xfffffff00b433e68": 1
+    },
+    "com.apple.security.Image4": {
+      "0xfffffff00b2a1694": 1,
+      "0xfffffff00b2a170c": 1,
+      "0xfffffff00b2a1778": 1,
+      "0xfffffff00b2a1798": 1
+    }
+  },
+  "limitations": [
+    "The exact current consumer set qualifies processor_info flavor 1/count 5 only.",
+    "The original regression function, emission checks and loadable/runtime constants remain unchanged.",
+    "Unknown native inputs, roots, fixtures, policies or pairing require independent review.",
+    "Five unresolved interfaces prohibit a published candidate; no partial kernel or boot image is delivered."
+  ]
+}

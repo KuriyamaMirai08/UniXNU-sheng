@@ -7,6 +7,8 @@
 *.mm text eol=lf
 *.rs text eol=lf
 *.json text eol=lf
+# Retained exact-byte matcher evidence includes its original CRLF encoding.
+scripts/clean-prelink-symbols.json -text -eol whitespace=cr-at-eol
 *.patch text eol=lf -whitespace
 *.png binary
 *.jpg binary

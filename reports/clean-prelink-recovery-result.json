@@ -1,0 +1,313 @@
+{
+  "started_at": "2026-11-15T02:33:59.176172+00:00",
+  "status": "refused",
+  "contract_sha256": "52fb10e76c11b82b17d327ff457de08adf429485c85205ae94b9025fa29fecea",
+  "build_invoked": false,
+  "device_operations": false,
+  "candidate_persisted": false,
+  "input_identities_verified": true,
+  "interface_guard": {
+    "reviewed_functions": 13,
+    "reviewed_objects": [
+      {
+        "symbol": "_PE_arm_debug_panic_hook",
+        "original": "0xfffffe00070446a8",
+        "native": "0xfffffff007f61188",
+        "size": 8,
+        "native_bytes": "189bc100be2a2080"
+      },
+      {
+        "symbol": "_kext_assertions_enable",
+        "original": "0xfffffe000b8b3ce8",
+        "native": "0xfffffff007f3c3d8",
+        "size": 4,
+        "native_bytes": "01000000"
+      }
+    ],
+    "processor_info": {
+      "qualified_flavors": [
+        1
+      ],
+      "flavor_3_qualified": false,
+      "consumer": "com.apple.driver.AppleARMWatchdogTimer",
+      "call": "0xfffffe00087170e0",
+      "count": 5
+    },
+    "image4_storage": {
+      "bytes": 5120,
+      "required_bytes": 912,
+      "alignment": 8
+    }
+  },
+  "recovered_bindings": [
+    {
+      "owner": "com.apple.driver.AppleARMWatchdogTimer",
+      "original": "0xfffffe00070446a8",
+      "symbol": "_PE_arm_debug_panic_hook",
+      "site": "0xfffffe0007f873f0",
+      "final_site": "0xfffffff007f873f0",
+      "final_target": "0xfffffff00b859188",
+      "chain_fields": [
+        0,
+        null,
+        null,
+        null
+      ],
+      "real_native_binding": true,
+      "real_handler": {
+        "symbol": "_PE_arm_panic_hook",
+        "target": "0xfffffff00b521b18",
+        "fields": [
+          1,
+          0,
+          10942,
+          0
+        ]
+      }
+    },
+    {
+      "owner": "com.apple.driver.AppleARMWatchdogTimer",
+      "original": "0xfffffe000ad53f60",
+      "symbol": "_processor_info",
+      "site": "0xfffffe0007f873b0",
+      "final_site": "0xfffffff007f873b0",
+      "final_target": "0xfffffff00ad0a17c",
+      "chain_fields": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "real_native_binding": true
+    },
+    {
+      "owner": "com.apple.driver.ApplePMGR",
+      "original": "0xfffffe000ad6df18",
+      "symbol": "_sched_enable_acc_rail",
+      "site": "0xfffffe0008153010",
+      "final_site": "0xfffffff008153010",
+      "final_target": "0xfffffff00ad20a88",
+      "chain_fields": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "real_native_binding": true
+    },
+    {
+      "owner": "com.apple.driver.ApplePMGR",
+      "original": "0xfffffe000ad6e204",
+      "symbol": "_sched_disable_acc_rail",
+      "site": "0xfffffe0008153008",
+      "final_site": "0xfffffff008153008",
+      "final_target": "0xfffffff00ad20ccc",
+      "chain_fields": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "real_native_binding": true
+    },
+    {
+      "owner": "com.apple.iokit.IOGPUFamily",
+      "original": "0xfffffe000ae14d08",
+      "symbol": "_vm_map_page_size",
+      "site": "0xfffffe0008333940",
+      "final_site": "0xfffffff008333940",
+      "final_target": "0xfffffff00adff488",
+      "chain_fields": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "real_native_binding": true
+    },
+    {
+      "owner": "com.apple.driver.AppleARMPlatform",
+      "original": "0xfffffe000aebcc3c",
+      "symbol": "_ml_arm_sleep",
+      "site": "0xfffffe0007f856b8",
+      "final_site": "0xfffffff007f856b8",
+      "final_target": "0xfffffff00aeebbd8",
+      "chain_fields": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "real_native_binding": true
+    },
+    {
+      "owner": "com.apple.driver.AppleARMPlatform",
+      "original": "0xfffffe000aebdee4",
+      "symbol": "_cpu_number",
+      "site": "0xfffffe0007f85670",
+      "final_site": "0xfffffff007f85670",
+      "final_target": "0xfffffff00aeed148",
+      "chain_fields": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "real_native_binding": true
+    },
+    {
+      "owner": "com.apple.driver.AppleARMWatchdogTimer",
+      "original": "0xfffffe000aebdee4",
+      "symbol": "_cpu_number",
+      "site": "0xfffffe0007f87320",
+      "final_site": "0xfffffff007f87320",
+      "final_target": "0xfffffff00aeed148",
+      "chain_fields": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "real_native_binding": true
+    },
+    {
+      "owner": "com.apple.driver.AppleARMPlatform",
+      "original": "0xfffffe000aebdef4",
+      "symbol": "_ml_get_wake_timebase",
+      "site": "0xfffffe0007f85700",
+      "final_site": "0xfffffff007f85700",
+      "final_target": "0xfffffff00aeed1bc",
+      "chain_fields": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "real_native_binding": true
+    },
+    {
+      "owner": "com.apple.iokit.IOCryptoAcceleratorFamily",
+      "original": "0xfffffe000aec5fe0",
+      "symbol": "_ml_stack_remaining",
+      "site": "0xfffffe0008313cc0",
+      "final_site": "0xfffffff008313cc0",
+      "final_target": "0xfffffff00aefd0b0",
+      "chain_fields": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "real_native_binding": true
+    },
+    {
+      "owner": "com.apple.iokit.IOSurface",
+      "original": "0xfffffe000b4b6724",
+      "symbol": "__ZN18IOMemoryDescriptor26ktraceEmitPhysicalSegmentsEv",
+      "site": "0xfffffe00083b6238",
+      "final_site": "0xfffffff0083b6238",
+      "final_target": "0xfffffff00b484300",
+      "chain_fields": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "real_native_binding": true
+    },
+    {
+      "owner": "com.apple.driver.AppleARMPlatform",
+      "original": "0xfffffe000b4ca1d0",
+      "symbol": "__ZN24IOCPUInterruptControllerC1Ev",
+      "site": "0xfffffe0007f854a8",
+      "final_site": "0xfffffff007f854a8",
+      "final_target": "0xfffffff00b495fb4",
+      "chain_fields": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "real_native_binding": true
+    },
+    {
+      "owner": "com.apple.driver.AppleARMPlatform",
+      "original": "0xfffffe000b4ca260",
+      "symbol": "_IOCPURunPlatformQuiesceActions",
+      "site": "0xfffffe0007f85128",
+      "final_site": "0xfffffff007f85128",
+      "final_target": "0xfffffff00b4968f8",
+      "chain_fields": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "real_native_binding": true
+    },
+    {
+      "owner": "com.apple.driver.AppleARMPlatform",
+      "original": "0xfffffe000b4ca2e8",
+      "symbol": "_IOCPURunPlatformActiveActions",
+      "site": "0xfffffe0007f85120",
+      "final_site": "0xfffffff007f85120",
+      "final_target": "0xfffffff00b4969bc",
+      "chain_fields": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "real_native_binding": true
+    },
+    {
+      "owner": "com.apple.security.AppleImage4",
+      "original": "0xfffffe000b5a3ba8",
+      "symbol": "_kernel_image4_storage_data",
+      "site": "0xfffffe00080e1950",
+      "final_site": "0xfffffff0080e1950",
+      "final_target": "0xfffffff00b284764",
+      "chain_fields": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "real_native_binding": true
+    },
+    {
+      "owner": "com.apple.iokit.IOHIDFamily",
+      "original": "0xfffffe000b8b3ce8",
+      "symbol": "_kext_assertions_enable",
+      "site": "0xfffffe00083586a8",
+      "final_site": "0xfffffff0083586a8",
+      "final_target": "0xfffffff00b8343d8",
+      "chain_fields": [
+        0,
+        null,
+        null,
+        null
+      ],
+      "real_native_binding": true,
+      "integer_value": 1
+    }
+  ],
+  "recovered_import_occurrences": 16,
+  "remaining": {
+    "com.apple.driver.AppleARMPlatform": {
+      "0xfffffff00b433e68": 1
+    },
+    "com.apple.security.Image4": {
+      "0xfffffff00b2a1694": 1,
+      "0xfffffff00b2a170c": 1,
+      "0xfffffff00b2a1778": 1,
+      "0xfffffff00b2a1798": 1
+    }
+  },
+  "stubbed": {},
+  "in_memory_candidate_sha256": "6c62b865994160cebc35555a6384c41b4c008250c0efc53353da8399b26bcc99",
+  "source_inputs_modified": false,
+  "finished_at": "2026-11-15T02:34:24.672489+00:00",
+  "origin": "Retained clean build run 43615501493, offline unmodified engine emission and independent final-byte checks",
+  "artifacts": "No new kernel.macho or boot.img; incomplete candidate exists only in memory"
+}
