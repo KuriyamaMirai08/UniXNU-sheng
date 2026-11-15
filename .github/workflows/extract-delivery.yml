@@ -1,0 +1,45 @@
+name: Extract completed boot delivery
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  extract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Retrieve original successful build without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/input"
+          gh run download 43731472664 --repo "$GITHUB_REPOSITORY" --name sheng-clean-candidate-43731472664-1 --dir "$RUNNER_TEMP/input"
+          python3 - "$RUNNER_TEMP/input" <<'PY'
+          import hashlib,sys
+          from pathlib import Path
+          p=Path(sys.argv[1]); expected=(p/'SHA256SUMS.txt').read_text().split()[0]
+          with (p/'attempt.tar.gz').open('rb') as f: actual=hashlib.file_digest(f,'sha256').hexdigest()
+          if actual!=expected: raise ValueError('Original archive checksum mismatch')
+          print('Verified original archive:',actual)
+          PY
+      - name: Preserve actual delivery and hidden receipts
+        run: |
+          python3 -B scripts/repro/extract-delivery.py --archive "$RUNNER_TEMP/input/attempt.tar.gz" --output "$RUNNER_TEMP/delivery" > "$RUNNER_TEMP/extraction.log"
+          tar -C "$RUNNER_TEMP/delivery" -czf "$RUNNER_TEMP/delivery.tar.gz" .
+          sha256sum "$RUNNER_TEMP/delivery.tar.gz" > "$RUNNER_TEMP/delivery.sha256"
+          cp "$RUNNER_TEMP/delivery/EXTRACTION.json" "$RUNNER_TEMP/EXTRACTION.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: boot-delivery-43731472664
+          path: |
+            ${{ runner.temp }}/delivery.tar.gz
+            ${{ runner.temp }}/delivery.sha256
+            ${{ runner.temp }}/EXTRACTION.json
+            ${{ runner.temp }}/extraction.log
+          if-no-files-found: error
+          retention-days: 30
