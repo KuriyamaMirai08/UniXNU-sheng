@@ -29,7 +29,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/rpc-input"
           gh run download 43615501493 --repo "$GITHUB_REPOSITORY" --name clean-kernel-b1-43615501493-1 --dir "$RUNNER_TEMP/rpc-input"
-      - name: Generate one IDL and compile three units
+      - name: Generate one IDL and compile six affected units
         env:
           INSPECT_SERIALIZABLE: ${{ inputs.inspect_serializable }}
         run: |

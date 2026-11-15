@@ -1,6 +1,21 @@
+diff --git a/config/IOKit.exports b/config/IOKit.exports
+index fd799dc..649cbe9 100644
+--- a/config/IOKit.exports
++++ b/config/IOKit.exports
+@@ -2027,3 +2027,8 @@ __ZN14IOPMrootDomain20copyWakeReasonStringEPcm
+ __ZN23IOMultiMemoryDescriptor12setPurgeableEjPj
+ __ZN23IOMultiMemoryDescriptor18getPhysicalSegmentEyPyj
+ __ZN23IOMultiMemoryDescriptor5doMapEP7_vm_mapPyjyy
++
++# Dictionary platform RPC (Darwin 26 DriverKit ABI).
++__ZN9IOService20CallPlatformFunctionEP8OSStringbP12OSDictionaryPS3_PFiP15OSMetaClassBase5IORPCE
++__ZN9IOService25CallPlatformFunction_ImplEP8OSStringbP12OSDictionaryPS3_
++__ZN9IOService27CallPlatformFunction_InvokeE5IORPCP15OSMetaClassBasePFiS2_P8OSStringbP12OSDictionaryPS6_E
+diff --git a/iokit/DriverKit/IOService.iig b/iokit/DriverKit/IOService.iig
+index 4180871..bba811c 100644
 --- a/iokit/DriverKit/IOService.iig
 +++ b/iokit/DriverKit/IOService.iig
-@@ -591,6 +591,16 @@
+@@ -591,6 +591,16 @@ public:
  	virtual kern_return_t
  	ReleasePMAssertion(uint64_t assertionID);
  
@@ -12,14 +27,127 @@
 +		OSString * functionName,
 +		bool waitForFunction,
 +		OSDictionary * inParam,
-+		OSDictionary ** outParam);
++		OSDictionary ** outParam) LOCAL IIG_SERIALIZABLE;
 +
  private:
  	virtual void
  	Stop_async(
+diff --git a/iokit/DriverKit/Makefile b/iokit/DriverKit/Makefile
+index d456318..f771d8b 100644
+--- a/iokit/DriverKit/Makefile
++++ b/iokit/DriverKit/Makefile
+@@ -60,6 +60,7 @@ $(GENERATED_HEADERS) : \
+ 	%.h : %.iig
+ 	@$(LOG_IIG) "$@"
+ 	$(_v)$(IIG) --def $< --header $@ --impl $(patsubst %.h,%.iig.cpp,$@) --framework-name DriverKit ${OTHER_IIG_FLAGS} -- ${OTHER_IIG_CFLAGS} $(_vstdout)
++	$(if $(filter IOService.h,$(notdir $@)),$(_v)$(PYTHON) $(SRCROOT)/iokit/DriverKit/restore_platform_rpc.py $(patsubst %.h,%.iig.cpp,$@))
+ 
+ $(GENERATED_IMPL) : $(GENERATED_HEADERS)
+ 
+diff --git a/iokit/DriverKit/restore_platform_rpc.py b/iokit/DriverKit/restore_platform_rpc.py
+new file mode 100644
+index 0000000..934e786
+--- /dev/null
++++ b/iokit/DriverKit/restore_platform_rpc.py
+@@ -0,0 +1,56 @@
++#!/usr/bin/env python3
++"""Restore the two observed 24A446 generator contracts for one private RPC.
++
++DriverKit-440 keeps its actual message structs and runtime checks. Its generator
++does not encode SERIALIZABLE into bit8 and leaves a rejected output retained.
++Restrict this compatibility step to the exact generated wrapper; fail on drift.
++"""
++import argparse
++import hashlib
++from pathlib import Path
++
++OLD_FLAGS = """    msg->content.__hdr.flags = 0*kIORPCMessageOneway
++                             | 0*kIORPCMessageSimpleReply
++                             | 0*kIORPCMessageLocalHost
++                             | 0*kIORPCMessageOnqueue;"""
++OLD_OUTPUT = """        *outParam = OSDynamicCast(OSDictionary, (OSObject *) rpl->content.outParam);
++        if (rpl->content.outParam && !*outParam) ret = kIOReturnBadArgument;"""
++NEW_OUTPUT = """        *outParam = OSDynamicCast(OSDictionary, (OSObject *) rpl->content.outParam);
++        if (rpl->content.outParam && !*outParam)
++        {
++            ((OSObject *) rpl->content.outParam)->release();
++            ret = kIOReturnBadArgument;
++        }"""
++
++
++def restore(text):
++    marker = "\nIOService::CallPlatformFunction(\n"
++    if text.count(marker) != 1:
++        raise ValueError("Platform RPC wrapper identity changed")
++    start = text.index(marker)
++    end = text.index("\n}\n", start) + 3
++    wrapper = text[start:end]
++    new_flags = OLD_FLAGS + "\n    msg->content.__hdr.flags |= kIORPCMessageSerializable;"
++    if new_flags in wrapper and NEW_OUTPUT in wrapper:
++        return text
++    if wrapper.count(OLD_FLAGS) != 1 or wrapper.count(OLD_OUTPUT) != 1:
++        raise ValueError("Platform RPC generation contract changed")
++    if "IOService_CallPlatformFunction_ID" not in wrapper or "msgh_descriptor_count = 3" not in wrapper:
++        raise ValueError("Platform RPC message shape changed")
++    wrapper = wrapper.replace(OLD_FLAGS, new_flags, 1).replace(OLD_OUTPUT, NEW_OUTPUT, 1)
++    return text[:start] + wrapper + text[end:]
++
++
++def main():
++    parser = argparse.ArgumentParser()
++    parser.add_argument("implementation", type=Path)
++    args = parser.parse_args()
++    raw = args.implementation.read_bytes()
++    updated = restore(raw.decode("utf-8")).encode("utf-8")
++    if raw != updated:
++        args.implementation.write_bytes(updated)
++    print("platform RPC codegen: " + hashlib.sha256(raw).hexdigest() + " -> " + hashlib.sha256(updated).hexdigest())
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/iokit/IOKit/IOKitKeysPrivate.h b/iokit/IOKit/IOKitKeysPrivate.h
+index b35891a..b639bc9 100644
+--- a/iokit/IOKit/IOKitKeysPrivate.h
++++ b/iokit/IOKit/IOKitKeysPrivate.h
+@@ -96,6 +96,7 @@ typedef struct _IOUCProcessToken {
+ #define kIOPlatformPanicActionKey                    "IOPlatformPanicAction"         /* value is OSNumber (priority) */
+ 
+ #define kIOPlatformFunctionHandlerSet                "IOPlatformFunctionHandlerSet"
++#define kIOUserPlatformFunctionHandlerGet             "IOUserPlatformFunctionHandlerGet"
+ 
+ #define kIOPlatformFunctionHandlerMaxBusDelay        "IOPlatformFunctionHandlerMaxBusDelay"
+ #define kIOPlatformMaxBusDelay                       "IOPlatformMaxBusDelay"
+diff --git a/iokit/IOKit/IORPC.h b/iokit/IOKit/IORPC.h
+index 7ffc6b7..d104bd0 100644
+--- a/iokit/IOKit/IORPC.h
++++ b/iokit/IOKit/IORPC.h
+@@ -167,6 +167,7 @@ enum{
+ 	kIORPCMessageOnqueue    = 0x00000020,
+ 	kIORPCMessageError      = 0x00000040,
+ 	kIORPCMessageSimpleReply = 0x00000080,
++	kIORPCMessageSerializable = 0x00000100,
+ };
+ 
+ enum{
+diff --git a/iokit/IOKit/IOUserServer.h b/iokit/IOKit/IOUserServer.h
+index 8ac4bf6..e38321d 100644
+--- a/iokit/IOKit/IOUserServer.h
++++ b/iokit/IOKit/IOUserServer.h
+@@ -270,7 +270,7 @@ public:
+ 	static OSObject      * copyObjectForSendRight(ipc_port_t port, ipc_kobject_type_t type);
+ 
+ 	IOReturn               copyOutObjects(IORPCMessageMach * mach, IORPCMessage * message,
+-	    size_t size, bool consume);
++	    size_t size, bool consume, OSArray ** createdRights = NULL);
+ 	IOReturn               copyInObjects(IORPCMessageMach * mach, IORPCMessage * message,
+ 	    size_t size, bool copyObjects, bool consumePorts);
+ 
+diff --git a/iokit/Kernel/IOService.cpp b/iokit/Kernel/IOService.cpp
+index 5e28090..1a32fb9 100644
 --- a/iokit/Kernel/IOService.cpp
 +++ b/iokit/Kernel/IOService.cpp
-@@ -284,6 +284,7 @@
+@@ -284,6 +284,7 @@ static OSData *                 gIOConsoleUsersSeedValue;
  extern const OSSymbol *         gIODTPHandleKey;
  
  const OSSymbol *                gIOPlatformFunctionHandlerSet;
@@ -27,7 +155,7 @@
  
  
  static IOLock *                 gIOConsoleUsersLock;
-@@ -607,6 +608,7 @@
+@@ -607,6 +608,7 @@ IOService::initialize( void )
  	gIOAllCPUInitializedKey                 = OSSymbol::withCStringNoCopy( kIOAllCPUInitializedKey );
  
  	gIOPlatformFunctionHandlerSet               = OSSymbol::withCStringNoCopy(kIOPlatformFunctionHandlerSet);
@@ -35,9 +163,303 @@
  	sCPULatencyFunctionName[kCpuDelayBusStall]  = OSSymbol::withCStringNoCopy(kIOPlatformFunctionHandlerMaxBusDelay);
  #if defined(__x86_64__)
  	sCPULatencyFunctionName[kCpuDelayInterrupt] = OSSymbol::withCStringNoCopy(kIOPlatformFunctionHandlerMaxInterruptDelay);
+diff --git a/iokit/Kernel/IOUserServer.cpp b/iokit/Kernel/IOUserServer.cpp
+index 14d77fb..43c2d4d 100644
 --- a/iokit/Kernel/IOUserServer.cpp
 +++ b/iokit/Kernel/IOUserServer.cpp
-@@ -5505,6 +5505,60 @@
+@@ -53,6 +53,7 @@
+ #include <libkern/c++/OSAllocation.h>
+ #include <libkern/c++/OSKext.h>
+ #include <libkern/c++/OSSharedPtr.h>
++#include <libkern/c++/OSUnserialize.h>
+ #include <libkern/OSDebug.h>
+ #include <libkern/Block.h>
+ #include <kern/cs_blobs.h>
+@@ -3239,6 +3240,92 @@ uext_server(ipc_port_t receiver, ipc_kmsg_t requestkmsg, ipc_kmsg_t * pReply)
+ #define MAX_UEXT_REPLY_SIZE     0x17c0
+ static_assert(MAX_UEXT_REPLY_SIZE + MAX_TRAILER_SIZE <= KALLOC_SAFE_ALLOC_SIZE);
+ 
++struct IORPCObjectEditContext {
++	task_t task;
++	IOReturn status;
++	OSArray * rights;
++};
++
++static void
++IORPCReleaseObjectRights(task_t task, OSArray * rights)
++{
++	if (!rights) {
++		return;
++	}
++	for (unsigned int index = 0; index < rights->getCount(); ++index) {
++		OSNumber * number = OSDynamicCast(OSNumber, rights->getObject(index));
++		if (number && task) {
++			(void) iokit_mod_send_right(task, number->unsigned32BitValue(), -1);
++		}
++	}
++	rights->release();
++}
++
++static const OSMetaClassBase *
++IORPCSerializeObject(void * reference, OSSerialize * serializer __unused,
++    OSCollection * container __unused, const OSSymbol * name __unused,
++    const OSMetaClassBase * value)
++{
++	IORPCObjectEditContext * context = (IORPCObjectEditContext *) reference;
++	if (context->status != kIOReturnSuccess || !value ||
++	    OSDynamicCast(OSString, value) || OSDynamicCast(OSNumber, value) ||
++	    OSDynamicCast(OSData, value) || OSDynamicCast(OSBoolean, value) ||
++	    OSDynamicCast(OSCollection, value)) {
++		if (value) {
++			value->retain();
++		}
++		return value;
++	}
++	OSObject * object = const_cast<OSObject *>(OSDynamicCast(OSObject, value));
++	if (!object) {
++		value->retain();
++		return value;
++	}
++	if (!context->task) {
++		context->status = kIOReturnBadArgument;
++		value->retain();
++		return value;
++	}
++	mach_port_name_t port = iokit_make_send_right(context->task, object, IKOT_UEXT_OBJECT);
++	if (!MACH_PORT_VALID(port)) {
++		context->status = kIOReturnBadArgument;
++		value->retain();
++		return value;
++	}
++	if (!context->rights) {
++		context->rights = OSArray::withCapacity(1);
++	}
++	OSNumber * number = OSNumber::withNumber(port, 62);
++	if (!context->rights || !number || !context->rights->setObject(number)) {
++		(void) iokit_mod_send_right(context->task, port, -1);
++		OSSafeReleaseNULL(number);
++		context->status = kIOReturnNoMemory;
++		value->retain();
++		return value;
++	}
++	return number;
++}
++
++static OSObject *
++IORPCUnserializeObject(void * reference, OSCollection * container __unused,
++    const OSSymbol * name __unused, OSObject * value)
++{
++	IORPCObjectEditContext * context = (IORPCObjectEditContext *) reference;
++	OSNumber * number = OSDynamicCast(OSNumber, value);
++	if (context->status == kIOReturnSuccess && number && number->numberOfBits() == 62) {
++		OSObject * object = context->task ? iokit_lookup_object_with_port_name(
++		    number->unsigned32BitValue(), IKOT_UEXT_OBJECT, context->task) : NULL;
++		if (object) {
++			return object;
++		}
++		context->status = kIOReturnBadArgument;
++	}
++	if (value) {
++		value->retain();
++	}
++	return value;
++}
++
+ kern_return_t
+ IOUserServer::server(ipc_kmsg_t requestkmsg, IORPCMessage * message, ipc_kmsg_t * pReply)
+ {
+@@ -3253,6 +3340,7 @@ IOUserServer::server(ipc_kmsg_t requestkmsg, IORPCMessage * message, ipc_kmsg_t
+ 	OSAction         * action;
+ 	bool               oneway;
+ 	uint64_t           msgid;
++	uint64_t           objectFlags;
+ 
+ 	msgin   = (typeof(msgin))ikm_header(requestkmsg);
+ 	replyAlloc = 0;
+@@ -3291,6 +3379,7 @@ IOUserServer::server(ipc_kmsg_t requestkmsg, IORPCMessage * message, ipc_kmsg_t
+ 	}
+ 	object = (OSObject *) message->objects[0];
+ 	msgid = message->msgid;
++	objectFlags = message->flags & kIORPCMessageSerializable;
+ 	message->flags &= ~kIORPCMessageKernel;
+ 	message->flags |= kIORPCMessageRemote;
+ 
+@@ -3351,6 +3440,7 @@ IOUserServer::server(ipc_kmsg_t requestkmsg, IORPCMessage * message, ipc_kmsg_t
+ 			if (!reply) {
+ 				ret = kIOReturnIPCError;
+ 			} else {
++				reply->flags |= objectFlags;
+ 				ret = copyOutObjects(msgout, reply, replySize, (kIORPCVersionCurrentReply == msgout->msgh.msgh_id) /* =>!InvokeReply */);
+ 			}
+ 		}
+@@ -3561,6 +3651,8 @@ IOUserServer::rpc(IORPC rpc)
+ 	uint32_t           sendSize, replySize;
+ 	bool               oneway;
+ 	uint64_t           msgid;
++	uint64_t           objectFlags;
++	OSArray          * createdRights = NULL;
+ 	IODispatchQueue  * queue;
+ 	IOService        * service;
+ 	ipc_port_t         port;
+@@ -3581,6 +3673,7 @@ IOUserServer::rpc(IORPC rpc)
+ 		return kIOReturnIPCError;
+ 	}
+ 	msgid   = message->msgid;
++	objectFlags = message->flags & kIORPCMessageSerializable;
+ 	machid  = (msgid >> 32);
+ 
+ 	if (mach->msgh_body.msgh_descriptor_count < 1) {
+@@ -3607,7 +3700,11 @@ IOUserServer::rpc(IORPC rpc)
+ 
+ 	oneway = (0 != (kIORPCMessageOneway & message->flags));
+ 
+-	ret = copyOutObjects(mach, message, sendSize, false);
++	ret = copyOutObjects(mach, message, sendSize, false, &createdRights);
++	if (ret != kIOReturnSuccess) {
++		ipc_port_release_send(sendPort);
++		return ret;
++	}
+ 
+ 	mach->msgh.msgh_bits = MACH_MSGH_BITS_COMPLEX |
+ 	    MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, (oneway ? 0 : MACH_MSG_TYPE_MAKE_SEND_ONCE));
+@@ -3635,8 +3732,13 @@ IOUserServer::rpc(IORPC rpc)
+ 		if (!message_moved) {
+ 			// release ports
+ 			copyInObjects(mach, message, sendSize, false, true);
++			IORPCReleaseObjectRights(fOwningTask, createdRights);
++			createdRights = NULL;
+ 		}
+ 	}
++	/* On delivery the destination task owns the nested send rights. A receive
++	 * failure after delivery must not revoke rights already handed over. */
++	OSSafeReleaseNULL(createdRights);
+ 
+ 	if ((KERN_SUCCESS == ret) && !oneway) {
+ 		if (kIORPCVersionCurrentReply != mach->msgh.msgh_id) {
+@@ -3656,6 +3758,7 @@ IOUserServer::rpc(IORPC rpc)
+ 				ret = MIG_BAD_ARGUMENTS;
+ 			} else {
+ 				bool isError = (0 != (kIORPCMessageError & message->flags));
++				message->flags |= objectFlags;
+ 				ret = copyInObjects(mach, message, replySize, !isError, true);
+ 				if (kIOReturnSuccess != ret) {
+ 					if (kIODKLogIPC & gIODKDebug) {
+@@ -3758,7 +3861,7 @@ copyoutkdata(const void * data, vm_size_t len, void ** buf)
+ 
+ IOReturn
+ IOUserServer::copyOutObjects(IORPCMessageMach * mach, IORPCMessage * message,
+-    size_t size, bool consume)
++    size_t size, bool consume, OSArray ** createdRights)
+ {
+ 	uint64_t           refs;
+ 	uint32_t           idx, maxObjectCount;
+@@ -3772,6 +3875,10 @@ IOUserServer::copyOutObjects(IORPCMessageMach * mach, IORPCMessage * message,
+ 	mach_msg_size_t              length;
+ 	kern_return_t                kr;
+ 	OSSerialize                * s;
++	IORPCObjectEditContext context = { fOwningTask, kIOReturnSuccess, NULL };
++	if (createdRights) {
++		*createdRights = NULL;
++	}
+ 
+ 	refs           = message->objectRefs;
+ 	maxObjectCount = MAX_OBJECT_COUNT(mach, size, message);
+@@ -3804,6 +3911,7 @@ IOUserServer::copyOutObjects(IORPCMessageMach * mach, IORPCMessage * message,
+ 
+ 				port = copySendRightForObject(object, IKOT_UEXT_OBJECT);
+ 				if (!port) {
++					descsize = -1UL;
+ 					break;
+ 				}
+ 				if (consume) {
+@@ -3824,14 +3932,26 @@ IOUserServer::copyOutObjects(IORPCMessageMach * mach, IORPCMessage * message,
+ 			length = 0;
+ 			address = NULL;
+ 			if (object) {
+-				s = OSSerialize::binaryWithCapacity(4096);
+-				assert(s);
++				bool edit = (message->flags & kIORPCMessageSerializable) &&
++				    OSDynamicCast(OSDictionary, object);
++				s = edit ? OSSerialize::binaryWithCapacity(4096, kOSSerializeEditAll,
++				    IORPCSerializeObject, &context) : OSSerialize::binaryWithCapacity(4096);
++				if (!edit) {
++					assert(s);
++				}
+ 				if (!s) {
++					context.status = kIOReturnNoMemory;
++					descsize = -1UL;
+ 					break;
+ 				}
+ 				s->setIndexed(true);
+-				if (!object->serialize(s)) {
+-					assert(false);
++				bool serialized = object->serialize(s);
++				if (!serialized || context.status != kIOReturnSuccess) {
++					/* Retain the existing assertion for an unsupported serializer.
++					 * A failed port conversion has its own checked error result. */
++					if (context.status == kIOReturnSuccess) {
++						assert(serialized);
++					}
+ 					descsize = -1UL;
+ 					s->release();
+ 					break;
+@@ -3868,6 +3988,12 @@ IOUserServer::copyOutObjects(IORPCMessageMach * mach, IORPCMessage * message,
+ 	}
+ 
+ 	if (idx >= refs) {
++		if (createdRights) {
++			*createdRights = context.rights;
++		} else {
++			/* A successful kernel reply transfers the rights to fOwningTask. */
++			OSSafeReleaseNULL(context.rights);
++		}
+ 		return kIOReturnSuccess;
+ 	}
+ 
+@@ -3901,7 +4027,13 @@ IOUserServer::copyOutObjects(IORPCMessageMach * mach, IORPCMessage * message,
+ 		desc = (typeof(desc))(((uintptr_t) desc) + descsize);
+ 	}
+ 
+-	return kIOReturnBadArgument;
++	IORPCReleaseObjectRights(fOwningTask, context.rights);
++	if (consume) {
++		/* Converted entries are already zero; release only the rest of this
++		 * kernel-owned reply when conversion fails before message delivery. */
++		consumeObjects(mach, message, size);
++	}
++	return context.status != kIOReturnSuccess ? context.status : kIOReturnBadArgument;
+ }
+ 
+ IOReturn
+@@ -3917,6 +4049,7 @@ IOUserServer::copyInObjects(IORPCMessageMach * mach, IORPCMessage * message,
+ 	mach_msg_ool_descriptor_t  * ool;
+ 	vm_map_address_t             copyoutdata;
+ 	kern_return_t                kr;
++	IORPCObjectEditContext context = { fOwningTask, kIOReturnSuccess, NULL };
+ 
+ 	refs           = message->objectRefs;
+ 	maxObjectCount = MAX_OBJECT_COUNT(mach, size, message);
+@@ -3966,12 +4099,18 @@ IOUserServer::copyInObjects(IORPCMessageMach * mach, IORPCMessage * message,
+ 			if (isObjectPort && copyObjects && ool->size && ool->address) {
+ 				kr = vm_map_copyout(kernel_map, &copyoutdata, (vm_map_copy_t) ool->address);
+ 				if (KERN_SUCCESS == kr) {
+-					object = OSUnserializeXML((const char *) copyoutdata, ool->size);
++					object = (message->flags & kIORPCMessageSerializable) ?
++					    OSUnserializeXML((const char *) copyoutdata, ool->size,
++					    IORPCUnserializeObject, &context, kOSSerializeEditAll) :
++					    OSUnserializeXML((const char *) copyoutdata, ool->size);
+ 					kr = vm_deallocate(kernel_map, copyoutdata, ool->size);
+ 					assert(KERN_SUCCESS == kr);
+ 					// vm_map_copyout() has consumed the vm_map_copy_t in the message
+ 					ool->size = 0;
+ 					ool->address = NULL;
++					if (context.status != kIOReturnSuccess) {
++						OSSafeReleaseNULL(object);
++					}
+ 				}
+ 				if (!object) {
+ 					descsize = -1UL;
+@@ -5505,6 +5644,60 @@ IOService::SearchProperty_Impl(
  	return object ? kIOReturnSuccess : kIOReturnNotFound;
  }
  
@@ -98,24 +520,336 @@
  kern_return_t
  IOService::StringFromReturn_Impl(
  	IOReturn retval,
---- a/iokit/IOKit/IOKitKeysPrivate.h
-+++ b/iokit/IOKit/IOKitKeysPrivate.h
-@@ -96,6 +96,7 @@
- #define kIOPlatformPanicActionKey                    "IOPlatformPanicAction"         /* value is OSNumber (priority) */
+diff --git a/libkern/c++/OSSerializeBinary.cpp b/libkern/c++/OSSerializeBinary.cpp
+index 5d6f1de..5a96d00 100644
+--- a/libkern/c++/OSSerializeBinary.cpp
++++ b/libkern/c++/OSSerializeBinary.cpp
+@@ -28,6 +28,7 @@
  
- #define kIOPlatformFunctionHandlerSet                "IOPlatformFunctionHandlerSet"
-+#define kIOUserPlatformFunctionHandlerGet             "IOUserPlatformFunctionHandlerGet"
  
- #define kIOPlatformFunctionHandlerMaxBusDelay        "IOPlatformFunctionHandlerMaxBusDelay"
- #define kIOPlatformMaxBusDelay                       "IOPlatformMaxBusDelay"
---- a/config/IOKit.exports
-+++ b/config/IOKit.exports
-@@ -2027,3 +2027,8 @@
- __ZN23IOMultiMemoryDescriptor12setPurgeableEjPj
- __ZN23IOMultiMemoryDescriptor18getPhysicalSegmentEyPyj
- __ZN23IOMultiMemoryDescriptor5doMapEP7_vm_mapPyjyy
+ #include <libkern/c++/OSSharedPtr.h>
++#include <libkern/c++/OSUnserialize.h>
+ #include <libkern/OSSerializeBinary.h>
+ #include <libkern/c++/OSContainers.h>
+ #include <libkern/c++/OSLib.h>
+@@ -50,6 +51,13 @@
+ OSSerialize *
+ OSSerialize::binaryWithCapacity(unsigned int inCapacity,
+     Editor editor, void * reference)
++{
++	return binaryWithCapacity(inCapacity, kOSSerializeEditDictionary, editor, reference);
++}
 +
-+# Dictionary platform RPC (Darwin 26 DriverKit ABI).
-+__ZN9IOService20CallPlatformFunctionEP8OSStringbP12OSDictionaryPS3_PFiP15OSMetaClassBase5IORPCE
-+__ZN9IOService25CallPlatformFunction_ImplEP8OSStringbP12OSDictionaryPS3_
-+__ZN9IOService27CallPlatformFunction_InvokeE5IORPCP15OSMetaClassBasePFiS2_P8OSStringbP12OSDictionaryPS6_E
++OSSerialize *
++OSSerialize::binaryWithCapacity(unsigned int inCapacity, unsigned int options,
++    Editor editor, void * reference)
+ {
+ 	OSSerialize *me;
+ 
+@@ -65,6 +73,7 @@ OSSerialize::binaryWithCapacity(unsigned int inCapacity,
+ 	me->endCollection = true;
+ 	me->editor        = editor;
+ 	me->editRef       = reference;
++	me->editOptions   = options;
+ 
+ 	bcopy(kOSSerializeBinarySignature, &me->data[0], sizeof(kOSSerializeBinarySignature));
+ 	me->length = sizeof(kOSSerializeBinarySignature);
+@@ -250,7 +259,7 @@ OSSerialize::binarySerializeInternal(const OSMetaClassBase *o)
+ 			dictKey = dict->dictionary[i].key;
+ 			dictValue = dict->dictionary[i].value;
+ 			i++;
+-			if (editor) {
++			if (editor && (editOptions & kOSSerializeEditDictionary)) {
+ 				dictValue = nvalue = (*editor)(editRef, this, dict, dictKey, dictValue);
+ 				if (!dictValue) {
+ 					dictValue = dict;
+@@ -275,11 +284,22 @@ OSSerialize::binarySerializeInternal(const OSMetaClassBase *o)
+ 		key = (kOSSerializeArray | array->count);
+ 		ok = addBinaryObject(o, key, NULL, 0, &startCollection);
+ 		for (i = 0; ok && (i < array->count);) {
++			const OSMetaClassBase * value = array->array[i];
++			const OSMetaClassBase * edited = NULL;
+ 			i++;
++			if (editor && (editOptions & kOSSerializeEditArray)) {
++				value = edited = (*editor)(editRef, this, array, NULL, value);
++				if (!value) {
++					value = array;
++				}
++			}
+ 			endCollection = (i == array->count);
+-			ok = binarySerialize(array->array[i - 1]);
++			ok = binarySerialize(value);
+ 			if (!ok) {
+-				ok = array->array[i - 1]->serialize(this);
++				ok = value->serialize(this);
++			}
++			if (edited) {
++				edited->release();
+ 			}
+ //			if (!ok) ok = binarySerialize(kOSBooleanFalse);
+ 		}
+@@ -288,11 +308,22 @@ OSSerialize::binarySerializeInternal(const OSMetaClassBase *o)
+ 		key = (kOSSerializeSet | set->members->count);
+ 		ok = addBinaryObject(o, key, NULL, 0, &startCollection);
+ 		for (i = 0; ok && (i < set->members->count);) {
++			const OSMetaClassBase * value = set->members->array[i];
++			const OSMetaClassBase * edited = NULL;
+ 			i++;
++			if (editor && (editOptions & kOSSerializeEditSet)) {
++				value = edited = (*editor)(editRef, this, set, NULL, value);
++				if (!value) {
++					value = set;
++				}
++			}
+ 			endCollection = (i == set->members->count);
+-			ok = binarySerialize(set->members->array[i - 1]);
++			ok = binarySerialize(value);
+ 			if (!ok) {
+-				ok = set->members->array[i - 1]->serialize(this);
++				ok = value->serialize(this);
++			}
++			if (edited) {
++				edited->release();
+ 			}
+ //			if (!ok) ok = binarySerialize(kOSBooleanFalse);
+ 		}
+@@ -345,6 +376,14 @@ OSSerialize::binarySerializeInternal(const OSMetaClassBase *o)
+ 
+ OSObject *
+ OSUnserializeBinary(const char *buffer, size_t bufferSize, OSString **errorString)
++{
++	return OSUnserializeBinary(buffer, bufferSize, NULL, NULL, 0, errorString);
++}
++
++OSObject *
++OSUnserializeBinary(const char *buffer, size_t bufferSize,
++    OSUnserializeCallback callback, void * reference, unsigned int options,
++    OSString **errorString)
+ {
+ 	OSObject ** objsArray;
+ 	uint32_t    objsCapacity;
+@@ -462,6 +501,11 @@ OSUnserializeBinary(const char *buffer, size_t bufferSize, OSString **errorStrin
+ 			value.value <<= 32;
+ 			value.value |= next[0];
+ 			switch (len) {
++			case 62:
++				if (callback && (options & kOSSerializeEditAll)) {
++					o = OSNumber::withNumber(value.value, len);
++				}
++				break;
+ 			case 63:
+ 				o = OSNumber::withDouble(value.fpValue);
+ 				break;
+@@ -556,7 +600,13 @@ OSUnserializeBinary(const char *buffer, size_t bufferSize, OSString **errorStrin
+ 				}
+ 				DEBG("%s = %s\n", sym->getCStringNoCopy(), o->getMetaClass()->getClassName());
+ 				if (o != dict) {
+-					ok = dict->setObject(sym, o);
++					if (callback && (options & kOSSerializeEditDictionary)) {
++						OSObject * edited = (*callback)(reference, dict, sym, o);
++						ok = edited && dict->setObject(sym, edited);
++						OSSafeReleaseNULL(edited);
++					} else {
++						ok = dict->setObject(sym, o);
++					}
+ 				}
+ 				if (sym && (sym != str)) {
+ 					sym->release();
+@@ -564,9 +614,21 @@ OSUnserializeBinary(const char *buffer, size_t bufferSize, OSString **errorStrin
+ 				sym = NULL;
+ 			}
+ 		} else if (array) {
+-			ok = array->setObject(o);
++			if (callback && (options & kOSSerializeEditArray)) {
++				OSObject * edited = (*callback)(reference, array, NULL, o);
++				ok = edited && array->setObject(edited);
++				OSSafeReleaseNULL(edited);
++			} else {
++				ok = array->setObject(o);
++			}
+ 		} else if (set) {
+-			ok = set->setObject(o);
++			if (callback && (options & kOSSerializeEditSet)) {
++				OSObject * edited = (*callback)(reference, set, NULL, o);
++				ok = edited && set->setObject(edited);
++				OSSafeReleaseNULL(edited);
++			} else {
++				ok = set->setObject(o);
++			}
+ 		} else if (result) {
+ 			ok = false;
+ 		} else {
+diff --git a/libkern/c++/OSUnserializeXML.cpp b/libkern/c++/OSUnserializeXML.cpp
+index 65084ad..4ca531a 100644
+--- a/libkern/c++/OSUnserializeXML.cpp
++++ b/libkern/c++/OSUnserializeXML.cpp
+@@ -1 +1,109 @@
+ #include <libkern/c++/OSUnserializeXMLSharedImplementation.h>
++
++#ifdef XNU_KERNEL_PRIVATE
++#include <libkern/c++/OSCollectionIterator.h>
++
++/* XML parsing constructs private containers before this value walk. The
++ * grammar and its checked-in generated implementation remain identical.
++ * Track visited containers to bound depth and preserve shared references. */
++static bool
++OSUnserializeEditXML(OSObject * object, OSUnserializeCallback callback,
++    void * reference, unsigned int options, OSArray * visited, unsigned int depth)
++{
++	OSCollection * collection = OSDynamicCast(OSCollection, object);
++	if (!collection) {
++		return true;
++	}
++	if (visited->getNextIndexOfObject(collection, 0) != -1U) {
++		return true;
++	}
++	if (depth >= 64 || !visited->setObject(collection)) {
++		return false;
++	}
++	OSDictionary * dict = OSDynamicCast(OSDictionary, collection);
++	OSArray * array = OSDynamicCast(OSArray, collection);
++	OSSet * set = OSDynamicCast(OSSet, collection);
++	OSArray * entries = OSArray::withCapacity(collection->getCount());
++	OSCollectionIterator * iterator = OSCollectionIterator::withCollection(collection);
++	if (!entries || !iterator) {
++		OSSafeReleaseNULL(entries);
++		OSSafeReleaseNULL(iterator);
++		return false;
++	}
++	OSObject * entry;
++	bool ok = true;
++	while ((entry = iterator->getNextObject())) {
++		if (!entries->setObject(entry)) {
++			ok = false;
++			break;
++		}
++	}
++	if (!iterator->isValid()) {
++		ok = false;
++	}
++	iterator->release();
++	for (unsigned int index = 0; ok && index < entries->getCount(); ++index) {
++		const OSSymbol * key = dict ? OSDynamicCast(OSSymbol, entries->getObject(index)) : NULL;
++		OSObject * value = dict ? dict->getObject(key) : entries->getObject(index);
++		if (!value || (dict && !key) || !OSUnserializeEditXML(value, callback, reference,
++		    options, visited, depth + 1)) {
++			ok = false;
++			break;
++		}
++		unsigned int option = dict ? kOSSerializeEditDictionary :
++		    (array ? kOSSerializeEditArray : kOSSerializeEditSet);
++		if (!(options & option)) {
++			continue;
++		}
++		OSObject * edited = (*callback)(reference, collection, key, value);
++		if (!edited) {
++			ok = false;
++			break;
++		}
++		if (dict) {
++			ok = dict->setObject(key, edited);
++		} else if (array) {
++			array->replaceObject(index, edited);
++		} else if (set) {
++			if (edited != value) {
++				set->removeObject(value);
++				ok = set->containsObject(edited) || set->setObject(edited);
++			}
++		} else {
++			ok = false;
++		}
++		edited->release();
++	}
++	entries->release();
++	return ok;
++}
++
++OSObject *
++OSUnserializeXML(const char * buffer, size_t bufferSize,
++    OSUnserializeCallback callback, void * reference, unsigned int options,
++    OSString ** errorString)
++{
++	if (!callback || !(options & kOSSerializeEditAll)) {
++		return OSUnserializeXML(buffer, bufferSize, errorString);
++	}
++	if (!buffer || bufferSize < sizeof(kOSSerializeBinarySignature)) {
++		return NULL;
++	}
++	if (!memcmp(buffer, kOSSerializeBinarySignature, sizeof(kOSSerializeBinarySignature)) ||
++	    (kOSSerializeIndexedBinarySignature == (uint8_t) buffer[0])) {
++		return OSUnserializeBinary(buffer, bufferSize, callback, reference, options, errorString);
++	}
++	OSObject * object = OSUnserializeXML(buffer, bufferSize, errorString);
++	if (!object) {
++		return NULL;
++	}
++	OSArray * visited = OSArray::withCapacity(8);
++	bool ok = visited && OSUnserializeEditXML(object, callback, reference, options, visited, 0);
++	OSSafeReleaseNULL(visited);
++	if (!ok) {
++		object->release();
++		return NULL;
++	}
++	return object;
++}
++#endif /* XNU_KERNEL_PRIVATE */
+diff --git a/libkern/libkern/c++/OSSerialize.h b/libkern/libkern/c++/OSSerialize.h
+index c8f28b7..e3f8d27 100644
+--- a/libkern/libkern/c++/OSSerialize.h
++++ b/libkern/libkern/c++/OSSerialize.h
+@@ -119,6 +119,8 @@ public:
+ 	void   * editRef;
+ 	OSPtr<OSData> indexData;
+ 
++	unsigned int editOptions;
++
+ 	bool binarySerialize(const OSMetaClassBase *o);
+ 	bool binarySerializeInternal(const OSMetaClassBase *o);
+ 	bool addBinary(const void * data, size_t size);
+@@ -147,6 +149,12 @@ public:
+ 	static OSPtr<OSSerialize> withCapacity(unsigned int capacity);
+ 
+ 	static OSPtr<OSSerialize> binaryWithCapacity(unsigned int inCapacity, Editor editor = NULL, void * reference = NULL);
++#ifdef XNU_KERNEL_PRIVATE
++	/* Dictionary, array and set value editing. Existing callers retain the
++	 * dictionary-only Editor contract through the original overload. */
++	static OSPtr<OSSerialize> binaryWithCapacity(unsigned int inCapacity,
++	    unsigned int options, Editor editor, void * reference);
++#endif
+ 	void setIndexed(bool index);
+ 
+ /*!
+diff --git a/libkern/libkern/c++/OSUnserialize.h b/libkern/libkern/c++/OSUnserialize.h
+index a6cded4..a674ce6 100644
+--- a/libkern/libkern/c++/OSUnserialize.h
++++ b/libkern/libkern/c++/OSUnserialize.h
+@@ -40,6 +40,29 @@
+ class OSObject;
+ class OSString;
+ 
++#ifdef XNU_KERNEL_PRIVATE
++class OSCollection;
++class OSSymbol;
++
++/* The callback returns one retained object for insertion into the collection.
++ * Port-number tokens are accepted only by this private callback entry. */
++typedef OSObject * (*OSUnserializeCallback)(void * reference,
++    OSCollection * container, const OSSymbol * name, OSObject * value);
++enum {
++	kOSSerializeEditDictionary = 1,
++	kOSSerializeEditArray      = 2,
++	kOSSerializeEditSet        = 4,
++	kOSSerializeEditAll        = 7,
++};
++
++extern "C++" OSPtr<OSObject> OSUnserializeBinary(const char * buffer,
++    size_t bufferSize, OSUnserializeCallback callback, void * reference,
++    unsigned int options, OSString ** errorString = NULL);
++extern "C++" OSPtr<OSObject> OSUnserializeXML(const char * buffer,
++    size_t bufferSize, OSUnserializeCallback callback, void * reference,
++    unsigned int options, OSString ** errorString = NULL);
++#endif
++
+ /*!
+  * @header
+  *

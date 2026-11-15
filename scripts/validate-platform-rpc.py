@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate one platform RPC IDL and compile three retained XNU units.
+"""Generate one platform RPC IDL and compile affected retained XNU units.
 
 Use only an isolated copy of the successful clean tree. Keep original bytes,
 diffs, commands and errors. No kernel/prelink/payload/device builder is run.
@@ -36,6 +36,13 @@ SOURCE_SHA = {
     "iokit/Kernel/IOUserServer.cpp": "762d6dfb51fca17e90d08cd317a3a0cab7b9fde7cc83da5d95068c297a019256",
     "iokit/IOKit/IOKitKeysPrivate.h": "9ab32cbe172fef8227f1dbd49abaf7bab43c50d8be2edfec109505bcd95a1711",
     "config/IOKit.exports": "a2b4b40b7559a37ccb0d29efb5972e30c9dda6a3e56eb57c9120c2a7a8eda76d",
+    "iokit/DriverKit/Makefile": "dfad9206fe7dd323a0b9db47e33c03627bae236f295a8aaf5750e4f08dbd6dad",
+    "iokit/IOKit/IORPC.h": "3463c83ffccead1f69c474d0d0ffcb5389cdcff923236d35600e31bcdbd229ce",
+    "iokit/IOKit/IOUserServer.h": "de3cac0274781d1717c915e1c2991875ded78ff43af0142908e2fc2604e20be5",
+    "libkern/c++/OSSerializeBinary.cpp": "59f49215c745a15996271193204a927b7bf06eedeb16d33cd78778f96101cc03",
+    "libkern/c++/OSUnserializeXML.cpp": "20f7364e1d9487eb5cb7e8caeb404b2e203022c84a83fefaad107038f5868560",
+    "libkern/libkern/c++/OSSerialize.h": "50ba832c24740c2e33afeca54c7fd200eb801bb85f8fcb2c75a98dbe6bd57f5b",
+    "libkern/libkern/c++/OSUnserialize.h": "7ad50664216e46a72e9404371f35e692eef136a480741d3e14246c40cef7cb2e",
 }
 
 
@@ -211,11 +218,10 @@ def main():
             # or treat generation as an accepted functional RPC.
             declaration = source / "iokit/DriverKit/IOService.iig"
             text = declaration.read_text()
-            marker = "\t\tOSDictionary ** outParam);"
+            marker = "\t\tOSDictionary ** outParam) LOCAL IIG_SERIALIZABLE;"
             if text.count(marker) != 1:
                 raise ValueError("Platform declaration inspection marker changed")
-            declaration.write_text(text.replace(marker,
-                "\t\tOSDictionary ** outParam) LOCAL IIG_SERIALIZABLE;", 1))
+            declaration.write_text(text.replace(marker, "\t\tOSDictionary ** outParam);", 1))
             annotated = evidence / "serializable-generated"
             generate(iig, sdk, source, obj, annotated, evidence, "iig-serializable")
             annotated_ids = ids((annotated / "IOService.h").read_text())
@@ -230,6 +236,16 @@ def main():
             if not receipt["serializable_method_id_matches"] or not receipt["serializable_existing_ids_unchanged"]:
                 raise ValueError("Annotated generation changed method identities")
             return 0
+        run(["python3", str(source / "iokit/DriverKit/restore_platform_rpc.py"),
+             str(current_generated / "IOService.iig.cpp")], source, evidence, "restore-platform-codegen")
+        shutil.copyfile(source / "iokit/DriverKit/restore_platform_rpc.py", after / "iokit/DriverKit/restore_platform_rpc.py")
+        for name in ("IOService.h", "IOService.iig.cpp"):
+            a, b = (baseline_generated / name).read_text(), (current_generated / name).read_text()
+            (evidence / (name + ".restored.diff")).write_text("".join(difflib.unified_diff(
+                a.splitlines(keepends=True), b.splitlines(keepends=True), fromfile="before/" + name, tofile="restored/" + name)))
+        wire = (current_generated / "IOService.iig.cpp").read_text()
+        receipt["request_serializable_flag_restored"] = "msg->content.__hdr.flags |= kIORPCMessageSerializable;" in wire
+        receipt["wrong_type_output_release_restored"] = "((OSObject *) rpl->content.outParam)->release();" in wire
         for name in ("IOService.h", "IOService.iig.cpp"):
             for target in obj.rglob(name):
                 if target.parent.name != "DriverKit":
@@ -244,11 +260,22 @@ def main():
                     raise ValueError("Framework-header link escaped experiment")
                 target.chmod(target.stat().st_mode | 0o200)
                 shutil.copyfile(current_generated / "IOService.h", target)
+        # The retained exported kernel headers are immutable baseline evidence.
+        # Replace only their corresponding files in this isolated copy.
+        for relative in ("iokit/IOKit/IORPC.h", "iokit/IOKit/IOUserServer.h",
+                         "libkern/libkern/c++/OSSerialize.h", "libkern/libkern/c++/OSUnserialize.h"):
+            exported = obj / "EXPORT_HDRS" / relative
+            exported.chmod(exported.stat().st_mode | 0o200)
+            shutil.copyfile(source / relative, exported)
         objects = evidence / "objects"
         objects.mkdir()
         commands, codes = [], []
-        for name in ("IOService", "IOUserServer", "IOService.iig"):
-            fragment = cpo_dir / (name + ".cpo.json")
+        units = [("IOService", cpo_dir), ("IOUserServer", cpo_dir), ("IOService.iig", cpo_dir),
+                 ("OSSerializeBinary", obj / "DEVELOPMENT_ARM64_BCM2837/libkern/DEVELOPMENT"),
+                 ("OSUnserializeXML", obj / "DEVELOPMENT_ARM64_BCM2837/libkern/DEVELOPMENT"),
+                 ("OSSerialize", obj / "DEVELOPMENT_ARM64_BCM2837/libkern/DEVELOPMENT")]
+        for name, directory in units:
+            fragment = directory / (name + ".cpo.json")
             text = fragment.read_text()
             command, end = json.JSONDecoder().raw_decode(text)
             if text[end:].strip() != ",":
@@ -279,7 +306,7 @@ def main():
             run(["xcrun", "otool", "-tvV", str(objects / (unit["name"] + ".cpo"))], repo, evidence,
                 "disassembly-" + unit["name"], required=False)
         receipt["status"] = "objects_compiled_wire_and_behavior_review_pending"
-        if not receipt["existing_method_ids_unchanged"] or not receipt["generated_rpc_id_matches"] or not all(receipt["expected_rpc_definitions"].values()):
+        if not receipt["existing_method_ids_unchanged"] or not receipt["generated_rpc_id_matches"] or not all(receipt["expected_rpc_definitions"].values()) or not receipt["request_serializable_flag_restored"] or not receipt["wrong_type_output_release_restored"]:
             raise ValueError("Generated RPC ABI differs from retained interface")
         exitcode = 0
     except Exception as error:
