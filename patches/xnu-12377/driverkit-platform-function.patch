@@ -1,0 +1,121 @@
+--- a/iokit/DriverKit/IOService.iig
++++ b/iokit/DriverKit/IOService.iig
+@@ -591,6 +591,16 @@
+ 	virtual kern_return_t
+ 	ReleasePMAssertion(uint64_t assertionID);
+ 
++
++	/* Dictionary-based DriverKit platform calls use their own typed handler.
++	 * Append the method to retain the existing generated method order. */
++	virtual kern_return_t
++	CallPlatformFunction(
++		OSString * functionName,
++		bool waitForFunction,
++		OSDictionary * inParam,
++		OSDictionary ** outParam);
++
+ private:
+ 	virtual void
+ 	Stop_async(
+--- a/iokit/Kernel/IOService.cpp
++++ b/iokit/Kernel/IOService.cpp
+@@ -284,6 +284,7 @@
+ extern const OSSymbol *         gIODTPHandleKey;
+ 
+ const OSSymbol *                gIOPlatformFunctionHandlerSet;
++const OSSymbol *                gIOUserPlatformFunctionHandlerGet;
+ 
+ 
+ static IOLock *                 gIOConsoleUsersLock;
+@@ -607,6 +608,7 @@
+ 	gIOAllCPUInitializedKey                 = OSSymbol::withCStringNoCopy( kIOAllCPUInitializedKey );
+ 
+ 	gIOPlatformFunctionHandlerSet               = OSSymbol::withCStringNoCopy(kIOPlatformFunctionHandlerSet);
++	gIOUserPlatformFunctionHandlerGet            = OSSymbol::withCStringNoCopy(kIOUserPlatformFunctionHandlerGet);
+ 	sCPULatencyFunctionName[kCpuDelayBusStall]  = OSSymbol::withCStringNoCopy(kIOPlatformFunctionHandlerMaxBusDelay);
+ #if defined(__x86_64__)
+ 	sCPULatencyFunctionName[kCpuDelayInterrupt] = OSSymbol::withCStringNoCopy(kIOPlatformFunctionHandlerMaxInterruptDelay);
+--- a/iokit/Kernel/IOUserServer.cpp
++++ b/iokit/Kernel/IOUserServer.cpp
+@@ -5505,6 +5505,60 @@
+ 	return object ? kIOReturnSuccess : kIOReturnNotFound;
+ }
+ 
++/* 24A446 routes the dictionary RPC through an explicitly supplied handler.
++ * Its old four-void-pointer virtual method only retrieves that handler. */
++extern const OSSymbol * gIOUserPlatformFunctionHandlerGet;
++
++kern_return_t
++IOService::CallPlatformFunction_Impl(
++	OSString * functionName,
++	bool waitForFunction,
++	OSDictionary * inParam,
++	OSDictionary ** outParam)
++{
++	if (functionName == NULL) {
++		return kIOReturnBadArgument;
++	}
++
++	IOUserServer * us = (IOUserServer *)thread_iokit_tls_get(0);
++	if (us == NULL || !us->isPlatformDriver()) {
++		return kIOReturnUnsupported;
++	}
++	if (reserved && reserved->uvars && reserved->uvars->userServer != us) {
++		return CallPlatformFunction(functionName, waitForFunction, inParam, outParam);
++	}
++
++	CallPlatformFunction_Handler handler = NULL;
++	IOReturn ret = callPlatformFunction(gIOUserPlatformFunctionHandlerGet,
++	    true, &handler, NULL, NULL, NULL);
++	if (ret != kIOReturnSuccess || handler == NULL) {
++		return kIOReturnUnsupported;
++	}
++
++	/* Never call the incompatible legacy method with dictionary arguments.
++	 * Resolve the actual virtual member using native C++/PAC semantics. */
++	typedef IOReturn (IOService::*LegacyPlatformMethod)(const OSSymbol *, bool,
++	    void *, void *, void *, void *);
++	CallPlatformFunction_Handler legacy = OSMemberFunctionCast(
++	    CallPlatformFunction_Handler, this,
++	    static_cast<LegacyPlatformMethod>(&IOService::callPlatformFunction));
++	if (handler == legacy) {
++		IOLog("callPlatformFunction disallowed for user platform function: service %s, 0x%llx\n",
++		    getName(), getRegistryEntryID());
++		return kIOReturnUnsupported;
++	}
++
++	const OSSymbol * symbol = OSSymbol::withString(functionName);
++	/* The retained implementation passes NULL to the typed handler on an
++	 * allocation failure; preserve that contract and the handler's result. */
++	ret = handler(this, const_cast<OSSymbol *>(symbol), waitForFunction,
++	    inParam, outParam);
++	if (symbol) {
++		symbol->release();
++	}
++	return ret;
++}
++
+ kern_return_t
+ IOService::StringFromReturn_Impl(
+ 	IOReturn retval,
+--- a/iokit/IOKit/IOKitKeysPrivate.h
++++ b/iokit/IOKit/IOKitKeysPrivate.h
+@@ -96,6 +96,7 @@
+ #define kIOPlatformPanicActionKey                    "IOPlatformPanicAction"         /* value is OSNumber (priority) */
+ 
+ #define kIOPlatformFunctionHandlerSet                "IOPlatformFunctionHandlerSet"
++#define kIOUserPlatformFunctionHandlerGet             "IOUserPlatformFunctionHandlerGet"
+ 
+ #define kIOPlatformFunctionHandlerMaxBusDelay        "IOPlatformFunctionHandlerMaxBusDelay"
+ #define kIOPlatformMaxBusDelay                       "IOPlatformMaxBusDelay"
+--- a/config/IOKit.exports
++++ b/config/IOKit.exports
+@@ -2027,3 +2027,8 @@
+ __ZN23IOMultiMemoryDescriptor12setPurgeableEjPj
+ __ZN23IOMultiMemoryDescriptor18getPhysicalSegmentEyPyj
+ __ZN23IOMultiMemoryDescriptor5doMapEP7_vm_mapPyjyy
++
++# Dictionary platform RPC (Darwin 26 DriverKit ABI).
++__ZN9IOService20CallPlatformFunctionEP8OSStringbP12OSDictionaryPS3_PFiP15OSMetaClassBase5IORPCE
++__ZN9IOService25CallPlatformFunction_ImplEP8OSStringbP12OSDictionaryPS3_
++__ZN9IOService27CallPlatformFunction_InvokeE5IORPCP15OSMetaClassBasePFiS2_P8OSStringbP12OSDictionaryPS6_E
