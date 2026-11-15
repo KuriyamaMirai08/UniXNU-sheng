@@ -1,0 +1,246 @@
+diff --git a/config/Libkern.exports b/config/Libkern.exports
+index f822678..782539a 100644
+--- a/config/Libkern.exports
++++ b/config/Libkern.exports
+@@ -713,6 +713,10 @@ _img4_interface_register
+ _image4_dlxk_link
+ _image4_dlxk_get
+ _image4_v2_interface_register
++_image4_v2_load_diavlo_root_ca
++_image4_v2_load_local_policy
++_image4_v2_roll_nonce
++_image4_v2_set_nonce_digest
+ _inet_ntop
+ _inflate
+ _inflateEnd
+diff --git a/libkern/image4/image4_v2.c b/libkern/image4/image4_v2.c
+index 5cf8959..fd2b311 100644
+--- a/libkern/image4/image4_v2.c
++++ b/libkern/image4/image4_v2.c
+@@ -1,13 +1,82 @@
+ /*
+  * Registration point of the libImage4_V2 interface (Darwin 26 KPI).
+  *
+- * The Image4 kext publishes its interface table here at start. This kernel
+- * keeps the pointer only; it has no consumers of the table yet.
++ * The retained 24A446 Image4 kext publishes its authenticated interface at
++ * start. Sheng has no PPL or TXM. Its normal PAL continues to perform the
++ * original trust evaluation, using the digest/roll state mirrored by that
++ * same kext. Never enter the PPL-only interface initializers on this board.
+  */
+ #include <libkern/libkern.h>
+ #include <libkern/section_keywords.h>
++#include <kern/locks.h>
++#include <kern/startup.h>
++#include <ptrauth.h>
++#include <sys/code_signing.h>
++
++#if CODE_SIGNING_MONITOR
++#error "The sheng normal Image4 adapter requires a real monitor-free kernel"
++#endif
++
++enum {
++	SHENG_IMAGE4_NONCE_DOMAINS = 17,
++	SHENG_IMAGE4_DIGEST_BYTES = 48,
++	SHENG_IMAGE4_BAD_DOMAIN = 1,
++	SHENG_IMAGE4_ROLLED = 2,
++	SHENG_IMAGE4_BAD_ARGUMENT = 3,
++	SHENG_IMAGE4_NOT_FOUND = 10,
++};
++
++struct sheng_image4_digest {
++	uint8_t bytes[SHENG_IMAGE4_DIGEST_BYTES];
++	size_t length;
++};
++
++typedef int (* __ptrauth(ptrauth_key_asia, 0, 0x90e1) sheng_nonce_query_t)(
++	uint32_t domain, struct sheng_image4_digest *digest);
++typedef int (* __ptrauth(ptrauth_key_asia, 0, 0x629a) sheng_root_ca_t)(
++	const void *manifest, size_t manifest_length, const void *payload,
++	size_t payload_length);
++typedef int (* __ptrauth(ptrauth_key_asia, 0, 0x50c7) sheng_local_policy_t)(
++	const void *manifest, size_t manifest_length);
++
++/* Exact published prefix. The first three PPL-only callbacks remain opaque.
++ * The root and local policy callbacks parse borrowed buffers synchronously,
++ * verify their signatures/properties, then copy verified properties into
++ * normal PAL-owned storage. They do not retain the caller's buffer. */
++struct sheng_image4_v2_interface {
++	uintptr_t ppl_callbacks[3];
++	sheng_root_ca_t load_root_ca;
++	sheng_local_policy_t load_local_policy;
++};
++
++struct sheng_image4_normal_pal {
++	uint8_t opaque[0x100];
++	sheng_nonce_query_t copy_nonce_digest;
++};
++
++/* The board archive reaches the pinned, retained PAL selector through an
++ * owned BTI/B adapter. XnuPrelink relocates that branch after native placement. */
++extern struct sheng_image4_normal_pal *sheng_image4_normal_pal(void);
++
++static struct {
++	struct sheng_image4_digest digest;
++	bool rolled;
++} sheng_nonce_state[SHENG_IMAGE4_NONCE_DOMAINS];
++
++static LCK_GRP_DECLARE(sheng_image4_lck_grp, "sheng.image4.nonce");
++static LCK_MTX_DECLARE(sheng_image4_nonce_lock, &sheng_image4_lck_grp);
++
++static SECURITY_READ_ONLY_LATE(sheng_nonce_query_t) sheng_original_nonce_query;
++
++static int sheng_image4_copy_nonce_digest(uint32_t domain,
++    struct sheng_image4_digest *digest);
+ 
+ void image4_v2_interface_register(const void *interface);
++int image4_v2_set_nonce_digest(uint32_t domain, const void *digest, size_t length);
++int image4_v2_roll_nonce(uint32_t domain);
++int image4_v2_load_diavlo_root_ca(const void *manifest, size_t manifest_length,
++    const void *payload, size_t payload_length);
++int image4_v2_load_local_policy(const void *manifest, size_t manifest_length);
+ 
+ #pragma mark Module Globals
+ SECURITY_READ_ONLY_LATE(const void *) _image4_v2_interface = NULL;
+@@ -16,8 +85,141 @@ SECURITY_READ_ONLY_LATE(const void *) _image4_v2_interface = NULL;
+ void
+ image4_v2_interface_register(const void *interface)
+ {
++	/* The retained security extension starts before __DATA_CONST lockdown.
++	 * Reject a late registration rather than change protected page mappings. */
++	if (startup_phase < STARTUP_SUB_LOCKS || startup_phase == STARTUP_SUB_LOCKDOWN) {
++		panic("sheng Image4 registration outside early startup");
++	}
+ 	if (_image4_v2_interface) {
+ 		panic("libImage4_V2 interface already set");
+ 	}
++	if (!interface) {
++		panic("libImage4_V2 interface is null");
++	}
++	code_signing_monitor_type_t monitor = CS_MONITOR_TYPE_NONE;
++	code_signing_configuration(&monitor, NULL);
++	if (monitor != CS_MONITOR_TYPE_NONE) {
++		panic("sheng Image4 adapter cannot replace a security monitor");
++	}
++	struct sheng_image4_normal_pal *pal = sheng_image4_normal_pal();
++	if (!pal || !pal->copy_nonce_digest) {
++		panic("sheng Image4 normal PAL is not initialized");
++	}
++	sheng_original_nonce_query = pal->copy_nonce_digest;
+ 	_image4_v2_interface = interface;
++	/* Only the selected normal PAL digest callback changes. Signature, local
++	 * root, epoch, digest derivation and production-state checks stay original. */
++	pal->copy_nonce_digest = sheng_image4_copy_nonce_digest;
++}
++
++static int
++sheng_image4_copy_nonce_digest(uint32_t domain, struct sheng_image4_digest *digest)
++{
++	if (!digest) {
++		return SHENG_IMAGE4_BAD_ARGUMENT;
++	}
++	if (domain >= SHENG_IMAGE4_NONCE_DOMAINS) {
++		return SHENG_IMAGE4_BAD_DOMAIN;
++	}
++	lck_mtx_lock(&sheng_image4_nonce_lock);
++	bool present = sheng_nonce_state[domain].digest.length != 0;
++	bool rolled = sheng_nonce_state[domain].rolled;
++	if (present && !rolled) {
++		*digest = sheng_nonce_state[domain].digest;
++	}
++	lck_mtx_unlock(&sheng_image4_nonce_lock);
++	if (present) {
++		return rolled ? SHENG_IMAGE4_ROLLED : 0;
++	}
++	if (rolled) {
++		return SHENG_IMAGE4_NOT_FOUND;
++	}
++	/* Before the Image4 service mirrors a domain, query the real AppleImage4
++	 * nonce provider. This preserves its genuine BNCH fallback and failures. */
++	int result = sheng_original_nonce_query(domain, digest);
++	/* A concurrent mirror/roll must take precedence over a fallback started
++	 * before that update. Never return a stale fallback after invalidation. */
++	lck_mtx_lock(&sheng_image4_nonce_lock);
++	present = sheng_nonce_state[domain].digest.length != 0;
++	rolled = sheng_nonce_state[domain].rolled;
++	if (rolled) {
++		result = present ? SHENG_IMAGE4_ROLLED : SHENG_IMAGE4_NOT_FOUND;
++	} else if (present) {
++		*digest = sheng_nonce_state[domain].digest;
++		result = 0;
++	}
++	lck_mtx_unlock(&sheng_image4_nonce_lock);
++	return result;
++}
++
++int
++image4_v2_set_nonce_digest(uint32_t domain, const void *digest, size_t length)
++{
++	if (!digest || !length || length > SHENG_IMAGE4_DIGEST_BYTES ||
++	    (uintptr_t)digest > UINTPTR_MAX - length) {
++		return SHENG_IMAGE4_BAD_ARGUMENT;
++	}
++	if (domain >= SHENG_IMAGE4_NONCE_DOMAINS) {
++		return SHENG_IMAGE4_BAD_DOMAIN;
++	}
++	if (!_image4_v2_interface) {
++		return SHENG_IMAGE4_NOT_FOUND;
++	}
++	lck_mtx_lock(&sheng_image4_nonce_lock);
++	if (sheng_nonce_state[domain].digest.length) {
++		lck_mtx_unlock(&sheng_image4_nonce_lock);
++		panic("sheng Image4 nonce digest already set for domain %u", domain);
++	}
++	memcpy(sheng_nonce_state[domain].digest.bytes, digest, length);
++	sheng_nonce_state[domain].digest.length = length;
++	lck_mtx_unlock(&sheng_image4_nonce_lock);
++	return 0;
++}
++
++int
++image4_v2_roll_nonce(uint32_t domain)
++{
++	if (domain >= SHENG_IMAGE4_NONCE_DOMAINS) {
++		return SHENG_IMAGE4_BAD_DOMAIN;
++	}
++	if (!_image4_v2_interface) {
++		return SHENG_IMAGE4_NOT_FOUND;
++	}
++	/* Image4 already invalidated the real AppleImage4 domain before this
++	 * mirror call. Mark the state consumed by trust evaluation; do not roll
++	 * again or generate a new nonce. Invalidation is idempotent. */
++	lck_mtx_lock(&sheng_image4_nonce_lock);
++	sheng_nonce_state[domain].rolled = true;
++	lck_mtx_unlock(&sheng_image4_nonce_lock);
++	return 0;
++}
++
++int
++image4_v2_load_diavlo_root_ca(const void *manifest, size_t manifest_length,
++    const void *payload, size_t payload_length)
++{
++	if (!manifest || !manifest_length || !payload || !payload_length ||
++	    (uintptr_t)manifest > UINTPTR_MAX - manifest_length ||
++	    (uintptr_t)payload > UINTPTR_MAX - payload_length) {
++		return SHENG_IMAGE4_BAD_ARGUMENT;
++	}
++	const struct sheng_image4_v2_interface *v2 = _image4_v2_interface;
++	if (!v2 || !v2->load_root_ca) {
++		return SHENG_IMAGE4_NOT_FOUND;
++	}
++	return v2->load_root_ca(manifest, manifest_length, payload, payload_length);
++}
++
++int
++image4_v2_load_local_policy(const void *manifest, size_t manifest_length)
++{
++	if (!manifest || !manifest_length ||
++	    (uintptr_t)manifest > UINTPTR_MAX - manifest_length) {
++		return SHENG_IMAGE4_BAD_ARGUMENT;
++	}
++	const struct sheng_image4_v2_interface *v2 = _image4_v2_interface;
++	if (!v2 || !v2->load_local_policy) {
++		return SHENG_IMAGE4_NOT_FOUND;
++	}
++	return v2->load_local_policy(manifest, manifest_length);
+ }

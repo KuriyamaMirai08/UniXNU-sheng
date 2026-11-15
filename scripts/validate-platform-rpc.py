@@ -43,6 +43,10 @@ SOURCE_SHA = {
     "libkern/c++/OSUnserializeXML.cpp": "20f7364e1d9487eb5cb7e8caeb404b2e203022c84a83fefaad107038f5868560",
     "libkern/libkern/c++/OSSerialize.h": "50ba832c24740c2e33afeca54c7fd200eb801bb85f8fcb2c75a98dbe6bd57f5b",
     "libkern/libkern/c++/OSUnserialize.h": "7ad50664216e46a72e9404371f35e692eef136a480741d3e14246c40cef7cb2e",
+    "libkern/c++/OSUnserializeXML.y": "de132f53f181ac1936d93e2ec24667c06da7437a7c2b8a6ef10bdb98b2242338",
+    "libkern/libkern/c++/OSUnserializeXMLSharedImplementation.h": "d7371a8a90ae034be3b601b72a4cee05c027c7d9d311d0f1de46448b29317ac6",
+    "libkern/image4/image4_v2.c": "a9f30df1d44fd6cb49c84c685aee83ed3728100ff1e1bec061aaee665a9eb00b",
+    "config/Libkern.exports": "a7c88a4e59118e43fb0447d28a8efe92ab5bf3f2a1264ca1c72b572e2a986fff",
 }
 
 
@@ -195,6 +199,11 @@ def main():
         receipt["patch_sha256"] = sha(patch)
         run(["git", "apply", "--check", str(patch)], source, evidence, "patch-check")
         run(["git", "apply", str(patch)], source, evidence, "patch-apply")
+        image4_patch = repo / "patches/xnu-12377/sheng-image4-normal-runtime.patch"
+        shutil.copyfile(image4_patch, evidence / "image4-implementation.patch")
+        run(["git", "apply", "--check", str(image4_patch)], source, evidence, "image4-patch-check")
+        run(["git", "apply", str(image4_patch)], source, evidence, "image4-patch-apply")
+        receipt["image4_patch_sha256"] = sha(image4_patch)
         after = evidence / "after"
         after.mkdir()
         for name in SOURCE_SHA:
@@ -263,7 +272,8 @@ def main():
         # The retained exported kernel headers are immutable baseline evidence.
         # Replace only their corresponding files in this isolated copy.
         for relative in ("iokit/IOKit/IORPC.h", "iokit/IOKit/IOUserServer.h",
-                         "libkern/libkern/c++/OSSerialize.h", "libkern/libkern/c++/OSUnserialize.h"):
+                         "libkern/libkern/c++/OSSerialize.h", "libkern/libkern/c++/OSUnserialize.h",
+                         "libkern/libkern/c++/OSUnserializeXMLSharedImplementation.h"):
             exported = obj / "EXPORT_HDRS" / relative
             exported.chmod(exported.stat().st_mode | 0o200)
             shutil.copyfile(source / relative, exported)
@@ -296,6 +306,43 @@ def main():
         receipt["compile_returncodes"] = codes
         if any(codes):
             raise RuntimeError("Targeted object compilation failed")
+        # Compile the actual Image4 source using its retained kernel command.
+        fragments = list(obj.rglob("image4_v2.o.json"))
+        if len(fragments) != 1:
+            raise ValueError("Missing/ambiguous original Image4 compilation record")
+        record = json.JSONDecoder().raw_decode(fragments[0].read_text())[0]
+        argv = [value.replace(OLD_ROOT, str(work)) for value in record["arguments"]]
+        argv[argv.index("-o") + 1] = str(objects / "image4_v2.o")
+        run(argv, Path(record["directory"].replace(OLD_ROOT, str(work))), evidence, "compile-image4-v2")
+        receipt["image4_compiled"] = True
+        run(["xcrun", "otool", "-tvV", str(objects / "image4_v2.o")], repo, evidence, "disassembly-image4-v2")
+        # The private serializer option occupies original alignment padding.
+        # Read actual Apple compiler layouts for both headers, then compare
+        # size/alignment and every original field; added virtuals are forbidden.
+        layout_source = evidence / "serializer-layout.cpp"
+        layout_source.write_text("#include <libkern/c++/OSSerialize.h>\nchar layout_size[sizeof(OSSerialize)];\n")
+        base_record = json.JSONDecoder().raw_decode(
+            (obj / "DEVELOPMENT_ARM64_BCM2837/libkern/DEVELOPMENT/OSSerialize.cpo.json").read_text())[0]
+        layouts = {}
+        for label, include in (("before", before / "libkern/libkern"), ("after", source / "libkern/libkern")):
+            original_argv = [value.replace(OLD_ROOT, str(work)) for value in base_record["arguments"]]
+            old_file = base_record["file"].replace(OLD_ROOT, str(work))
+            actual = [compiler, "-I" + str(include), *original_argv[1:]]
+            actual[actual.index(old_file)] = str(layout_source)
+            actual[actual.index("-o") + 1] = str(objects / (label + "-serializer-layout.o"))
+            actual += ["-Xclang", "-fdump-record-layouts"]
+            run(actual, Path(base_record["directory"].replace(OLD_ROOT, str(work))), evidence, "layout-" + label)
+            log = (evidence / ("layout-" + label + ".log")).read_text()
+            match = re.search(r"(?ms)^\s*0 \| class OSSerialize\n(.*?\[sizeof=.*?\])", log)
+            if not match:
+                raise ValueError("Apple compiler did not emit OSSerialize layout")
+            layouts[label] = match.group(1)
+        original_lines = [line for line in layouts["before"].splitlines() if line.strip()]
+        new_lines = [line for line in layouts["after"].splitlines() if line.strip() and " editOptions" not in line]
+        if original_lines != new_lines:
+            raise ValueError("OSSerialize existing object ABI changed")
+        write_json(evidence / "serializer-abi.json", dict(layouts=layouts, original_fields_size_alignment_unchanged=True))
+        receipt["serializer_object_abi_unchanged"] = True
         run(["xcrun", "nm", "-g", *map(str, sorted(objects.glob("*.cpo")))], repo, evidence, "object-symbols")
         symbols = (evidence / "object-symbols.log").read_text()
         receipt["expected_rpc_definitions"] = {symbol: bool(re.search(r"\b[TDS]\s+" + re.escape(symbol) + r"$", symbols, re.M)) for symbol in RPC_SYMBOLS}
