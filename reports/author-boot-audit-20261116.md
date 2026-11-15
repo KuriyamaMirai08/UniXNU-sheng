@@ -55,3 +55,8 @@ normal-Image4 branch, HMAC, trust and device binding checks remain required.
 Full clean compilation and static acceptance are pending. No device command
 is authorized or run by this audit. No author-binary equality or successful
 hardware boot is claimed.
+
+The compact artifact retains the 17 guarded prepared source files, all build
+logs and inventories, final images, real archive recipes/outputs, runtime
+trust inputs and DarwinBoot PE/map/PDB records. It accompanies the complete
+build archive. Evidence-only selection never changes compilation or acceptance.

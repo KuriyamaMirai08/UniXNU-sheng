@@ -13,6 +13,7 @@ import shutil
 
 
 BOARD = "out/sheng/ipados-27.0.1-24A446/sheng_ipados27/"
+PREPARED = set(json.loads((Path(__file__).parents[1] / "sheng-candidate-prelink-contract.json").read_text())["prepared_sources"])
 
 
 def selected(relative):
@@ -37,12 +38,28 @@ def selected(relative):
         return True
     if name == "SILICIUM_UEFI.fd":
         return True
+    if key.startswith("uefi-sheng/Build/") and name in ("DarwinBoot.map", "DarwinBoot.pdb", "DarwinBoot.efi",
+                                                      "DarwinBoot.dll", "DarwinBoot.obj", "DarwinBoot.inf"):
+        return "OUTPUT" in parts or "DEBUG" in parts
+    if key.startswith("out/ipsw/24A446/") and ("TrustCache" in name or relative.suffix == ".trustcache"):
+        return True
     if key.startswith(BOARD):
         local = key[len(BOARD):]
         if local in ("package.manifest.json", ".config", "xnu-inputs.json", "xnu-patches.list"):
             return True
         if local.startswith(("boot/", "payload/", "kernel/")):
             return relative.suffix in (".img", ".macho", ".json", ".log", ".py")
+        if local.startswith("runtime/"):
+            return relative.suffix in (".json", ".log", ".plist", ".sig", ".trustcache") or name in ("owner-trustcache.bin", "gpuaddon.bin")
+        if local.startswith("tree/.cache/firmware/sheng/") or local.startswith("tree/build/sheng-uefi-binaries/"):
+            return relative.suffix in (".json", ".log")
+        if local == "device-tree/hardware.dtb":
+            return True
+        if local.startswith("tree/.cache/xnu-work/"):
+            return local.removeprefix("tree/.cache/xnu-work/") in PREPARED
+        if local.startswith("tree/scripts/") and name in ("build-xnu-4k-baseline.sh", "build-gop-legacy-display-27.py",
+                                                        "legacy-display-24A446.json", "seal-source-crypto-kernel.py"):
+            return True
         if "logs" in parts:
             return True
         if name in ("mach.development.bcm2837.unstripped.noctf", "mach.release.bcm2837.unstripped.noctf"):
