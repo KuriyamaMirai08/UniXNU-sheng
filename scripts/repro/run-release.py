@@ -160,6 +160,7 @@ def main():
         step("dependencies", ["python3", framework / "unixnu", "fetch", "-D", device, *common])
         step("configuration", ["bash", "scripts/package.sh", *common, "--no-deps", "--check"], device)
         step("source-status", ["python3", framework / "unixnu", "status", "-D", device, *common, "--json"])
+        step("assemble-tree", ["python3", framework / "unixnu", "tree", "-D", device, *common])
         tree = root / "out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree"
         old = [str(p) for p in tree.rglob("*") if p.is_file() and (p.suffix in (".o", ".a", ".cpo") or p.name == "kernel.macho")]
         save("precompile-objects.json", old)
