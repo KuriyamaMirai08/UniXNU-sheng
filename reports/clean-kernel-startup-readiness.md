@@ -208,6 +208,11 @@ checks. Original reports are saved on refusal. No acceptance field, policy,
 security module or production function was weakened. There is no new native
 source change needing another full compilation.
 
+The verified implementation commit is `bdbf6dbda75d7055bc99df79de3674617be50cff`. Its Git archive
+preserves the exact fixture hash and was used for the final 12-case test run
+and strict emission refusal. The report/porting evidence update follows this
+commit; it does not replace the identified tested code.
+
 Use the original retained files and a fresh attempt directory:
 
 ```sh

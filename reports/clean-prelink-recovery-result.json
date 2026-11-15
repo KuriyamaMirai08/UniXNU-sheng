@@ -1,7 +1,7 @@
 {
-  "started_at": "2026-11-15T02:33:59.176172+00:00",
+  "started_at": "2026-11-15T02:51:13.727000+00:00",
   "status": "refused",
-  "contract_sha256": "52fb10e76c11b82b17d327ff457de08adf429485c85205ae94b9025fa29fecea",
+  "contract_sha256": "5936de5c0f974959bfc866beeea5ab172c8ceefcf8b5197e8fb1a266f5d7ffe7",
   "build_invoked": false,
   "device_operations": false,
   "candidate_persisted": false,
@@ -307,7 +307,11 @@
   "stubbed": {},
   "in_memory_candidate_sha256": "6c62b865994160cebc35555a6384c41b4c008250c0efc53353da8399b26bcc99",
   "source_inputs_modified": false,
-  "finished_at": "2026-11-15T02:34:24.672489+00:00",
-  "origin": "Retained clean build run 43615501493, offline unmodified engine emission and independent final-byte checks",
-  "artifacts": "No new kernel.macho or boot.img; incomplete candidate exists only in memory"
+  "finished_at": "2026-11-15T02:51:35.107182+00:00",
+  "verified_code_commit": "bdbf6dbda75d7055bc99df79de3674617be50cff",
+  "origin": "Retained clean build run 43615501493, offline unmodified engine emission using Git-archived recovery sources and independent final-byte checks",
+  "artifacts": "No new kernel.macho or boot.img; incomplete candidate exists only in memory",
+  "test_cases_passed": 12,
+  "test_log_sha256": "4d0f757759234a612521bb8c06938acd511533490464d1b48d7429d05c267e71",
+  "source_archive_sha256": "43bc1e6602c902e3a9e96c6eb5a234fb08955ccf1eb86fcf3ed7588731b6c0c2"
 }

@@ -241,6 +241,13 @@ kind = "source"
 reference = "reports/clean-prelink-recovery-result.json"
 result = "Offline strict emission verifies all 16 recovered import occurrences, real native assertion value 1, authenticated panic handler and unchanged 57-entry closure, inputs and 561 adapter branches. Five unresolved interfaces remain, stubbed is empty and candidate_written is false. No full build or device operation; original loadable/runtime constants and regression checks remain."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/clean-prelink-recovery-result.json"
+command = "Git archive bdbf6dbda75d7055bc99df79de3674617be50cff; retained-input recovery and 12 targeted tests"
+revision = "bdbf6dbda75d7055bc99df79de3674617be50cff"
+result = "The exact archived implementation commit preserves the reviewed fixture bytes and passes all 12 tests. Actual unchanged-engine emission independently verifies 16 recovered imports, refuses the remaining five and preserves the original input hashes. No candidate kernel, boot image, full build or device operation was produced."
+
 [[area]]
 id = "firmware"
 status = "implemented"
@@ -900,6 +907,13 @@ kind = "source"
 reference = "reports/clean-prelink-recovery-result.json"
 result = "Offline strict emission verifies all 16 recovered import occurrences, real native assertion value 1, authenticated panic handler and unchanged 57-entry closure, inputs and 561 adapter branches. Five unresolved interfaces remain, stubbed is empty and candidate_written is false. No full build or device operation; original loadable/runtime constants and regression checks remain."
 
+[[area.evidence]]
+kind = "host"
+reference = "reports/clean-prelink-recovery-result.json"
+command = "Git archive bdbf6dbda75d7055bc99df79de3674617be50cff; retained-input recovery and 12 targeted tests"
+revision = "bdbf6dbda75d7055bc99df79de3674617be50cff"
+result = "The exact archived implementation commit preserves the reviewed fixture bytes and passes all 12 tests. Actual unchanged-engine emission independently verifies 16 recovered imports, refuses the remaining five and preserves the original input hashes. No candidate kernel, boot image, full build or device operation was produced."
+
 [[area]]
 id = "diagnostics"
 status = "implemented"
@@ -969,6 +983,13 @@ result = "UniXNU-M4 confirmed 19 unresolved pointer references reduced to 5 afte
 kind = "source"
 reference = "reports/clean-prelink-recovery-result.json"
 result = "Offline strict emission verifies all 16 recovered import occurrences, real native assertion value 1, authenticated panic handler and unchanged 57-entry closure, inputs and 561 adapter branches. Five unresolved interfaces remain, stubbed is empty and candidate_written is false. No full build or device operation; original loadable/runtime constants and regression checks remain."
+
+[[area.evidence]]
+kind = "host"
+reference = "reports/clean-prelink-recovery-result.json"
+command = "Git archive bdbf6dbda75d7055bc99df79de3674617be50cff; retained-input recovery and 12 targeted tests"
+revision = "bdbf6dbda75d7055bc99df79de3674617be50cff"
+result = "The exact archived implementation commit preserves the reviewed fixture bytes and passes all 12 tests. Actual unchanged-engine emission independently verifies 16 recovered imports, refuses the remaining five and preserves the original input hashes. No candidate kernel, boot image, full build or device operation was produced."
 
 [[area]]
 id = "arm64e-os"
