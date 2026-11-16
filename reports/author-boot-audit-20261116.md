@@ -87,3 +87,25 @@ The compact artifact retains the 17 guarded prepared source files, all build
 logs and inventories, final images, real archive recipes/outputs, runtime
 trust inputs and DarwinBoot PE/map/PDB records. It accompanies the complete
 build archive. Evidence-only selection never changes compilation or acceptance.
+
+## Run 39 and iteration time
+
+Run 43794012575 successfully linked the real RELEASE reference, then its
+global-only nm check incorrectly rejected four private section definitions.
+The actual retained Mach-O defines all four with n_type 0x1e. Qualification now
+requires section-backed definitions and checks real BTI/brk #0xff00/ret handler
+bytes plus the original enabled static-key initializer. Six damaged-binary
+cases are refused; the successful actual binary is preserved unchanged.
+
+That run spent about 34 minutes building/preparing inputs and 19 more minutes
+archiving/uploading. A target-keyed cache now retains public downloaded IPSW
+and verified vendor inputs. Every restored file is rehashed. Compiled objects,
+runtime outputs and private installation inputs are excluded. Firmware and IPSW
+provenance checks still run. The first fill needs downloads; subsequent runs
+can reuse them. Five local cache reuse/corruption/path/identity/archive cases pass.
+
+Full build evidence uses gzip level 1. Already compressed artifacts use ZIP
+compression level 0. An encrypted IPSW duplicate may be omitted only after
+rehashing both the retained plain image and ciphertext against their original
+receipts. The source, object tree, complete logs and omission record remain.
+These are iteration changes, not proof of a particular speedup or successful boot.
