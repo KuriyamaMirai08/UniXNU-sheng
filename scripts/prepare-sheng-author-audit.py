@@ -20,6 +20,18 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def install_reference_verifier(root):
+    """Make the builder's real dependency available before author regressions."""
+    source = Path(__file__).with_name('reference_diagnostics.py')
+    destination = root / 'scripts/reference_diagnostics.py'
+    if destination.exists():
+        raise ValueError('Unexpected reference verifier already in framework')
+    data = source.read_bytes()
+    destination.write_bytes(data)
+    return dict(path='scripts/reference_diagnostics.py', before_sha256=None,
+                after_sha256=sha(data), source='device:scripts/reference_diagnostics.py')
+
+
 def replace(text, old, new, label):
     if text.count(old) != 1:
         raise ValueError("Missing or ambiguous upstream source: " + label)
@@ -180,7 +192,7 @@ def main():
     if subprocess.check_output(["git", "-C", root, "rev-parse", "HEAD"], text=True).strip() != FRAMEWORK:
         raise ValueError("Unexpected framework revision")
     args.evidence.mkdir(parents=True, exist_ok=True)
-    records = []
+    records = [install_reference_verifier(root)]
     for name in ("drivers/RamBlock/NativeRamBlock.cpp", "drivers/Adreno740/NativeAdrenoPublish.cpp", "scripts/build-arm-driver.py",
                  "scripts/build-sheng-source-storage.py", "scripts/build-fileset-release-reference.py"):
         path = root / name

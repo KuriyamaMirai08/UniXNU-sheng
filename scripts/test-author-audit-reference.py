@@ -9,7 +9,10 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -20,6 +23,31 @@ REFERENCE = None
 
 
 class ReferencePublicationTests(unittest.TestCase):
+    def test_early_framework_import_requires_installed_dependency_without_pythonpath(self):
+        source = Path(__file__).with_name('prepare-sheng-author-audit.py')
+        spec = importlib.util.spec_from_file_location('audit_preparation', source)
+        preparation = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(preparation)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / 'scripts/build-fileset-release-reference.py'
+            script.parent.mkdir()
+            script.write_bytes(Path(REFERENCE.__file__).read_bytes())
+            environment = dict(os.environ)
+            environment.pop('PYTHONPATH', None)
+            environment.pop('PYTHONHOME', None)
+            command = [sys.executable, '-E', str(script), '--help']
+            missing = subprocess.run(command, cwd=root, env=environment, capture_output=True, text=True)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("No module named 'reference_diagnostics'", missing.stderr)
+            record = preparation.install_reference_verifier(root)
+            self.assertEqual(record['after_sha256'], hashlib.sha256(
+                Path(__file__).with_name('reference_diagnostics.py').read_bytes()).hexdigest())
+            installed = subprocess.run(command, cwd=root, env=environment, capture_output=True, text=True)
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            with self.assertRaisesRegex(ValueError, 'already in framework'):
+                preparation.install_reference_verifier(root)
+
     def exercise(self, final_exit, native_diagnostics=False, omit_diagnostic=False, compile_failure=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
