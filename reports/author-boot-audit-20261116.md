@@ -109,3 +109,18 @@ compression level 0. An encrypted IPSW duplicate may be omitted only after
 rehashing both the retained plain image and ciphertext against their original
 receipts. The source, object tree, complete logs and omission record remain.
 These are iteration changes, not proof of a particular speedup or successful boot.
+
+## Early regression dependency installation
+
+Run 43802194750 stopped after about two minutes, before public downloads or
+native compilation. The transformed framework builder imported the new verifier
+before tree assembly, but preparation had not copied that device-owned helper
+beside it. A temporary local PYTHONPATH had hidden this integration omission.
+
+Preparation now installs the exact helper and records its digest before the
+original framework regressions. A subprocess regression clears PYTHONPATH and
+ignores Python environment overrides, proves the missing dependency fails, then
+proves the installed dependency works. Six publication tests pass. Three
+unchanged author tests pass on Windows; its linked-SDK-header test stops at
+Windows symlink privilege error 1314. All four remain enabled on the macOS
+runner. The cache was a miss and this early failure did not save a partial cache.
