@@ -50,16 +50,24 @@ with real `brk #0xff00` traps, with the telemetry and initialization paths;
 `osfmk/kern/debug.c` defines the structured assertion jump key and its feature
 override lifecycle. These are not empty fallback functions or scalar substitutes.
 
-The private RELEASE comparison now selects the original `mach_assert` and
-`ubsan_minimal` options in `MASTER.arm64.bcm2837`. It retains the `release`
-option, `KERNEL_CONFIGS=RELEASE` and `BUILD_LTO=1`. This is an explicit comparison
-configuration difference from the upstream recipe, required by the genuine
-DEVELOPMENT archives. The source/SDK and script hashes plus the option select
-the build key. The receipt records before/after configuration and real source
-hashes; final publication requires all four real defined symbols. Strict
-prelink checks the receipt. The actual DEVELOPMENT native configuration and
-its assertion/sanitizer instrumentation remain unchanged. Four local
-publication regressions pass; the actual new Apple link is still required.
+Run 38 (43755649212) exposed a configuration error in that first fix.
+Global `mach_assert` changes `ipc_port` to 160 bytes while RELEASE requires
+144, and enables `os_log_valid` assertions without its debug-only declaration.
+The missing `nonltolink.filelist` exception is secondary to those compiler errors.
+
+The private comparison retains global RELEASE assertion configuration. Two
+exact guards in the hash-pinned original `debug.c` select the genuine static-key
+definitions and their full feature-override lifecycle for the real DEVELOPMENT
+archives. Its original UBSan minimal runtime remains selected. No callable or
+scalar substitute is generated. Source hashes, the private transformation and
+final defined symbols remain in the receipt; strict prelink refuses a globally
+changed RELEASE assertion ABI. The native DEVELOPMENT configuration is unchanged.
+
+Five local publication regressions pass, including compiler-exit preservation
+before final-link input discovery. Actual Apple compilation, strict prelink and
+final boot image acceptance are pending. Documentation run 43755647089 also
+found an unowned configuration fixture; the diagnostics area now owns that
+fixture directory. No validation check is removed.
 
 ## Verification scope
 
