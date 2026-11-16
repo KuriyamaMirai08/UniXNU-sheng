@@ -76,7 +76,6 @@ def prepare_native_diagnostics(source, output):
         raise ValueError('Unexpected prepared RELEASE configuration for native archive diagnostics')
     text = before.decode()
     replacements = {
-        '#  KERNEL_RELEASE = [ KERNEL_BASE release ]': '#  KERNEL_RELEASE = [ KERNEL_BASE release mach_assert ]',
         '#  VM_RELEASE =     [ VM_BASE ]': '#  VM_RELEASE =     [ VM_BASE ubsan_minimal ]',
     }
     for old, new in replacements.items():
@@ -85,6 +84,19 @@ def prepare_native_diagnostics(source, output):
         text = text.replace(old, new)
     after = text.encode()
     config.write_bytes(after)
+    # MACH_ASSERT changes global kernel structures and enables assertions whose
+    # debug-only helpers RELEASE does not build. Select only debug.c's genuine
+    # static-key definitions and their complete boot-argument lifecycle.
+    debug = source / 'osfmk/kern/debug.c'
+    debug_before = debug.read_bytes()
+    if hashlib.sha256(debug_before).hexdigest() != 'fd749f59d773dac9cb95f8183ff9dece13f2ae2888f5da6f2efd9197acc9e5b0':
+        raise ValueError('Unexpected genuine static-key implementation')
+    debug_text = debug_before.decode()
+    if debug_text.count('#if MACH_ASSERT\\n') != 2:
+        raise ValueError('Unexpected static-key definition/lifecycle guards')
+    debug_after = debug_text.replace('#if MACH_ASSERT\\n',
+        '#if MACH_ASSERT || XNU_REFERENCE_NATIVE_ASSERT\\n').encode()
+    debug.write_bytes(debug_after)
     implementations = {
         name: file_hash(source / name) for name in (
             'san/memory/ubsan_minimal.c', 'san/memory/ubsan_minimal.h',
@@ -93,7 +105,11 @@ def prepare_native_diagnostics(source, output):
     }
     record = dict(enabled=True, scope='private RELEASE comparison, not the native kernel',
                   kernel_configs='RELEASE', build_lto=True,
-                  added_config_options=['mach_assert', 'ubsan_minimal'],
+                  added_config_options=['ubsan_minimal'],
+                  global_mach_assert_enabled=False,
+                  static_key_scope='debug.c definitions and complete feature-override lifecycle',
+                  static_key_before_sha256=hashlib.sha256(debug_before).hexdigest(),
+                  static_key_after_sha256=hashlib.sha256(debug_after).hexdigest(),
                   config_before_sha256=expected, config_after_sha256=hashlib.sha256(after).hexdigest(),
                   genuine_implementation_sha256=implementations,
                   required_symbols=sorted(NATIVE_DIAGNOSTIC_SYMBOLS),
@@ -113,6 +129,10 @@ def prepare_native_diagnostics(source, output):
             "    mode = 'lto' if options.lto else 'snapshot'\n", name)
         text = replace(text, "        'mode': mode,\n",
                        "        'mode': mode,\n        'native_diagnostics': options.native_diagnostics,\n", name)
+        text = replace(text, "    args = ['make','-C',str(source),'build','SDKROOT=iphoneos',\n",
+            "    if options.native_diagnostics:\n"
+            "        flags += ' -DXNU_REFERENCE_NATIVE_ASSERT=1'\n"
+            "    args = ['make','-C',str(source),'build','SDKROOT=iphoneos',\n", name)
         text = replace(text, "        manifest = {str(p.relative_to(source)):",
             "        if options.native_diagnostics:\n            prepare_native_diagnostics(source, output)\n"
             "        manifest = {str(p.relative_to(source)):", name)
@@ -139,6 +159,11 @@ def prepare_native_diagnostics(source, output):
     missing = sorted(set(re.findall(r'^\\s+"(_[^" ]+)"', build_log, re.M)))
     if result.returncode and missing:
         (output / 'first-link-undefineds.json').write_text(json.dumps(missing, indent=2) + '\\n')
+    filelist = output / f'{mode}-obj/RELEASE_ARM64_BCM2837' / ('nonltolink.filelist' if options.lto else 'link.filelist')
+    if result.returncode and not filelist.is_file():
+        # A compiler failure has no final link inputs to reconcile. Preserve
+        # the actual build exit rather than masking it with FileNotFoundError.
+        raise SystemExit(result.returncode)
 ''' + text[end:]
     else:
         raise ValueError("Unknown framework transform: " + name)

@@ -20,7 +20,7 @@ REFERENCE = None
 
 
 class ReferencePublicationTests(unittest.TestCase):
-    def exercise(self, final_exit, native_diagnostics=False, omit_diagnostic=False):
+    def exercise(self, final_exit, native_diagnostics=False, omit_diagnostic=False, compile_failure=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for name in (".cache/xnu-work/osfmk/arm64/sleh.c",
@@ -47,6 +47,8 @@ class ReferencePublicationTests(unittest.TestCase):
                     path = root / '.cache/xnu-work' / name
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_bytes(b'control-flow fixture; actual implementation compiled in the clean build')
+                debug = config.parent / 'osfmk/kern/debug.c'
+                debug.write_bytes((fixture.parent / 'debug.c').read_bytes())
             links = []
 
             def subprocess_response(command, **kwargs):
@@ -60,6 +62,9 @@ class ReferencePublicationTests(unittest.TestCase):
                 self.assertEqual(command[0], "make")
                 values = dict(arg.split("=", 1) for arg in command if "=" in arg)
                 links.append(command[:])
+                if compile_failure:
+                    kwargs['stdout'].write('error: preserved compiler failure\n')
+                    return SimpleNamespace(returncode=2)
                 objects = Path(values["OBJROOT"]) / "RELEASE_ARM64_BCM2837"
                 objects.mkdir(parents=True, exist_ok=True)
                 (objects / "nonltolink.filelist").write_text("")
@@ -73,8 +78,12 @@ class ReferencePublicationTests(unittest.TestCase):
                 self.assertEqual(values['BUILD_LTO'], '1')
                 if native_diagnostics:
                     modified = (Path(command[2]) / 'config/MASTER.arm64.bcm2837').read_text()
-                    self.assertIn('#  KERNEL_RELEASE = [ KERNEL_BASE release mach_assert ]', modified)
+                    self.assertIn('#  KERNEL_RELEASE = [ KERNEL_BASE release ]', modified)
                     self.assertIn('#  VM_RELEASE =     [ VM_BASE ubsan_minimal ]', modified)
+                    self.assertIn('-DXNU_REFERENCE_NATIVE_ASSERT=1', values['CFLAGS_EXTRA'])
+                    debug = (Path(command[2]) / 'osfmk/kern/debug.c').read_text()
+                    self.assertEqual(debug.count('#if MACH_ASSERT || XNU_REFERENCE_NATIVE_ASSERT\n'), 2)
+                    self.assertIn('static_if_key_disable(mach_assert);', debug)
                 if final_exit:
                     kwargs["stdout"].write('  "_missing_real_provider", referenced from:\n      consumer.o\n')
                 else:
@@ -87,16 +96,19 @@ class ReferencePublicationTests(unittest.TestCase):
             with patch.object(REFERENCE.subprocess, "run", side_effect=subprocess_response), \
                     patch.object(REFERENCE.subprocess, "check_output", return_value="fixture compiler"), \
                     patch("sys.argv", arguments):
-                if final_exit:
+                if final_exit or compile_failure:
                     with self.assertRaises(SystemExit) as refused:
                         REFERENCE.main()
-                    self.assertEqual(refused.exception.code, final_exit)
+                    self.assertEqual(refused.exception.code, 2 if compile_failure else final_exit)
                 elif omit_diagnostic:
                     with self.assertRaisesRegex(ValueError, 'lacks genuine'):
                         REFERENCE.main()
                 else:
                     REFERENCE.main()
-            self.assertEqual(len(links), 2)
+            self.assertEqual(len(links), 1 if compile_failure else 2)
+            if compile_failure:
+                self.assertFalse(list(root.rglob('mach.release.bcm2837.unstripped.noctf')))
+                return
             build = root / "build/xnu/fileset-reference"
             first = list(build.glob("lto-*/first-link-undefineds.json"))
             self.assertEqual(len(first), 1)
@@ -119,6 +131,7 @@ class ReferencePublicationTests(unittest.TestCase):
                     self.assertTrue(receipt['inputs']['native_diagnostics'])
                     self.assertEqual(receipt['native_archive_diagnostics']['final_defined_symbols_verified'],
                                      sorted(REFERENCE.NATIVE_DIAGNOSTIC_SYMBOLS))
+                    self.assertFalse(receipt['native_archive_diagnostics']['global_mach_assert_enabled'])
 
     def test_unavailable_forced_export_reconciles_before_successful_publication(self):
         self.exercise(0)
@@ -131,6 +144,9 @@ class ReferencePublicationTests(unittest.TestCase):
 
     def test_successful_link_without_all_diagnostics_refuses_publication(self):
         self.exercise(0, native_diagnostics=True, omit_diagnostic=True)
+
+    def test_compiler_failure_preserves_build_exit_before_export_reconciliation(self):
+        self.exercise(0, compile_failure=True)
 
 
 def main():

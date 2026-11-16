@@ -150,6 +150,9 @@ def main():
         require(reference_receipt["inputs"].get("native_diagnostics") is True,
                 "Reference did not select the genuine native archive diagnostics")
         diagnostics = reference_receipt.get("native_archive_diagnostics") or {}
+        require(diagnostics.get("global_mach_assert_enabled") is False and
+                diagnostics.get("added_config_options") == ["ubsan_minimal"],
+                "Reference changed global RELEASE assertion ABI")
         require(diagnostics.get("final_defined_symbols_verified") == sorted((
             "___ubsan_handle_add_overflow_minimal", "___ubsan_handle_negate_overflow_minimal",
             "___ubsan_handle_sub_overflow_minimal", "_mach_assert_jump_key")),
