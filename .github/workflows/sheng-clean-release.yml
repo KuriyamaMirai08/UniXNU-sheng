@@ -19,6 +19,16 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Select pinned public download cache
+        id: public-key
+        run: python3 scripts/repro/download_cache.py key >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: public-downloads
+        with:
+          path: ${{ runner.temp }}/sheng-public-downloads
+          key: ${{ steps.public-key.outputs.key }}
+      - name: Check public input cache handling
+        run: python3 scripts/repro/test-download-cache.py
       - name: Install the original build tools
         run: |
           test -d "$DEVELOPER_DIR"
@@ -44,13 +54,17 @@ jobs:
       - name: Clean build and original full release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 -B scripts/repro/run-release.py --baseline-archive "$RUNNER_TEMP/candidate-baseline/layout-inputs.tar.gz"
-      - name: Archive complete build and errors
+        run: python3 -B scripts/repro/run-release.py --baseline-archive "$RUNNER_TEMP/candidate-baseline/layout-inputs.tar.gz" --download-cache "$RUNNER_TEMP/sheng-public-downloads"
+      - uses: actions/cache/save@v4
+        if: always() && env.PUBLIC_DOWNLOAD_CACHE_READY == '1' && steps.public-downloads.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/sheng-public-downloads
+          key: ${{ steps.public-key.outputs.key }}
+      - name: Archive build and complete errors
         if: always() && env.CANDIDATE_ATTEMPT != ''
         run: |
           mkdir -p "$RUNNER_TEMP/candidate-upload"
-          tar --exclude=.git -czf "$RUNNER_TEMP/candidate-upload/attempt.tar.gz" -C "$CANDIDATE_ATTEMPT" .
-          shasum -a 256 "$RUNNER_TEMP/candidate-upload/attempt.tar.gz" > "$RUNNER_TEMP/candidate-upload/SHA256SUMS.txt"
+          python3 scripts/repro/archive-attempt.py --attempt "$CANDIDATE_ATTEMPT" --output "$RUNNER_TEMP/candidate-upload/attempt.tar.gz"
       - name: Collect images, full logs and source evidence
         if: always() && env.CANDIDATE_ATTEMPT != ''
         run: |
@@ -65,6 +79,7 @@ jobs:
           path: ${{ runner.temp }}/author-audit-upload/
           if-no-files-found: error
           retention-days: 30
+          compression-level: 0
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always() && env.CANDIDATE_ATTEMPT != ''
         with:
@@ -72,3 +87,4 @@ jobs:
           path: ${{ runner.temp }}/candidate-upload/
           if-no-files-found: error
           retention-days: 3
+          compression-level: 0

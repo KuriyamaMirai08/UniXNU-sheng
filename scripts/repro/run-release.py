@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 from preserve import apply
+from download_cache import restore as restore_downloads, capture as capture_downloads
 
 FRAMEWORK = "97437dcf7389484a0eeaa8067725ce743aff18ef"
 UEFI = "66421cb7bb5694843aec8de1ca3d1de4c20cca38"
@@ -33,6 +34,7 @@ def file_hash(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline-archive", type=Path, required=True)
+    parser.add_argument("--download-cache", type=Path)
     args = parser.parse_args()
     require_host = platform.system() == "Darwin" and platform.machine() == "arm64"
     if not require_host:
@@ -145,6 +147,8 @@ def main():
             if any(destination.rglob("local.toml")):
                 raise ValueError("Undeclared source override: " + name)
         device, framework, uefi = root / "device", root / "UniXNU", root / "uefi-sheng"
+        if args.download_cache:
+            restore_downloads(args.download_cache, root, evidence)
         os.environ.update(UNIXNU_ROOT=str(framework), UNIXNU_DEVICE=str(device), UNIXNU_UEFI=str(uefi))
         if file_hash(framework / "scripts/build-sheng-source-drivers.py") != SOURCE_HELPER_SHA:
             raise ValueError("Source-driver helper is not the qualified author input")
@@ -218,6 +222,13 @@ def main():
         save("result.json", dict(status="author_release_built_static_review_pending", full_source_build=True,
                                  device_operations=False, stable_outputs_modified=False, outputs=result["outputs"]))
     finally:
+        if args.download_cache:
+            try:
+                capture_downloads(args.download_cache, root, evidence)
+            except Exception as error:
+                # Cache publication is optional. Keep the build's original
+                # result and record a cache failure without hiding its cause.
+                save("download-cache-capture-error.json", dict(type=type(error).__name__, error=str(error)))
         inventory = []
         for base, directories, filenames in os.walk(root):
             directories[:] = [name for name in directories if name not in (".git", "__pycache__")]

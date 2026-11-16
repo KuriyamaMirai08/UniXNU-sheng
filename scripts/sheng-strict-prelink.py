@@ -150,6 +150,9 @@ def main():
         require(reference_receipt["inputs"].get("native_diagnostics") is True,
                 "Reference did not select the genuine native archive diagnostics")
         diagnostics = reference_receipt.get("native_archive_diagnostics") or {}
+        from reference_diagnostics import verify_diagnostic_providers
+        require(diagnostics.get("final_provider_definitions") == verify_diagnostic_providers(args.fileset_reference),
+                "Reference diagnostic definitions differ from actual section-backed code/data")
         require(diagnostics.get("global_mach_assert_enabled") is False and
                 diagnostics.get("added_config_options") == ["ubsan_minimal"],
                 "Reference changed global RELEASE assertion ABI")

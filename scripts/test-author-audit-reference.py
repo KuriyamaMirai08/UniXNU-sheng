@@ -32,6 +32,9 @@ class ReferencePublicationTests(unittest.TestCase):
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b"control-flow fixture; never a build input")
+            verifier = root / 'scripts/reference_diagnostics.py'
+            verifier.parent.mkdir(parents=True)
+            verifier.write_bytes((Path(__file__).parent / 'reference_diagnostics.py').read_bytes())
             config = root / ".cache/xnu-work/config"
             config.mkdir()
             (config / "Private.exports").write_text("_available\n_unavailable_export\n")
@@ -93,8 +96,13 @@ class ReferencePublicationTests(unittest.TestCase):
             arguments = ['reference', '--tree', str(root), '--lto']
             if native_diagnostics:
                 arguments.append('--native-diagnostics')
+            def provider_response(path):
+                if omit_diagnostic:
+                    raise ValueError('lacks genuine diagnostic definitions')
+                return {name: {'control_flow_fixture': True} for name in REFERENCE.NATIVE_DIAGNOSTIC_SYMBOLS}
             with patch.object(REFERENCE.subprocess, "run", side_effect=subprocess_response), \
                     patch.object(REFERENCE.subprocess, "check_output", return_value="fixture compiler"), \
+                    patch.object(REFERENCE, 'verify_diagnostic_providers', side_effect=provider_response), \
                     patch("sys.argv", arguments):
                 if final_exit or compile_failure:
                     with self.assertRaises(SystemExit) as refused:

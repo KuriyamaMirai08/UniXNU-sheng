@@ -58,6 +58,8 @@ def transform(name, text):
         text = replace(text, "        command = build.compile_command(record, source, output, includes, flags)",
                        "        command = build.compile_command(record, source, output, includes, flags)\n        command += compiler_flags(tree)", name)
     elif name == "scripts/build-fileset-release-reference.py":
+        text = replace(text, 'import fnmatch\n',
+                       'import fnmatch\nfrom reference_diagnostics import verify_diagnostic_providers\n', name)
         helper = '''
 NATIVE_DIAGNOSTIC_SYMBOLS = {
     '___ubsan_handle_add_overflow_minimal',
@@ -128,7 +130,8 @@ def prepare_native_diagnostics(source, output):
             "        raise ValueError('Native archive diagnostics are qualified only for RELEASE-LTO')\n"
             "    mode = 'lto' if options.lto else 'snapshot'\n", name)
         text = replace(text, "        'mode': mode,\n",
-                       "        'mode': mode,\n        'native_diagnostics': options.native_diagnostics,\n", name)
+                       "        'mode': mode,\n        'native_diagnostics': options.native_diagnostics,\n"
+                       "        'diagnostic_verifier': file_hash(root / 'scripts/reference_diagnostics.py') if options.native_diagnostics else None,\n", name)
         text = replace(text, "    args = ['make','-C',str(source),'build','SDKROOT=iphoneos',\n",
             "    if options.native_diagnostics:\n"
             "        flags += ' -DXNU_REFERENCE_NATIVE_ASSERT=1'\n"
@@ -140,11 +143,9 @@ def prepare_native_diagnostics(source, output):
             "    built = output / f'{mode}-obj/RELEASE_ARM64_BCM2837/mach.release.bcm2837.unstripped'\n"
             "    qualification = None\n"
             "    if options.native_diagnostics:\n"
-            "        listed = subprocess.run(['xcrun', 'nm', '-gUj', str(built)], capture_output=True, text=True, check=True)\n"
-            "        provided = set(listed.stdout.splitlines())\n"
-            "        if not NATIVE_DIAGNOSTIC_SYMBOLS <= provided:\n"
-            "            raise ValueError('Final RELEASE reference lacks genuine native archive diagnostic providers')\n"
+            "        providers = verify_diagnostic_providers(built)\n"
             "        qualification = json.loads((output / 'native-archive-diagnostics.json').read_text())\n"
+            "        qualification['final_provider_definitions'] = providers\n"
             "        qualification['final_defined_symbols_verified'] = sorted(NATIVE_DIAGNOSTIC_SYMBOLS)\n"
             "        (output / 'native-archive-diagnostics.json').write_text(json.dumps(qualification, indent=2) + '\\n')\n", name)
         text = replace(text, "'build': str(output)}, indent=2) + '\\n')",
