@@ -1,0 +1,53 @@
+name: Stage 0C-1B one-shot morning launch (2026-11-19)
+
+# One-off launcher only. The target compile workflow is not modified.
+# 2026-11-19 06:30 China Standard Time = 2026-11-18 22:30 UTC.
+on:
+  schedule:
+    - cron: '30 22 * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  launch:
+    name: Dispatch reviewed Stage 0C-1B compile once
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify target date in China Standard Time
+        id: date
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_date="$(TZ=Asia/Shanghai date +%F)"
+          if [[ "$actual_date" == "2026-11-19" ]]; then
+            echo "due=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Not the one-time target date; no build will be launched."
+          fi
+
+      - name: Dispatch target branch compile
+        if: ${{ steps.date.outputs.due == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run sheng-stage0c1b-compile.yml \
+            --ref codex/stage0c1b-compile-20261118
+          echo "Dispatch accepted. Inspect the Stage 0C-1B workflow for runner allocation and results."
+
+      - name: Disable this one-shot launcher after dispatch
+        if: ${{ steps.date.outputs.due == 'true' && success() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method PUT \
+            "repos/$GH_REPO/actions/workflows/stage0c1b-one-shot-20261119.yml/disable"
+          echo "This one-shot launcher is now disabled."
