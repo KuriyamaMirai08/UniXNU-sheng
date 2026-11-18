@@ -1,0 +1,2567 @@
+diff --git a/NativeRamBlock.cpp b/NativeRamBlock.cpp
+--- a/NativeRamBlock.cpp
++++ b/NativeRamBlock.cpp
+@@ -19,12 +19,18 @@
+ #include <pexpert/pexpert.h>
+ #include "SparseDisk.h"
+ #include "PersistOverlay.h"
++#include "PersistState.h"
+ #include "DirectDisk.h"
+ 
+ extern "C" {
+ extern unsigned long gPhysBase, gPhysSize;
+ // The kernel's release of loader memory (payload-addon-release.patch); absent in a kernel without it.
++#ifndef SHENG_HAS_PAYLOAD_RELEASE
++#define SHENG_HAS_PAYLOAD_RELEASE 1
++#endif
++#if SHENG_HAS_PAYLOAD_RELEASE
+ bool ml_static_mfree_prepare(vm_offset_t, vm_size_t) __attribute__((weak_import));
++#endif
+ void IODTFreeLoaderInfo(const char *, void *, int);
+ int native_ram_block_volume_device(const char *, dev_t *, char *, size_t);
+ volatile uint32_t native_ram_block_ready = 0;
+@@ -46,6 +52,9 @@
+ int native_ufs_store_write_cached(uint64_t, uint32_t, const void *) __attribute__((weak_import));
+ int native_ufs_store_sync(void) __attribute__((weak_import));
+ unsigned native_ufs_store_gpt_check(void) __attribute__((weak_import));
++uint32_t native_ufs_store_authority_state(void) __attribute__((weak_import));
++uint32_t native_ufs_store_authority_epoch(void) __attribute__((weak_import));
++unsigned native_ufs_store_authority_verify(void) __attribute__((weak_import));
+ // Diagnostics. state: 0 off, 1 blank (read-only probe), 2 resumed, 3 fresh (Install and boot), 4 refused/failed, 5 degraded after an I/O
+ // error, 6 resumed read-only (probe), 7 kept: the store holds no Data of this seed and no reset was asked, so it is left untouched and
+ // this boot's Data runs from the seed alone (header: why). header: persist::checkHeader result.
+@@ -78,6 +87,17 @@
+   uint8_t seedHash[32] = {};
+   persist::Overlay overlay;
+   uint8_t *overlayBits = nullptr, *stage = nullptr;   // stage: kStagePages pages, one write or read run
++  persist::wal::Entry *walEntries = nullptr;
++  uint64_t walEntryBytes = 0;
++  uint32_t walEntryCapacity = 0;
++  static constexpr uint64_t kWalV2Bytes = 64ULL * 1024ULL * 1024ULL;
++  static constexpr uint64_t kWalV2Blocks =
++      (kWalV2Bytes / persist::kBlock / persist::wal::kTransactionBlocks) *
++      persist::wal::kTransactionBlocks;
++  static_assert(kWalV2Blocks &&
++                kWalV2Blocks % persist::wal::kTransactionBlocks == 0 &&
++                kWalV2Blocks * persist::kBlock <= kWalV2Bytes,
++                "64 MiB WAL budget must contain whole transaction slots");
+   static constexpr uint32_t kStagePages = 32;
+   // Direct mode runs requests concurrently; only a request's own state is unshared:
+   //  - a staging buffer from the pool (stage is its first entry), taken for the request;
+@@ -89,13 +109,15 @@
+   uint8_t *stagePool[kStagePool] = {};
+   uint32_t stageFree = 0, stageCount = 0;
+   IOLock *poolLock = nullptr, *rangeLock = nullptr, *bitLock = nullptr, *flushMutex = nullptr;
++  IOLock *authorityLock = nullptr;   // serializes the comparatively expensive GPT/capacity recheck
+   IORWLock *flushRw = nullptr;
+   struct PageRange { uint64_t first, last; bool used; } ranges[kRanges] = {};
+   uint32_t inflight = 0;   // direct requests running without the gate (gate held to change it)
+-  bool storeAttached = false;
++  persist::StoreState storeState;
++  static constexpr uint32_t kAuthorityReady = 1;   // UfsWriteState::Ready ABI, checked in tests
+   // Direct mode (the store is open read-write): changed pages live in the store window only, never in RAM; reads of them go to the
+   // window. A failed store write stops all further writes (a page the system was told is written must be on the medium).
+-  bool direct = false, directFailed = false;
++  bool direct = false;
+   // Write back (direct mode only, unless data-fua=1): page writes may stay in the device's write cache; the disk reports a
+   // write cache, and its synchronize (or the idle timer, kFlushSeconds after the first write since the last flush) makes the pages
+   // and then their bitmap blocks durable (PersistOverlay.h flush). A crash loses at most the writes since the last flush.
+@@ -105,23 +127,91 @@
+   thread_call_t flushCall = nullptr;
+   static constexpr uint32_t kFlushSeconds = 5;
+   struct StoreOps {
++    NativeRamBlock *disk;
+     bool cached = false;
+     bool read(uint64_t b, uint32_t n, void *d) { __atomic_fetch_add(&native_data_persist_loaded, n, __ATOMIC_RELAXED); return native_ufs_store_read(b, n, d); }
+-    bool write(uint64_t b, uint32_t n, const void *s) { return cached ? native_ufs_store_write_cached(b, n, s) : native_ufs_store_write(b, n, s); }
+-    bool sync() { return native_ufs_store_sync(); }
++    bool write(uint64_t b, uint32_t n, const void *s) {
++      IOLockLock(disk->authorityLock);
++      if (!disk->authorizeStoreWrite()) {
++        IOLockUnlock(disk->authorityLock);
++        return false;
++      }
++      const bool ok = cached ? native_ufs_store_write_cached(b, n, s) : native_ufs_store_write(b, n, s);
++      IOLockUnlock(disk->authorityLock);
++      if (!ok) disk->persistFailed(persist::StoreFault::StoreWrite);
++      return ok;
++    }
++    bool sync() {
++      IOLockLock(disk->authorityLock);
++      if (!disk->authorizeStoreWrite()) {
++        IOLockUnlock(disk->authorityLock);
++        return false;
++      }
++      const bool ok = native_ufs_store_sync();
++      IOLockUnlock(disk->authorityLock);
++      if (!ok) disk->persistFailed(persist::StoreFault::StoreSync);
++      return ok;
++    }
+   };
++  uint32_t authorityEpochNow() const
++  {
++    return &native_ufs_store_authority_epoch ? native_ufs_store_authority_epoch() : 0;
++  }
++  bool authorityBackendReady() const
++  {
++    return &native_ufs_store_authority_state && &native_ufs_store_authority_epoch &&
++           &native_ufs_store_authority_verify;
++  }
++  void persistFailed(persist::StoreFault reason)
++  {
++    const bool newlyFailed = storeState.fail(reason);
++    overlay.fail();
++    native_data_persist_state = 5;
++    if (newlyFailed) __atomic_fetch_add(&native_data_persist_errors, 1, __ATOMIC_RELAXED);
++  }
++  bool verifyAuthority()
++  {
++    if (!authorityBackendReady() || !authorityLock) {
++      persistFailed(persist::StoreFault::AuthorityRejected);
++      return false;
++    }
++    IOLockLock(authorityLock);
++    const unsigned check = native_ufs_store_authority_verify();
++    const uint32_t state = native_ufs_store_authority_state();
++    const uint32_t epoch = native_ufs_store_authority_epoch();
++    IOLockUnlock(authorityLock);
++    if (check || state != kAuthorityReady || !storeState.authorityStable(epoch)) {
++      persistFailed(persist::StoreFault::AuthorityRejected);
++      return false;
++    }
++    return true;
++  }
++  bool authorizeStoreWrite()
++  {
++    const uint32_t epoch = authorityEpochNow();
++    if (!storeState.authorizes(epoch)) {
++      persistFailed(persist::StoreFault::AuthorityChanged);
++      return false;
++    }
++    return true;
++  }
+   static bool fuaRequested() { uint32_t v = 0; return PE_parse_boot_argn("data-fua", &v, sizeof v) && v == 1; }
++  // Version 2 is never selected by default. Both mounting and explicit
++  // initialization require this boot argument.
++  static bool walV2Requested() { uint32_t v = 0; return PE_parse_boot_argn("data-wal-v2", &v, sizeof v) && v == 1; }
+   // Makes the written pages and their bitmap blocks durable; a failure stops all further writes, as a failed store write does. Nothing
+   // written since the last flush: every page and bit is already durable, so no command is sent.
+   bool flushStore(bool timer) {
+-    if (!writeBack || !overlay.active) return true;
++    if (storeState.isFailed() || overlay.inconsistent) return false;
++    if (!writeBack && !(direct && overlay.walV2)) return true;
++    if (!overlay.active) return false;
+     IOLockLock(flushMutex);
+     IORWLockWrite(flushRw);   // waits for the writes in progress; their bits are set when they release it
+     bool ok = true;
+-    if (__atomic_load_n(&directFailed, __ATOMIC_ACQUIRE)) ok = false;
+-    else if (unflushed) {
++    if (!storeState.isWritable() || !verifyAuthority()) ok = false;
++    else if (overlay.walV2 || unflushed) {
+       const uint64_t t0 = mach_absolute_time();
+-      StoreOps store; store.cached = true;
++      StoreOps store = { this, true };
+       uint64_t blocks = 0;
+       ok = overlay.flush(store, &blocks);
+       __atomic_fetch_add(&native_data_flushes, 1, __ATOMIC_RELAXED);
+@@ -130,9 +220,7 @@
+       if (timer) __atomic_fetch_add(&native_data_timer_flushes, 1, __ATOMIC_RELAXED);
+       native_data_persist_present = overlay.present;
+       if (!ok) {
+-        __atomic_store_n(&directFailed, true, __ATOMIC_RELEASE);
+-        native_data_persist_state = 5;
+-        __atomic_fetch_add(&native_data_persist_errors, 1, __ATOMIC_RELAXED);
++        persistFailed(persist::StoreFault::OverlayFlush);
+       } else {
+         IOLockLock(bitLock); unflushed = false; IOLockUnlock(bitLock);
+       }
+@@ -202,11 +290,11 @@
+     }
+   };
+   IOReturn directReadWrite(IOMemoryDescriptor *buffer, uint64_t offset, uint64_t bytes, uint64_t *actual, uint64_t *waited);
+-  void persistFailed() { overlay.active = false; native_data_persist_state = 5; __atomic_fetch_add(&native_data_persist_errors, 1, __ATOMIC_RELAXED); }
+ public:
+   // Called once, before the Data volume is mounted (native_ram_block_volume_seed): open the store window, put the pages that
+   // earlier boots changed back into the sparse disk, and from then on write changed pages through. The seed identity
+-  // (seedHash) is not affected. Any refusal or error leaves the disk volatile, exactly as without persistence.
++  // (seedHash) is not affected. A missing provider leaves the disk volatile. Once the UFS window or overlay has
++  // been touched, any refusal/error is terminal for this boot: seed reads remain available, but persistent writes fail.
+   // data-reset=1 or 2 (the boot menu's Install and boot) starts the overlay over (the old pages are dropped, not applied); 2 also
+   // asks for Setup (BootWatchdogPolicy.c). It is the only way the store is made anew: a store of another seed, a blank or a damaged one
+   // is kept as it is on any other boot.
+@@ -214,99 +302,153 @@
+   void attachStore() {
+     if (!gate) return;
+     IOLockLock(gate);
+-    if (storeAttached) { IOLockUnlock(gate); return; }
+-    storeAttached = true;
++    if (!storeState.canBeginAttach()) { IOLockUnlock(gate); return; }
+     unsigned mode = &native_ufs_store_mode ? native_ufs_store_mode() : 0;
+-    if (mode && (sparse.pages || isBig) && &native_ufs_store_open && &native_ufs_store_read && &native_ufs_store_write &&
+-        &native_ufs_store_sync && &native_ufs_store_gpt_check) {
+-      uint64_t pages = (isBig ? big.bytes : sparse.bytes) / 4096, first = 0;
+-      const char *why = "";
+-      native_data_persist_pages = pages;
+-      native_data_persist_gpt = native_ufs_store_gpt_check();
+-      if (!native_ufs_store_open(persist::windowBlocks(pages), &first, &why)) {
+-        native_data_persist_state = 4;
+-        IOLog("NativeRamBlock: persistent store refused: %s\n", why);
++    if ((mode != 1 && mode != 2) || !(sparse.pages || isBig) || !&native_ufs_store_open ||
++        !&native_ufs_store_read || !&native_ufs_store_write || !&native_ufs_store_sync ||
++        !&native_ufs_store_gpt_check || !authorityBackendReady()) {
++      IOLockUnlock(gate);
++      return;
++    }
++    const uint32_t epoch = authorityEpochNow();
++    if (!storeState.beginAttach(epoch)) {
++      IOLockUnlock(gate);
++      return;
++    }
++    uint64_t pages = (isBig ? big.bytes : sparse.bytes) / 4096, first = 0;
++    uint64_t window = 0, bitmapCount = 0, walBlocks = 0;
++    const bool useWalV2 = walV2Requested();
++    const char *why = "";
++    native_data_persist_pages = pages;
++    native_data_persist_gpt = native_ufs_store_gpt_check();
++    if (!verifyAuthority()) {
++      IOLockUnlock(gate);
++      return;
++    }
++    if (!pages || !persist::bitmapBlocksFor(pages, &bitmapCount) || !bitmapCount ||
++        (useWalV2
++             ? (!persist::wal::windowBlocksFor(pages, kWalV2Blocks, &window) ||
++                !(walBlocks = kWalV2Blocks))
++             : !persist::windowBlocksFor(pages, &window)) ||
++        !bitmapCount || bitmapCount > UINT64_MAX / persist::kBlock || bitmapCount > UINT32_MAX ||
++        !native_ufs_store_open(window, &first, &why)) {
++      native_data_persist_state = 4;
++      IOLog("NativeRamBlock: persistent store refused: %s\n", why);
++      persistFailed(persist::StoreFault::AttachRejected);
++      IOLockUnlock(gate);
++      return;
++    }
++
++    // From here on the UFS store window is open. A failure is terminal for this attachment;
++    // it is never presented as a successful volatile fallback.
++    native_data_persist_first_lba = first;
++    overlayBits = static_cast<uint8_t *>(IOMallocZero(bitmapCount * persist::kBlock));
++    stage = static_cast<uint8_t *>(IOMallocZero(kStagePages * persist::kBlock));
++    if (useWalV2) {
++      const uint64_t slots = walBlocks / persist::wal::kTransactionBlocks;
++      if (slots > UINT32_MAX / persist::wal::kPagesPerTransaction) {
++        persistFailed(persist::StoreFault::AttachRejected);
++        IOLockUnlock(gate);
++        return;
++      }
++      walEntryCapacity = static_cast<uint32_t>(slots * persist::wal::kPagesPerTransaction);
++      walEntryBytes = uint64_t(walEntryCapacity) * sizeof(persist::wal::Entry);
++      walEntries = static_cast<persist::wal::Entry *>(IOMallocZero(walEntryBytes));
++    }
++    StoreOps ops = { this, false };
++    persist::Open result =
++        overlayBits && stage && (!useWalV2 || walEntries)
++            ? overlay.open(ops, pages, seedHash, mode == 1, overlayBits,
++                           discardRequested(), useWalV2, walEntries,
++                           walEntryCapacity, walBlocks)
++            : persist::Open::Failed;
++    native_data_persist_header = static_cast<uint32_t>(overlay.header);
++    if (result == persist::Open::Failed) {
++      persistFailed(storeState.isFailed() ? storeState.fault() : persist::StoreFault::OverlayReset);
++      IOLockUnlock(gate);
++      return;
++    }
++    if (result == persist::Open::Blank) {
++      native_data_persist_state = 1;
++    } else if (result == persist::Open::Kept) {
++      native_data_persist_state = 7;
++      overlay.active = false;
++      IOLog("NativeRamBlock: the persistent store holds no Data of this seed (header %d); kept, Data runs from the seed: "
++            "use Install and boot to start it over\n", overlay.header);
++    } else if (result == persist::Open::Fresh) {
++      native_data_persist_state = 3;
++    } else if (mode == 2) {
++      native_data_persist_state = 2;
++    } else {
++      struct Loader {
++        NativeRamBlock *self;
++        bool operator()(uint64_t i, const uint8_t *page) {
++          if (i >= self->sparse.bytes / 4096) return false;
++          if (!self->sparse.pages[i]) {
++            uint8_t *fresh = static_cast<uint8_t *>(IOMallocZero(4096));
++            if (!fresh) return false;
++            self->sparse.pages[i] = fresh;
++            self->sparse.resident += 4096;
++          }
++          memcpy(self->sparse.pages[i], page, 4096);
++          __atomic_fetch_add(&native_data_persist_loaded, 1, __ATOMIC_RELAXED);
++          return true;
++        }
++      } load = { this };
++      if (!overlay.forEachPresent(ops, load, stage, kStagePages)) {
++        persistFailed(persist::StoreFault::OverlayReset);
++        IOLockUnlock(gate);
++        return;
++      }
++      native_data_persist_state = 6;
++      native_ram_block_resident_bytes = sparse.resident;
++    }
++
++    direct = mode == 2 && overlay.active && !overlay.readOnly;
++    // Direct and read-write: write back when the store offers cached writes and data-fua=1 does not ask for write through.
++    if (direct && !overlay.walV2 && &native_ufs_store_write_cached && !fuaRequested()) {
++      dirtyBytes = bitmapCount;
++      dirtyBits = static_cast<uint8_t *>(IOMallocZero(dirtyBytes));
++      flushCall = dirtyBits ? thread_call_allocate(flushTimer, this) : nullptr;
++      if (dirtyBits && flushCall) {
++        overlay.dirty = dirtyBits;
++        overlay.dirtyBlocks = 0;
++        writeBack = true;
+       } else {
+-        native_data_persist_first_lba = first;
+-        uint64_t bb = persist::bitmapBlocks(pages);
+-        overlayBits = static_cast<uint8_t *>(IOMallocZero(bb * persist::kBlock));
+-        stage = static_cast<uint8_t *>(IOMallocZero(kStagePages * persist::kBlock));
+-        StoreOps ops;
+-        persist::Open result = overlayBits && stage ? overlay.open(ops, pages, seedHash, mode == 1, overlayBits, discardRequested())
+-                                                          : persist::Open::Failed;
+-        native_data_persist_header = static_cast<uint32_t>(overlay.header);
+-        if (result == persist::Open::Failed) {
+-          native_data_persist_state = 4;
+-          overlay.active = false;
+-        } else if (result == persist::Open::Blank) {
+-          native_data_persist_state = 1;
+-        } else if (result == persist::Open::Kept) {
+-          native_data_persist_state = 7;
+-          overlay.active = false;
+-          IOLog("NativeRamBlock: the persistent store holds no Data of this seed (header %d); kept, Data runs from the seed: "
+-                "use Install and boot to start it over\n", overlay.header);
+-        } else if (result == persist::Open::Fresh) {
+-          native_data_persist_state = 3;
+-          direct = mode == 2;
+-        } else if (mode == 2) {
+-          // Resumed read-write: nothing is copied into RAM. The window answers for every page whose bit is set.
+-          direct = true;
+-          native_data_persist_state = 2;
+-        } else {
+-          struct Loader {
+-            NativeRamBlock *self;
+-            bool operator()(uint64_t i, const uint8_t *page) {
+-              if (i >= self->sparse.bytes / 4096) return false;
+-              if (!self->sparse.pages[i]) {
+-                uint8_t *fresh = static_cast<uint8_t *>(IOMallocZero(4096));
+-                if (!fresh) return false;
+-                self->sparse.pages[i] = fresh;
+-                self->sparse.resident += 4096;
+-              }
+-              memcpy(self->sparse.pages[i], page, 4096);
+-              __atomic_fetch_add(&native_data_persist_loaded, 1, __ATOMIC_RELAXED);
+-              return true;
+-            }
+-          } load = { this };
+-          if (overlay.forEachPresent(ops, load, stage, kStagePages)) {
+-            native_data_persist_state = mode == 1 ? 6 : 2;
+-            native_ram_block_resident_bytes = sparse.resident;
+-          } else {
+-            // A partly restored disk would be worse than a volatile one, but the pages already copied are consistent
+-            // overlay content; stop writing back and let the system decide what it can mount.
+-            native_data_persist_state = 4;
+-            overlay.active = false;
+-          }
+-        }
+-        // Direct and read-write: write back when the store offers cached writes and data-fua=1 does not ask for write through.
+-        if (direct && overlay.active && !overlay.readOnly && &native_ufs_store_write_cached && !fuaRequested()) {
+-          dirtyBytes = persist::bitmapBlocks(pages);
+-          dirtyBits = static_cast<uint8_t *>(IOMallocZero(dirtyBytes));
+-          flushCall = dirtyBits ? thread_call_allocate(flushTimer, this) : nullptr;
+-          if (dirtyBits && flushCall) {
+-            overlay.dirty = dirtyBits;
+-            overlay.dirtyBlocks = 0;
+-            writeBack = true;
+-            native_data_write_back = 1;
+-          } else {
+-            if (dirtyBits) IOFree(dirtyBits, dirtyBytes);
+-            dirtyBits = nullptr; dirtyBytes = 0;
+-            if (flushCall) { thread_call_free(flushCall); flushCall = nullptr; }
+-          }
+-        }
+-        // Direct mode: the staging pool (see stagePool); at least the open's own buffer.
+-        if (direct) {
+-          stagePool[0] = stage; stageCount = 1;
+-          while (stageCount < kStagePool) {
+-            uint8_t *buffer = static_cast<uint8_t *>(IOMallocZero(kStagePages * persist::kBlock));
+-            if (!buffer) break;
+-            stagePool[stageCount++] = buffer;
+-          }
+-          stageFree = (1u << stageCount) - 1;
+-        }
+-        native_data_persist_present = overlay.present;
+-        native_data_persist_gpt_after = native_ufs_store_gpt_check();
+-      }
++        if (dirtyBits) IOFree(dirtyBits, dirtyBytes);
++        dirtyBits = nullptr; dirtyBytes = 0;
++        if (flushCall) { thread_call_free(flushCall); flushCall = nullptr; }
++      }
++    }
++    if (direct) {
++      stagePool[0] = stage; stageCount = 1;
++      while (stageCount < kStagePool) {
++        uint8_t *buffer = static_cast<uint8_t *>(IOMallocZero(kStagePages * persist::kBlock));
++        if (!buffer) break;
++        stagePool[stageCount++] = buffer;
++      }
++      stageFree = (1u << stageCount) - 1;
++    }
++    native_data_persist_present = overlay.present;
++    native_data_persist_gpt_after = native_ufs_store_gpt_check();
++    if (direct) {
++      if (!verifyAuthority()) {
++        IOLockUnlock(gate);
++        return;
++      }
++      if (!storeState.commitWritable(writeBack)) {
++        persistFailed(persist::StoreFault::InvalidState);
++        IOLockUnlock(gate);
++        return;
++      }
++      native_data_write_back = writeBack ? 1 : 0;
++    } else {
++      if (!storeState.commitReadOnly()) {
++        persistFailed(persist::StoreFault::InvalidState);
++        IOLockUnlock(gate);
++        return;
++      }
++      native_data_write_back = 0;
+     }
+     IOLockUnlock(gate);
+   }
+@@ -338,8 +480,15 @@
+   IOReturn reportWriteProtection(bool *value) override { *value = false; return kIOReturnSuccess; }
+   IOReturn doSynchronizeCache() override {
+     if (!online) return kIOReturnNotReady;
+-    // Write through: every changed page is on the medium, with its bitmap bit, before its write completed (PersistOverlay.h).
+-    if (!writeBack) return kIOReturnSuccess;
++    if (storeState.isFailed()) return kIOReturnIOError;
++    // v2 keeps committed transactions in WAL until synchronize requests a
++    // checkpoint. Write-through v1 is already durable page by page.
++    if (!writeBack) {
++      if (direct && !verifyAuthority()) return kIOReturnIOError;
++      if (direct && overlay.walV2)
++        return flushStore(false) ? kIOReturnSuccess : kIOReturnIOError;
++      return kIOReturnSuccess;
++    }
+     // Write back: the pages written so far, then their bitmap blocks. Barrier and full requests are both served as a full flush.
+     return flushStore(false) ? kIOReturnSuccess : kIOReturnIOError;
+   }
+@@ -371,7 +520,8 @@
+       physical < gPhysBase || bytes > gPhysSize || physical - gPhysBase > gPhysSize - bytes) return false;
+   memory = reinterpret_cast<uint8_t *>(ml_static_ptovirt(physical));
+   if (!memory || !(gate = IOLockAlloc()) || !(poolLock = IOLockAlloc()) || !(rangeLock = IOLockAlloc()) ||
+-      !(bitLock = IOLockAlloc()) || !(flushMutex = IOLockAlloc()) || !(flushRw = IORWLockAlloc())) return false;
++      !(bitLock = IOLockAlloc()) || !(flushMutex = IOLockAlloc()) || !(authorityLock = IOLockAlloc()) ||
++      !(flushRw = IORWLockAlloc())) return false;
+   uint64_t logical=bytes;
+   if(packedInput){
+     if(!ramPackedLayout(memory,bytes,&logical))return false;
+@@ -408,12 +558,14 @@
+   // A packed seed was copied page by page into this disk's own memory and hashed from there: nothing reads the loader's
+   // copy again. With boot-payload-release=1 its whole pages go back to the VM the way XNU returns loader memory, and the
+   // range leaves the registry's /chosen/memory-map, so a second start finds no seed instead of freed memory.
++#if SHENG_HAS_PAYLOAD_RELEASE
+   uint32_t release = 0;
+   if (packedInput && !memory && PE_parse_boot_argn("boot-payload-release", &release, sizeof release) && release == 1 &&
+       ml_static_mfree_prepare && bytes <= INT32_MAX && ml_static_mfree_prepare(ml_static_ptovirt(physical), bytes)) {
+     IODTFreeLoaderInfo("PackedRAMDisk", reinterpret_cast<void *>(physical), static_cast<int>(bytes));
+     native_ram_block_seed_released = static_cast<uint32_t>(bytes >> 12);
+   }
++#endif
+   memcpy(native_ram_block_seed_sha256,seedHash,32);
+   native_ram_block_bytes = logical;
+   native_ram_block_sparse=(sparse.pages||isBig)?1:0;
+@@ -467,7 +619,7 @@
+     completion->action(completion->target, completion->parameter, result, done);
+     return kIOReturnSuccess;
+   }
+-  uint64_t actual;bool noMemory=false;
++  uint64_t actual;bool noMemory=false, persistError=false;
+   if(isBig && !direct) {
+     // Before the store is attached (APFS probes the disk for its volume UUID long before the kernel asks for the Data volume, which is what
+     // attaches the store) a disk this size is read from its seed alone; it has no volatile mode, so writes wait.
+@@ -506,12 +658,16 @@
+     actual=ramSparseIO(sparse,write,block*512,bytes,ops,noMemory);
+     }
+     if(!direct && write && actual==bytes && overlay.active && !overlay.readOnly){
+-      StoreOps store;
++      StoreOps store = { this, false };
+       uint64_t firstPage=block*512/4096,lastPage=(block*512+bytes-1)/4096;
+       for(uint64_t i=firstPage;i<=lastPage && overlay.active;){
+         uint32_t n=0;
+         while(n<kStagePages && i+n<=lastPage && sparse.pages[i+n]){memcpy(stage+(uint64_t)n*persist::kBlock,sparse.pages[i+n],persist::kBlock);++n;}
+-        if(!n || !overlay.writeRun(store,i,n,stage)){persistFailed();break;}
++        if(!n || !overlay.writeRun(store,i,n,stage)){
++          persistFailed(storeState.isFailed() ? storeState.fault() : persist::StoreFault::StoreWrite);
++          persistError=true;
++          break;
++        }
+         __atomic_fetch_add(&native_data_persist_writes,n,__ATOMIC_RELAXED);
+         __atomic_fetch_add(&native_data_persist_syncs,1,__ATOMIC_RELAXED);   // one run = one durable commit
+         native_data_persist_present=overlay.present;
+@@ -528,7 +684,8 @@
+     actual = buffer->readBytes(0, memory + block * 512, bytes);
+     __atomic_fetch_add(&native_ram_block_writes, 1, __ATOMIC_RELAXED);
+   }
+-  IOReturn status = actual == bytes ? kIOReturnSuccess : noMemory ? kIOReturnNoMemory : kIOReturnIOError;
++  IOReturn status = persistError ? kIOReturnIOError : actual == bytes ? kIOReturnSuccess :
++                    noMemory ? kIOReturnNoMemory : kIOReturnIOError;
+   if (status) __atomic_fetch_add(&native_ram_block_failures, 1, __ATOMIC_RELAXED);
+   const uint64_t left = mach_absolute_time(), spent = left - entered;
+   if (buffer->getDirection() == kIODirectionOut) {
+@@ -560,22 +717,32 @@
+   const bool write = buffer->getDirection() == kIODirectionOut;
+   const uint64_t first = offset / 4096, last = (offset + bytes - 1) / 4096;
+   *actual = 0;
+-  if (write && __atomic_load_n(&directFailed, __ATOMIC_ACQUIRE)) return kIOReturnIOError;
++  if (write && (!storeState.isWritable() || !verifyAuthority())) return kIOReturnIOError;
+   const uint64_t t0 = mach_absolute_time();
+   uint8_t *buf = takeStage();
+-  if (write) { takeRange(first, last); IORWLockRead(flushRw); }
++  if (write) {
++    takeRange(first, last);
++    IORWLockRead(flushRw);
++    // Authorization may have been revoked while this request waited behind another
++    // writer or a flush. Recheck both the epoch and GPT/capacity baseline before a
++    // single page or bitmap fragment can be submitted.
++    if (!storeState.isWritable() || !verifyAuthority()) {
++      IORWLockUnlock(flushRw);
++      giveRange(first, last);
++      giveStage(buf);
++      return kIOReturnIOError;
++    }
++  }
+   *waited += mach_absolute_time() - t0;
+-  StoreOps store; store.cached = writeBack;
++  StoreOps store = { this, writeBack };
+   BitCommit commit = {this, store};
+   bool storeError = false;
+   *actual = isBig ? directDiskIO(big, overlay, store, buf, kStagePages, write, offset, bytes, bops, &storeError, commit)
+                   : directDiskIO(sparse, overlay, store, buf, kStagePages, write, offset, bytes, bops, &storeError, commit);
+   if (storeError) {
+-    if (write) __atomic_store_n(&directFailed, true, __ATOMIC_RELEASE);
+-    native_data_persist_state = 5;
+-    __atomic_fetch_add(&native_data_persist_errors, 1, __ATOMIC_RELAXED);
+-  }
+-  if (write && *actual) {
++    persistFailed(storeState.isFailed() ? storeState.fault() : persist::StoreFault::StoreWrite);
++  }
++  if (write && *actual && !storeError && storeState.isWritable()) {
+     __atomic_fetch_add(&native_data_persist_writes, (*actual + 4095) / 4096, __ATOMIC_RELAXED);
+     __atomic_fetch_add(&native_data_persist_syncs, 1, __ATOMIC_RELAXED);
+     native_data_persist_present = overlay.present;
+@@ -596,7 +763,9 @@
+     online = false;
+     while (inflight) IOLockSleep(gate, &inflight, THREAD_UNINT);
+     IOLockUnlock(gate);
+-    if (bitLock && flushMutex && flushRw) flushStore(false);
++    // Only a still-authorized clean shutdown may flush. A failed state must never send
++    // another data or bitmap write during teardown.
++    if (storeState.isWritable() && !storeState.isFailed() && bitLock && flushMutex && flushRw) flushStore(false);
+   }
+   IOBlockStorageDevice::stop(provider);
+ }
+@@ -604,8 +773,13 @@
+ void NativeRamBlock::free()
+ {
+   if (flushCall) { thread_call_cancel_wait(flushCall); thread_call_free(flushCall); flushCall = nullptr; }
++  if (walEntries) { IOFree(walEntries, walEntryBytes); walEntries = nullptr; walEntryBytes = 0; walEntryCapacity = 0; }
+   if (dirtyBits) { IOFree(dirtyBits, dirtyBytes); dirtyBits = nullptr; dirtyBytes = 0; overlay.dirty = nullptr; }
+-  if (overlayBits) { IOFree(overlayBits, persist::bitmapBlocks(sparse.bytes / 4096) * persist::kBlock); overlayBits = nullptr; }
++  if (overlayBits) {
++    uint64_t bitmapCount = 0;
++    if (persist::bitmapBlocksFor(sparse.bytes / 4096, &bitmapCount)) IOFree(overlayBits, bitmapCount * persist::kBlock);
++    overlayBits = nullptr;
++  }
+   for (unsigned k = 1; k < stageCount; ++k) { IOFree(stagePool[k], kStagePages * persist::kBlock); stagePool[k] = nullptr; }
+   stageCount = 0;
+   if (stage) { IOFree(stage, kStagePages * persist::kBlock); stage = nullptr; }
+@@ -620,6 +794,7 @@
+   if (rangeLock) { IOLockFree(rangeLock); rangeLock = nullptr; }
+   if (bitLock) { IOLockFree(bitLock); bitLock = nullptr; }
+   if (flushMutex) { IOLockFree(flushMutex); flushMutex = nullptr; }
++  if (authorityLock) { IOLockFree(authorityLock); authorityLock = nullptr; }
+   if (flushRw) { IORWLockFree(flushRw); flushRw = nullptr; }
+   if(sparse.pages){
+     for(uint64_t i=0;i<sparse.bytes/4096;++i)if(sparse.pages[i])IOFree(sparse.pages[i],4096);
+diff --git a/PersistOverlay.h b/PersistOverlay.h
+--- a/PersistOverlay.h
++++ b/PersistOverlay.h
+@@ -19,11 +19,14 @@
+ // An overlay is only ever applied on top of the exact seed it was made against. A window that holds no overlay of this seed (blank,
+ // damaged, or made against another seed or size) is made anew only when the caller asks for it (`reset`: the boot menu's Install and
+ // boot); otherwise it is left as it is (Kept) and the disk runs from the seed alone, so no boot replaces a user's Data by itself.
++// Reset first invalidates a currently valid same-seed header and synchronizes it before changing the bitmap. A failed write or sync
++// permanently deactivates this in-memory overlay; only a later boot may reopen the medium.
+ //
+ // Ops: bool read(uint64_t block, uint32_t count, void *dst); bool write(uint64_t block, uint32_t count, const void *src);
+ //      bool sync();   (blocks are relative to the window; sync is only used while the header is made)
+ #include <stdint.h>
+ #include <string.h>
++#include "PersistWalV2.h"
+ 
+ namespace persist {
+ constexpr uint32_t kBlock = 4096;
+@@ -43,9 +46,48 @@
+ inline uint32_t get32 (const uint8_t *p) { uint32_t v = 0; for (int i = 3; i >= 0; --i) v = (v << 8) | p[i]; return v; }
+ inline uint64_t get64 (const uint8_t *p) { uint64_t v = 0; for (int i = 7; i >= 0; --i) v = (v << 8) | p[i]; return v; }
+ 
+-inline uint64_t bitmapBlocks (uint64_t pages) { return (pages + 8ULL * kBlock - 1) / (8ULL * kBlock); }
+-inline uint64_t windowBlocks (uint64_t pages) { return 1 + bitmapBlocks (pages) + pages; }
+-inline uint64_t pageBlock (uint64_t pages, uint64_t index) { return 1 + bitmapBlocks (pages) + index; }
++// Checked layout arithmetic. The compatibility helpers return 0 on overflow; callers that
++// use the result to perform I/O must use the For variants and reject false.
++inline bool bitmapBlocksFor (uint64_t pages, uint64_t *blocks)
++{
++  if (!blocks) return false;
++  const uint64_t bitsPerBlock = 8ULL * kBlock;
++  *blocks = pages ? 1 + (pages - 1) / bitsPerBlock : 0;
++  return true;
++}
++inline bool windowBlocksFor (uint64_t pages, uint64_t *blocks)
++{
++  if (!blocks || !pages) return false;
++  uint64_t bitmap = 0;
++  if (!bitmapBlocksFor (pages, &bitmap) || bitmap >= UINT64_MAX ||
++      pages > UINT64_MAX - bitmap - 1) return false;
++  *blocks = 1 + bitmap + pages;
++  return true;
++}
++inline bool pageBlockFor (uint64_t pages, uint64_t index, uint64_t *block)
++{
++  if (!block || index >= pages) return false;
++  uint64_t bitmap = 0;
++  if (!bitmapBlocksFor (pages, &bitmap) || bitmap >= UINT64_MAX ||
++      index > UINT64_MAX - bitmap - 1) return false;
++  *block = 1 + bitmap + index;
++  return true;
++}
++inline uint64_t bitmapBlocks (uint64_t pages)
++{
++  uint64_t blocks = 0;
++  return bitmapBlocksFor (pages, &blocks) ? blocks : 0;
++}
++inline uint64_t windowBlocks (uint64_t pages)
++{
++  uint64_t blocks = 0;
++  return windowBlocksFor (pages, &blocks) ? blocks : 0;
++}
++inline uint64_t pageBlock (uint64_t pages, uint64_t index)
++{
++  uint64_t block = 0;
++  return pageBlockFor (pages, index, &block) ? block : 0;
++}
+ 
+ inline void encodeHeader (uint8_t block[kBlock], uint64_t pages, const uint8_t seed[32], uint64_t generation)
+ {
+@@ -78,44 +120,172 @@
+   uint8_t *bitmap = nullptr;       // bitmapBlocks(pages) * kBlock bytes, owned by the caller
+   uint8_t *dirty = nullptr;        // write back: bitmapBlocks(pages) bytes, owned by the caller, 1 = block gained a bit since the last flush
+   uint64_t dirtyBlocks = 0;        // marked entries of `dirty`
+-  bool readOnly = true, active = false;
++  bool readOnly = true, active = false, inconsistent = false;
++  bool walV2 = false;
++  wal::Wal walStore;
+   int header = -1;                 // checkHeader result at open
+ 
++  void fail()
++  {
++    active = false;
++    readOnly = true;
++    inconsistent = true;
++    if (walV2) walStore.fail();
++  }
++
++  bool rangeValid (uint64_t index, uint32_t count) const
++  {
++    return active && count && index < pages && count <= pages - index;
++  }
++
+   // Readers may test bits while a writer commits others (commitRun under the caller's lock), so bytes are read and set atomically.
+-  bool has (uint64_t i) const { return __atomic_load_n (&bitmap[i >> 3], __ATOMIC_ACQUIRE) >> (i & 7) & 1; }
++  bool rawHas (uint64_t i) const
++  {
++    return bitmap && ((wal::atomicLoadByte (&bitmap[i >> 3], wal::kAtomicAcquire) >> (i & 7)) & 1);
++  }
++
++  bool has (uint64_t i) const
++  {
++    if (walV2) return walStore.has (i);
++    return bitmap && i < pages && rawHas (i);
++  }
++
++  bool walSpaceExhausted() const { return walV2 && walStore.spaceExhausted; }
++
++  template <class Ops> bool readPresent (Ops &ops, uint64_t index, void *dst)
++  {
++    if (walV2) {
++      const bool ok = walStore.readPage (ops, index, dst);
++      if (!ok) fail();
++      return ok;
++    }
++    uint64_t block = 0;
++    if (!pageBlockFor (pages, index, &block) || !ops.read (block, 1, dst)) {
++      fail();
++      return false;
++    }
++    return true;
++  }
+ 
+   // `readOnly`: never write; a stale or blank window is reported (Blank) and left alone. Otherwise a window without this seed's
+   // overlay is initialised only with `reset` (bitmap first, header last, so a tear leaves no valid header), and kept as it is
+   // without (Kept). `reset` also drops this seed's own overlay.
+-  template <class Ops> Open open (Ops &ops, uint64_t pageCount, const uint8_t seed[32], bool ro, uint8_t *bits, bool reset = false)
+-  {
+-    pages = pageCount; bitmap = bits; readOnly = ro; present = 0; active = false;
+-    uint64_t bb = bitmapBlocks (pages);
++  template <class Ops> Open open (Ops &ops, uint64_t pageCount, const uint8_t seed[32], bool ro, uint8_t *bits,
++                                  bool reset = false, bool v2Init = false, wal::Entry *walEntries = nullptr,
++                                  uint32_t walEntryCapacity = 0, uint64_t walBlocks = 0)
++  {
++    pages = pageCount; bitmap = bits; readOnly = ro; present = 0; active = false; inconsistent = false;
++    walV2 = false;
++    uint64_t bb = 0;
++    if (!pages || !bits || !bitmapBlocksFor (pages, &bb) || !bb || bb > UINT64_MAX / kBlock ||
++        bb > UINT32_MAX) {
++      fail();
++      return Open::Failed;
++    }
+     dirtyBlocks = 0;
+-    if (dirty) memset (dirty, 0, bb);
+-    uint8_t block[kBlock];
+-    if (!pages || !ops.read (0, 1, block)) return Open::Failed;
++    if (dirty) memset (dirty, 0, static_cast<size_t> (bb));
++    uint8_t block[kBlock], rootB[kBlock];
++    if (!ops.read (0, 1, block) || !ops.read (1, 1, rootB)) {
++      fail();
++      return Open::Failed;
++    }
++    if (wal::isRootMagic (block) || wal::isRootMagic (rootB)) {
++      // v2 is opt-in for this stage. A v2 store with the feature disabled is
++      // left untouched and is never interpreted as v1 or as a blank disk.
++      if (!v2Init) {
++        header = 4;
++        active = false;
++        return Open::Kept;
++      }
++      if (!walStore.readRoots (ops, pages, seed, ro, bitmap, walEntries, walEntryCapacity,
++                               walBlocks, reset, false)) {
++        fail();
++        return Open::Failed;
++      }
++      walV2 = true;
++      generation = walStore.lastSequence;
++      present = walStore.present;
++      active = true;
++      header = 4;
++      return reset ? Open::Fresh : Open::Resumed;
++    }
++    bool zeroRoots = true;
++    for (uint32_t i = 0; i < kBlock; ++i) {
++      if (block[i] || rootB[i]) {
++        zeroRoots = false;
++        break;
++      }
++    }
++    if (v2Init && reset && !ro && zeroRoots) {
++      // Explicitly initialize v2 only after the feature flag and reset request
++      // both reach open(). Existing v1 or unknown bytes never take this path.
++      if (!walStore.readRoots (ops, pages, seed, ro, bitmap, walEntries, walEntryCapacity,
++                               walBlocks, reset, true)) {
++        fail();
++        return Open::Failed;
++      }
++      walV2 = true;
++      generation = walStore.lastSequence;
++      present = walStore.present;
++      active = true;
++      header = 4;
++      return Open::Fresh;
++    }
++    if (v2Init) {
++      // Do not migrate, replace, or clear an existing v1 or unknown format.
++      fail();
++      return Open::Failed;
++    }
+     header = checkHeader (block, pages, seed, &generation);
++    const int originalHeader = header;
++    const bool invalidateExisting = header == 0;
+     if (header == 0 && reset && !ro) header = 3;   // the caller asked to start over: handled like a stale overlay
+     if (header == 0) {
+-      for (uint64_t b = 0; b < bb; ++b) if (!ops.read (1 + b, 1, bitmap + b * kBlock)) return Open::Failed;
++      for (uint64_t b = 0; b < bb; ++b) {
++        if (!ops.read (1 + b, 1, bitmap + b * kBlock)) {
++          fail();
++          return Open::Failed;
++        }
++      }
+       // Bits past the last page must be clear, or the loader would read blocks outside the window.
+-      for (uint64_t i = pages; i < bb * 8ULL * kBlock; ++i) if (has (i)) return Open::Failed;
++      for (uint64_t i = pages; i < bb * 8ULL * kBlock; ++i) {
++        if (rawHas (i)) {
++          fail();
++          return Open::Failed;
++        }
++      }
+       for (uint64_t i = 0; i < pages; ++i) present += has (i);
+       active = true;
+       return Open::Resumed;
+     }
+-    memset (bitmap, 0, bb * kBlock);
++    memset (bitmap, 0, static_cast<size_t> (bb * kBlock));
+     if (ro) return Open::Blank;
+     if (!reset) return Open::Kept;
++    // Invalidate an old same-seed header before touching its bitmap. A crash or failed
++    // write after this point can therefore lose availability, but cannot resurrect an
++    // old valid header over a partially cleared bitmap.
++    if (invalidateExisting) {
++      uint8_t invalid[kBlock] = {};
++      if (!ops.write (0, 1, invalid) || !ops.sync ()) {
++        fail();
++        return Open::Failed;
++      }
++      header = 1;
++    }
+     // The cleared bitmap goes out in one write (the store splits it into its largest transfers), not one command per block: a 210 GiB
+     // disk has 1680 bitmap blocks, and that many forced-unit-access writes held the medium long enough for the root volumes that
+     // share it to miss their publication deadline.
+-    if (!ops.write (1, static_cast<uint32_t> (bb), bitmap)) return Open::Failed;
+-    if (!ops.sync ()) return Open::Failed;
+-    generation = (header == 3 || header == 2) ? generation + 1 : 1;
++    if (!ops.write (1, static_cast<uint32_t> (bb), bitmap) || !ops.sync ()) {
++      fail();
++      return Open::Failed;
++    }
++    generation = (originalHeader == 0 || originalHeader == 3 || originalHeader == 2)
++                     ? (generation < UINT32_MAX ? generation + 1 : 1) : 1;
+     encodeHeader (block, pages, seed, generation);
+-    if (!ops.write (0, 1, block) || !ops.sync ()) return Open::Failed;
++    if (!ops.write (0, 1, block) || !ops.sync ()) {
++      fail();
++      return Open::Failed;
++    }
+     active = true;
+     return Open::Fresh;
+   }
+@@ -124,12 +294,21 @@
+   // read into scratch (maxRun * kBlock bytes). Stops at the first failure.
+   template <class Ops, class Load> bool forEachPresent (Ops &ops, Load &load, uint8_t *scratch, uint32_t maxRun)
+   {
+-    if (!maxRun) return false;
++    if (!active || !maxRun || !scratch) return false;
++    if (walV2) {
++      const bool ok = walStore.forEachPresent (ops, load, scratch, maxRun);
++      if (!ok) fail();
++      return ok;
++    }
+     for (uint64_t i = 0; i < pages;) {
+       if (!has (i)) { ++i; continue; }
+       uint32_t n = 1;
+       while (n < maxRun && i + n < pages && has (i + n)) ++n;
+-      if (!ops.read (pageBlock (pages, i), n, scratch)) return false;
++      uint64_t block = 0;
++      if (!pageBlockFor (pages, i, &block) || !ops.read (block, n, scratch)) {
++        fail();
++        return false;
++      }
+       for (uint32_t k = 0; k < n; ++k) if (!load (i + k, scratch + (uint64_t) k * kBlock)) return false;
+       i += n;
+     }
+@@ -149,29 +328,56 @@
+   // (one commit at a time, and never during flush), so that bitmap blocks reach the medium in the order their bits were set.
+   template <class Ops> bool writePages (Ops &ops, uint64_t index, uint32_t count, const void *data)
+   {
+-    if (readOnly || !active || !count || index >= pages || count > pages - index) return false;
+-    return ops.write (pageBlock (pages, index), count, data);
++    uint64_t block = 0;
++    if (readOnly || !rangeValid (index, count) || !data || !pageBlockFor (pages, index, &block)) return false;
++    if (walV2) {
++      const bool ok = walStore.writePages (ops, index, count, data);
++      generation = walStore.lastSequence;
++      present = walStore.present;
++      if (!ok) {
++        const uint32_t fault = walStore.lastFault;
++        fail();
++        walStore.lastFault = fault;
++      }
++      return ok;
++    }
++    if (!ops.write (block, count, data)) {
++      fail();
++      return false;
++    }
++    return true;
+   }
+ 
+   template <class Ops> bool commitRun (Ops &ops, uint64_t index, uint32_t count)
+   {
+-    if (readOnly || !active || !count || index >= pages || count > pages - index) return false;
++    if (readOnly || !rangeValid (index, count)) return false;
++    // v2 commits begin, payload, and both commit sectors in writePages(). The
++    // caller's serialized commit step only acknowledges that completed state.
++    if (walV2) return active && !inconsistent;
+     uint64_t firstBlock = ~0ULL, lastBlock = 0;
+-    for (uint64_t i = index; i < index + count; ++i) {
++    for (uint64_t i = index; i - index < count; ++i) {
+       if (has (i)) continue;
+       uint64_t b = i / (8ULL * kBlock);
+       if (firstBlock == ~0ULL) firstBlock = b;
+       lastBlock = b;
+     }
+     // Set the bits only after the pages are written; in write through the bitmap blocks follow before this call returns.
+-    for (uint64_t i = index; i < index + count; ++i)
+-      if (!has (i)) { __atomic_fetch_or (&bitmap[i >> 3], uint8_t (1 << (i & 7)), __ATOMIC_RELEASE); ++present; }
++    for (uint64_t i = index; i - index < count; ++i)
++      if (!has (i)) {
++        wal::atomicOrByte (&bitmap[i >> 3], uint8_t (1 << (i & 7)), wal::kAtomicRelease);
++        ++present;
++      }
+     if (firstBlock == ~0ULL) return true;
+     if (dirty) {
+       for (uint64_t b = firstBlock; b <= lastBlock; ++b) if (!dirty[b]) { dirty[b] = 1; ++dirtyBlocks; }
+       return true;
+     }
+-    for (uint64_t b = firstBlock; b <= lastBlock; ++b) if (!ops.write (1 + b, 1, bitmap + b * kBlock)) return false;
++    for (uint64_t b = firstBlock; b <= lastBlock; ++b) {
++      if (!ops.write (1 + b, 1, bitmap + b * kBlock)) {
++        fail();
++        return false;
++      }
++    }
+     return true;
+   }
+ 
+@@ -181,18 +387,40 @@
+   template <class Ops> bool flush (Ops &ops, uint64_t *blocks = nullptr)
+   {
+     if (blocks) *blocks = 0;
+-    if (readOnly || !active) return true;
+-    if (!ops.sync ()) return false;
++    if (inconsistent) return false;
++    if (readOnly) return true;
++    if (!active) return false;
++    if (walV2) {
++      const bool ok = walStore.checkpoint (ops);
++      generation = walStore.lastSequence;
++      present = walStore.present;
++      if (!ok) fail();
++      return ok;
++    }
++    if (!ops.sync ()) {
++      fail();
++      return false;
++    }
+     if (!dirty || !dirtyBlocks) return true;
+-    const uint64_t bb = bitmapBlocks (pages);
++    uint64_t bb = 0;
++    if (!bitmapBlocksFor (pages, &bb)) {
++      fail();
++      return false;
++    }
+     uint64_t written = 0;
+     for (uint64_t b = 0; b < bb; ++b) {
+       if (!dirty[b]) continue;
+-      if (!ops.write (1 + b, 1, bitmap + b * kBlock)) return false;
++      if (!ops.write (1 + b, 1, bitmap + b * kBlock)) {
++        fail();
++        return false;
++      }
+       ++written;
+     }
+-    if (!ops.sync ()) return false;
+-    memset (dirty, 0, bb);
++    if (!ops.sync ()) {
++      fail();
++      return false;
++    }
++    memset (dirty, 0, static_cast<size_t> (bb));
+     dirtyBlocks = 0;
+     if (blocks) *blocks = written;
+     return true;
+diff --git a/DirectDisk.h b/DirectDisk.h
+--- a/DirectDisk.h
++++ b/DirectDisk.h
+@@ -31,7 +31,10 @@
+       if (ov.has(index)) {
+         uint32_t n = 1;
+         while (n < stagePages && index + n <= lastIndex && ov.has(index + n)) ++n;
+-        if (!store.read(persist::pageBlock(ov.pages, index), n, stage)) { *storeError = true; break; }
++        for (uint32_t i = 0; i < n; ++i) {
++          if (!ov.readPresent(store, index + i, stage + (uint64_t)i * 4096)) { *storeError = true; break; }
++        }
++        if (*storeError) break;
+         uint64_t avail = (uint64_t) n * 4096 - skip;
+         if (avail > length - done) avail = length - done;
+         uint64_t got = buf.copy(done, stage + skip, avail);
+@@ -58,7 +61,7 @@
+     uint64_t n = 4096 - skip;                           // part of a page: read, merge, write back
+     if (n > length - done) n = length - done;
+     if (ov.has(index)) {
+-      if (!store.read(persist::pageBlock(ov.pages, index), 1, stage)) { *storeError = true; break; }
++      if (!ov.readPresent(store, index, stage)) { *storeError = true; break; }
+     } else {
+       const uint8_t *page = seed.find(index);
+       memcpy(stage, page ? page : zero, 4096);
+diff --git a/PersistWalV2.h b/PersistWalV2.h
+new file mode 100644
+--- /dev/null
++++ b/PersistWalV2.h
+@@ -0,0 +1,1408 @@
++// SPDX-License-Identifier: BSD-2-Clause-Patent
++#pragma once
++// Version 2 overlay with a checkpoint base, two published snapshot banks, two
++// roots, and a bounded WAL. Version 1 SHNGDATA remains an independent legacy
++// format and is never migrated implicitly.
++#include <stdint.h>
++#include <stddef.h>
++#include <string.h>
++
++#if defined(_MSC_VER)
++#include <intrin.h>
++#endif
++
++namespace persist {
++namespace wal {
++
++constexpr uint32_t kVersion = 2;
++constexpr uint32_t kBlock = 4096;
++constexpr uint32_t kPagesPerTransaction = 8;
++constexpr uint32_t kRootBytesLegacy = 128;
++constexpr uint32_t kRootBytesCheckpoint = 208;
++constexpr uint32_t kBeginBytes = 336;
++constexpr uint32_t kRootFlagsNoCheckpoint = 0;
++constexpr uint32_t kRootFlagsCheckpoint = 1;
++constexpr uint32_t kRootSlotA = 0;
++constexpr uint32_t kRootSlotB = 1;
++constexpr uint32_t kRootSlots = 2;
++constexpr uint32_t kSnapshotHeaderBlocks = 1;
++constexpr uint32_t kTransactionKindNormal = 0;
++constexpr uint32_t kTransactionKindReset = 1;
++constexpr uint32_t kSnapshotBankA = 0;
++constexpr uint32_t kSnapshotBankB = 1;
++constexpr uint32_t kCommitCopyOffset = kBlock / 2;
++constexpr uint32_t kTransactionBlocks = 1 + kPagesPerTransaction + 1;
++#if defined(_MSC_VER)
++constexpr int kAtomicRelaxed = 0;
++constexpr int kAtomicAcquire = 1;
++constexpr int kAtomicRelease = 2;
++#else
++constexpr int kAtomicRelaxed = __ATOMIC_RELAXED;
++constexpr int kAtomicAcquire = __ATOMIC_ACQUIRE;
++constexpr int kAtomicRelease = __ATOMIC_RELEASE;
++#endif
++
++inline void put32(uint8_t *p, uint32_t value)
++{
++  for (unsigned i = 0; i < 4; ++i) p[i] = uint8_t(value >> (8 * i));
++}
++
++inline void put64(uint8_t *p, uint64_t value)
++{
++  for (unsigned i = 0; i < 8; ++i) p[i] = uint8_t(value >> (8 * i));
++}
++
++inline uint32_t get32(const uint8_t *p)
++{
++  uint32_t value = 0;
++  for (int i = 3; i >= 0; --i) value = (value << 8) | p[i];
++  return value;
++}
++
++inline uint64_t get64(const uint8_t *p)
++{
++  uint64_t value = 0;
++  for (int i = 7; i >= 0; --i) value = (value << 8) | p[i];
++  return value;
++}
++
++inline uint32_t crc32(const uint8_t *data, size_t bytes)
++{
++  uint32_t crc = 0xffffffffU;
++  for (size_t i = 0; i < bytes; ++i) {
++    crc ^= data[i];
++    for (unsigned bit = 0; bit < 8; ++bit)
++      crc = (crc >> 1) ^ (0xedb88320U & (0U - (crc & 1U)));
++  }
++  return ~crc;
++}
++
++inline uint64_t crc64Init()
++{
++  return UINT64_MAX;
++}
++
++inline uint64_t crc64Update(uint64_t crc, const uint8_t *data, size_t bytes)
++{
++  for (size_t i = 0; i < bytes; ++i) {
++    crc ^= data[i];
++    for (unsigned bit = 0; bit < 8; ++bit)
++      crc = (crc >> 1) ^ (0xc96c5795d7870f42ULL & (0ULL - (crc & 1ULL)));
++  }
++  return crc;
++}
++
++inline uint64_t crc64Finish(uint64_t crc)
++{
++  return ~crc;
++}
++
++inline uint64_t crc64(const uint8_t *data, size_t bytes)
++{
++  return crc64Finish(crc64Update(crc64Init(), data, bytes));
++}
++
++inline bool allZero(const uint8_t *data, size_t bytes)
++{
++  if (!data) return false;
++  for (size_t i = 0; i < bytes; ++i)
++    if (data[i]) return false;
++  return true;
++}
++
++inline uint8_t atomicLoadByte(const uint8_t *p, int acquire)
++{
++#if defined(_MSC_VER)
++  (void) acquire;
++  return *const_cast<volatile const uint8_t *>(p);
++#else
++  return __atomic_load_n(p, acquire);
++#endif
++}
++
++inline void atomicStoreByte(uint8_t *p, uint8_t value, int release)
++{
++#if defined(_MSC_VER)
++  (void) release;
++  *const_cast<volatile uint8_t *>(p) = value;
++#else
++  __atomic_store_n(p, value, release);
++#endif
++}
++
++inline uint8_t atomicOrByte(uint8_t *p, uint8_t value, int release)
++{
++#if defined(_MSC_VER)
++  (void) release;
++  return uint8_t(_InterlockedOr8(reinterpret_cast<volatile char *>(p), value));
++#else
++  return __atomic_fetch_or(p, value, release);
++#endif
++}
++
++inline bool lockWord(volatile uint32_t *word)
++{
++#if defined(_MSC_VER)
++  return _InterlockedCompareExchange(reinterpret_cast<volatile long *>(word), 1, 0) == 0;
++#else
++  uint32_t expected = 0;
++  return __atomic_compare_exchange_n(
++      const_cast<uint32_t *>(word), &expected, 1, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
++#endif
++}
++
++inline void unlockWord(volatile uint32_t *word)
++{
++#if defined(_MSC_VER)
++  _InterlockedExchange(reinterpret_cast<volatile long *>(word), 0);
++#else
++  __atomic_store_n(const_cast<uint32_t *>(word), 0, __ATOMIC_RELEASE);
++#endif
++}
++
++inline void lockWordWait(volatile uint32_t *word)
++{
++  while (!lockWord(word)) {
++#if defined(_MSC_VER)
++    _mm_pause();
++#endif
++  }
++}
++
++inline bool checkedAdd(uint64_t a, uint64_t b, uint64_t *out)
++{
++  if (!out || a > UINT64_MAX - b) return false;
++  *out = a + b;
++  return true;
++}
++
++inline bool checkedMul(uint64_t a, uint64_t b, uint64_t *out)
++{
++  if (!out || (a && b > UINT64_MAX / a)) return false;
++  *out = a * b;
++  return true;
++}
++
++inline bool bitmapBlocksFor(uint64_t pages, uint64_t *blocks)
++{
++  if (!blocks || !pages) return false;
++  *blocks = 1 + (pages - 1) / (kBlock * 8ULL);
++  return true;
++}
++
++inline bool checksumBlocksFor(uint64_t pages, uint64_t *blocks)
++{
++  if (!blocks || !pages) return false;
++  uint64_t bytes = 0;
++  if (!checkedMul(pages, 4, &bytes)) return false;
++  *blocks = 1 + (bytes - 1) / kBlock;
++  return true;
++}
++
++inline bool snapshotBlocksFor(uint64_t pages, uint64_t *blocks)
++{
++  uint64_t bitmap = 0, checksums = 0, total = 0;
++  if (!bitmapBlocksFor(pages, &bitmap) ||
++      !checksumBlocksFor(pages, &checksums) ||
++      !checkedAdd(kSnapshotHeaderBlocks, bitmap, &total) ||
++      !checkedAdd(total, checksums, &total)) {
++    return false;
++  }
++  *blocks = total;
++  return true;
++}
++
++struct Layout {
++  uint64_t snapshotBlocks = 0;
++  uint64_t snapshotStartA = 0;
++  uint64_t snapshotStartB = 0;
++  uint64_t baseStart = 0;
++  uint64_t baseBlocks = 0;
++  uint64_t walStart = 0;
++  uint64_t walBlocks = 0;
++  uint64_t windowBlocks = 0;
++};
++
++inline bool layoutFor(uint64_t pages, uint64_t walBlocks, Layout *layout)
++{
++  if (!layout || !pages || !walBlocks ||
++      walBlocks % kTransactionBlocks != 0) return false;
++  uint64_t snapshotEach = 0, snapshotsTotal = 0, baseStart = 0;
++  uint64_t walStart = 0, window = 0;
++  if (!snapshotBlocksFor(pages, &snapshotEach) ||
++      !checkedMul(snapshotEach, 2, &snapshotsTotal) ||
++      !checkedAdd(kRootSlots, snapshotsTotal, &baseStart) ||
++      !checkedAdd(baseStart, pages, &walStart) ||
++      !checkedAdd(walStart, walBlocks, &window)) {
++    return false;
++  }
++  layout->snapshotBlocks = snapshotEach;
++  layout->snapshotStartA = kRootSlots;
++  layout->snapshotStartB = kRootSlots + snapshotEach;
++  layout->baseStart = baseStart;
++  layout->baseBlocks = pages;
++  layout->walStart = walStart;
++  layout->walBlocks = walBlocks;
++  layout->windowBlocks = window;
++  return true;
++}
++
++// Stage 0B-2B-2A fixtures and any explicitly created WAL-only v2 image keep
++// their original geometry. They are readable, but do not claim checkpoint
++// safety and are not silently upgraded.
++inline bool legacyLayoutFor(uint64_t pages, uint64_t walBlocks, Layout *layout)
++{
++  if (!layout || !pages || !walBlocks ||
++      walBlocks % kTransactionBlocks != 0) return false;
++  uint64_t snapshotEach = 0, snapshotsTotal = 0, walStart = 0, window = 0;
++  if (!snapshotBlocksFor(pages, &snapshotEach) ||
++      !checkedMul(snapshotEach, 2, &snapshotsTotal) ||
++      !checkedAdd(kRootSlots, snapshotsTotal, &walStart) ||
++      !checkedAdd(walStart, walBlocks, &window)) {
++    return false;
++  }
++  layout->snapshotBlocks = snapshotEach;
++  layout->snapshotStartA = kRootSlots;
++  layout->snapshotStartB = kRootSlots + snapshotEach;
++  layout->baseStart = 0;
++  layout->baseBlocks = 0;
++  layout->walStart = walStart;
++  layout->walBlocks = walBlocks;
++  layout->windowBlocks = window;
++  return true;
++}
++
++struct Root {
++  uint32_t flags = kRootFlagsNoCheckpoint;
++  uint32_t snapshotBank = 0;
++  uint64_t baseSequence = 0;
++  uint64_t checkpointGeneration = 0;
++  uint64_t walStart = 0;
++  uint64_t walBlocks = 0;
++  uint64_t pages = 0;
++  uint64_t snapshotSequence = 0;
++  uint64_t snapshotBlocks = 0;
++  uint64_t baseStart = 0;
++  uint64_t baseBlocks = 0;
++  uint64_t walHeadSlot = 0;
++  uint64_t walHeadSequence = 0;
++  uint8_t seed[32] = {};
++};
++
++inline void encodeLegacyRoot(uint8_t block[kBlock], uint64_t pages,
++                             const uint8_t seed[32], uint64_t baseSequence,
++                             uint64_t walStart, uint64_t walBlocks)
++{
++  memset(block, 0, kBlock);
++  memcpy(block, "SHNGV2RT", 8);
++  put32(block + 8, kVersion);
++  put32(block + 12, kRootBytesLegacy);
++  put32(block + 16, kRootFlagsNoCheckpoint);
++  put32(block + 20, 0);
++  memcpy(block + 24, seed, 32);
++  put64(block + 56, pages);
++  put64(block + 64, baseSequence);
++  put64(block + 72, 0);
++  put64(block + 80, walStart);
++  put64(block + 88, walBlocks);
++  put64(block + 96, kPagesPerTransaction);
++  put64(block + 104, kTransactionBlocks);
++  put64(block + 112, crc64(block, 112));
++}
++
++inline void encodeRoot(uint8_t block[kBlock], uint64_t pages,
++                       const uint8_t seed[32], uint64_t baseSequence,
++                       uint64_t checkpointGeneration, uint64_t walStart,
++                       uint64_t walBlocks, uint32_t snapshotBank,
++                       uint64_t snapshotBlocks, uint64_t baseStart,
++                       uint64_t baseBlocks, uint64_t walHeadSlot)
++{
++  memset(block, 0, kBlock);
++  memcpy(block, "SHNGV2RT", 8);
++  put32(block + 8, kVersion);
++  put32(block + 12, kRootBytesCheckpoint);
++  put32(block + 16, kRootFlagsCheckpoint);
++  put32(block + 20, snapshotBank + 1);
++  memcpy(block + 24, seed, 32);
++  put64(block + 56, pages);
++  put64(block + 64, baseSequence);
++  put64(block + 72, checkpointGeneration);
++  put64(block + 80, walStart);
++  put64(block + 88, walBlocks);
++  put64(block + 96, kPagesPerTransaction);
++  put64(block + 104, kTransactionBlocks);
++  put64(block + 112, crc64(block, 112));
++  put32(block + 120, snapshotBank);
++  put64(block + 128, baseSequence);
++  put64(block + 136, snapshotBlocks);
++  put64(block + 144, baseStart);
++  put64(block + 152, baseBlocks);
++  put64(block + 160, walHeadSlot);
++  put64(block + 168, baseSequence + 1);
++  put64(block + 176, checkpointGeneration);
++  put64(block + 200, crc64(block, 200));
++}
++
++inline void encodeRoot(uint8_t block[kBlock], uint64_t pages,
++                       const uint8_t seed[32], uint64_t baseSequence,
++                       uint64_t walStart, uint64_t walBlocks)
++{
++  encodeLegacyRoot(block, pages, seed, baseSequence, walStart, walBlocks);
++}
++
++inline bool decodeRoot(const uint8_t block[kBlock], uint64_t pages,
++                       const uint8_t seed[32], Root *root)
++{
++  if (!root || memcmp(block, "SHNGV2RT", 8) ||
++      get32(block + 8) != kVersion ||
++      get64(block + 96) != kPagesPerTransaction ||
++      get64(block + 104) != kTransactionBlocks ||
++      get64(block + 112) != crc64(block, 112)) {
++    return false;
++  }
++  const uint32_t bytes = get32(block + 12);
++  const uint32_t flags = get32(block + 16);
++  Root candidate;
++  candidate.flags = flags;
++  candidate.pages = get64(block + 56);
++  candidate.baseSequence = get64(block + 64);
++  candidate.walStart = get64(block + 80);
++  candidate.walBlocks = get64(block + 88);
++  memcpy(candidate.seed, block + 24, 32);
++  if (candidate.pages != pages || memcmp(candidate.seed, seed, 32) ||
++      !candidate.baseSequence || candidate.baseSequence == UINT64_MAX ||
++      !candidate.walBlocks || candidate.walBlocks % kTransactionBlocks) {
++    return false;
++  }
++  if (flags == kRootFlagsNoCheckpoint && bytes == kRootBytesLegacy &&
++      get32(block + 20) == 0 && get64(block + 72) == 0 &&
++      allZero(block + 120, kBlock - 120)) {
++    candidate.checkpointGeneration = candidate.baseSequence;
++    candidate.walHeadSlot = 0;
++    candidate.walHeadSequence = candidate.baseSequence + 1;
++    *root = candidate;
++    return true;
++  }
++  if (flags != kRootFlagsCheckpoint || bytes != kRootBytesCheckpoint ||
++      get32(block + 120) > kSnapshotBankB ||
++      get32(block + 20) != get32(block + 120) + 1 ||
++      get64(block + 128) != candidate.baseSequence ||
++      get64(block + 168) != candidate.baseSequence + 1 ||
++      get64(block + 176) != get64(block + 72) ||
++      get64(block + 200) != crc64(block, 200) ||
++      !allZero(block + 184, 16) ||
++      !allZero(block + 208, kBlock - 208)) {
++    return false;
++  }
++  candidate.snapshotBank = get32(block + 120);
++  candidate.snapshotSequence = get64(block + 128);
++  candidate.snapshotBlocks = get64(block + 136);
++  candidate.baseStart = get64(block + 144);
++  candidate.baseBlocks = get64(block + 152);
++  candidate.walHeadSlot = get64(block + 160);
++  candidate.walHeadSequence = get64(block + 168);
++  candidate.checkpointGeneration = get64(block + 72);
++  if (!candidate.checkpointGeneration ||
++      candidate.checkpointGeneration == UINT64_MAX ||
++      candidate.snapshotSequence != candidate.baseSequence ||
++      !candidate.snapshotBlocks || !candidate.baseBlocks) {
++    return false;
++  }
++  *root = candidate;
++  return true;
++}
++
++inline bool isRootMagic(const uint8_t block[kBlock])
++{
++  return memcmp(block, "SHNGV2RT", 8) == 0;
++}
++
++struct Entry {
++  uint64_t page = 0;
++  uint64_t dataBlock = 0;
++  uint64_t sequence = 0;
++  uint32_t checksum = 0;
++  uint8_t active = 0;
++  uint8_t reserved[3] = {};
++};
++
++enum class OpenResult {
++  Failed,
++  Initialized,
++  Recovered,
++  ReadOnly
++};
++
++struct Wal {
++  uint64_t pages = 0;
++  uint64_t walStart = 0;
++  uint64_t walBlocks = 0;
++  uint64_t baseSequence = 0;
++  uint64_t lastSequence = 0;
++  uint64_t nextSequence = 0;
++  uint64_t slotCount = 0;
++  uint64_t nextSlot = 0;
++  uint64_t walHeadSlot = 0;
++  uint64_t walHeadSequence = 0;
++  uint64_t present = 0;
++  uint64_t checkpointGeneration = 0;
++  uint32_t checkpointBank = 0;
++  Layout layout;
++  uint8_t *bitmap = nullptr;
++  Entry *entries = nullptr;
++  uint32_t entryCapacity = 0;
++  bool active = false;
++  bool readOnly = true;
++  bool inconsistent = false;
++  bool checkpointCapable = false;
++  bool recoveredCommittedTail = false;
++  bool stoppedAtUncommittedTail = false;
++  bool spaceExhausted = false;
++  bool checkpointFailed = false;
++  uint32_t lastFault = 0;
++  mutable volatile uint32_t operationLock = 0;
++
++  void fail()
++  {
++    lastFault = 0xff;
++    active = false;
++    readOnly = true;
++    inconsistent = true;
++  }
++
++  static uint64_t entryHash(uint64_t page, uint32_t capacity)
++  {
++    return (page * 11400714819323198485ULL) % capacity;
++  }
++
++  bool indexRebuild()
++  {
++    if (!entries || !entryCapacity) return false;
++    memset(entries, 0, size_t(entryCapacity) * sizeof(*entries));
++    return true;
++  }
++
++  bool entryFind(uint64_t page, Entry **found, uint32_t *insertAt) const
++  {
++    if (!entries || !entryCapacity) return false;
++    uint32_t at = uint32_t(entryHash(page, entryCapacity));
++    for (uint32_t probes = 0; probes < entryCapacity; ++probes) {
++      Entry *entry = &entries[at];
++      if (!atomicLoadByte(&entry->active, kAtomicAcquire)) {
++        if (found) *found = nullptr;
++        if (insertAt) *insertAt = at;
++        return true;
++      }
++      if (entry->page == page) {
++        if (found) *found = entry;
++        if (insertAt) *insertAt = at;
++        return true;
++      }
++      if (++at == entryCapacity) at = 0;
++    }
++    return false;
++  }
++
++  bool entryPublish(uint64_t page, uint64_t dataBlock, uint64_t sequence,
++                    uint32_t checksum, bool *added)
++  {
++    Entry *entry = nullptr;
++    uint32_t at = 0;
++    if (!entryFind(page, &entry, &at)) return false;
++    if (!entry) {
++      entry = &entries[at];
++      if (added) *added = true;
++    } else if (added) {
++      *added = false;
++    }
++    entry->page = page;
++    entry->dataBlock = dataBlock;
++    entry->sequence = sequence;
++    entry->checksum = checksum;
++    atomicStoreByte(&entry->active, 1, kAtomicRelease);
++    return true;
++  }
++
++  bool entryCanAccept(uint64_t index, uint32_t count) const
++  {
++    if (!entries || !entryCapacity) return false;
++    uint32_t needed = 0;
++    for (uint32_t i = 0; i < count; ++i) {
++      Entry *found = nullptr;
++      if (!entryFind(index + i, &found, nullptr)) return false;
++      if (found) continue;
++      bool duplicate = false;
++      for (uint32_t j = 0; j < i; ++j)
++        if (index + i == index + j) duplicate = true;
++      if (!duplicate) ++needed;
++    }
++    uint32_t used = 0;
++    for (uint32_t i = 0; i < entryCapacity; ++i)
++      if (atomicLoadByte(&entries[i].active, kAtomicAcquire)) ++used;
++    return needed <= entryCapacity - used;
++  }
++
++  bool rawHas(uint64_t index) const
++  {
++    return index < pages && bitmap &&
++           ((atomicLoadByte(&bitmap[index >> 3], kAtomicAcquire) >>
++             (index & 7)) & 1U);
++  }
++
++  bool has(uint64_t index) const
++  {
++    return rawHas(index);
++  }
++
++  uint64_t snapshotStart(uint32_t bank) const
++  {
++    return bank == kSnapshotBankA ? layout.snapshotStartA : layout.snapshotStartB;
++  }
++
++  uint64_t checksumStart(uint32_t bank) const
++  {
++    uint64_t bitmapCount = 0;
++    uint64_t start = snapshotStart(bank);
++    if (!bitmapBlocksFor(pages, &bitmapCount) ||
++        !checkedAdd(start, kSnapshotHeaderBlocks, &start) ||
++        !checkedAdd(start, bitmapCount, &start)) {
++      return UINT64_MAX;
++    }
++    return start;
++  }
++
++  template <class Ops>
++  bool readPageUnlocked(Ops &ops, uint64_t index, void *dst) const
++  {
++    if (!active || index >= pages || !dst) return false;
++    uint8_t block[kBlock];
++    Entry *entry = nullptr;
++    if (!entryFind(index, &entry, nullptr)) return false;
++    if (entry) {
++      if (!ops.read(entry->dataBlock, 1, block) ||
++          crc32(block, sizeof block) != entry->checksum) {
++        return false;
++      }
++    } else {
++      if (!checkpointCapable || !rawHas(index)) return false;
++      const uint64_t checksumBase = checksumStart(checkpointBank);
++      if (checksumBase == UINT64_MAX) return false;
++      const uint64_t byteOffset = index * 4;
++      uint64_t checksumBlock = 0;
++      if (!checkedAdd(checksumBase, byteOffset / kBlock, &checksumBlock) ||
++          !ops.read(checksumBlock, 1, block)) {
++        return false;
++      }
++      const uint32_t expected =
++          get32(block + (byteOffset % kBlock));
++      if (!ops.read(layout.baseStart + index, 1, block) ||
++          crc32(block, sizeof block) != expected) {
++        return false;
++      }
++    }
++    memcpy(dst, block, sizeof block);
++    return true;
++  }
++
++  template <class Ops>
++  bool readPage(Ops &ops, uint64_t index, void *dst) const
++  {
++    lockWordWait(&operationLock);
++    const bool ok = readPageUnlocked(ops, index, dst);
++    unlockWord(&operationLock);
++    return ok;
++  }
++
++  bool encodeSnapshotHeader(uint8_t header[kBlock], uint32_t bank,
++                            uint64_t snapshotSequence,
++                            uint64_t generation, uint64_t presentCount,
++                            uint64_t bitmapCrc, uint64_t checksumCrc)
++  {
++    uint64_t bitmapCount = 0, checksums = 0;
++    if (!bitmapBlocksFor(pages, &bitmapCount) ||
++        !checksumBlocksFor(pages, &checksums)) return false;
++    memset(header, 0, kBlock);
++    memcpy(header, "SHNGV2SN", 8);
++    put32(header + 8, kVersion);
++    put32(header + 12, 64);
++    put32(header + 16, bank);
++    put32(header + 20, 0);
++    memcpy(header + 24, seedCopy, 32);
++    put64(header + 56, pages);
++    put64(header + 64, snapshotSequence);
++    put64(header + 72, bitmapCount);
++    put64(header + 80, checksums);
++    put64(header + 88, presentCount);
++    put64(header + 96, bitmapCrc);
++    put64(header + 104, checksumCrc);
++    put64(header + 112, generation);
++    put64(header + 120, crc64(header, 120));
++    return true;
++  }
++
++  bool decodeSnapshotHeader(const uint8_t header[kBlock], uint32_t bank,
++                            uint64_t snapshotSequence,
++                            uint64_t generation, uint64_t *presentCount,
++                            uint64_t *bitmapCrc, uint64_t *checksumCrc)
++  {
++    uint64_t bitmapCount = 0, checksums = 0;
++    if (!presentCount || !bitmapCrc || !checksumCrc ||
++        !bitmapBlocksFor(pages, &bitmapCount) ||
++        !checksumBlocksFor(pages, &checksums) ||
++        memcmp(header, "SHNGV2SN", 8) ||
++        get32(header + 8) != kVersion ||
++        get32(header + 12) != 64 ||
++        get32(header + 16) != bank ||
++        get32(header + 20) != 0 ||
++        memcmp(header + 24, seedCopy, 32) ||
++        get64(header + 56) != pages ||
++        get64(header + 64) != snapshotSequence ||
++        get64(header + 72) != bitmapCount ||
++        get64(header + 80) != checksums ||
++        get64(header + 112) != generation ||
++        get64(header + 120) != crc64(header, 120) ||
++        !allZero(header + 128, kBlock - 128)) {
++      return false;
++    }
++    *presentCount = get64(header + 88);
++    *bitmapCrc = get64(header + 96);
++    *checksumCrc = get64(header + 104);
++    return *presentCount <= pages;
++  }
++
++  template <class Ops>
++  bool writeSnapshotUnlocked(Ops &ops, uint32_t bank, uint64_t sequence,
++                             uint64_t generation)
++  {
++    uint64_t bitmapCount = 0, checksumCount = 0;
++    if (!checkpointCapable || !bitmapBlocksFor(pages, &bitmapCount) ||
++        !checksumBlocksFor(pages, &checksumCount)) return false;
++    const uint64_t start = snapshotStart(bank);
++    const uint64_t bitmapStart = start + kSnapshotHeaderBlocks;
++    const uint64_t checksumBase = bitmapStart + bitmapCount;
++
++    uint64_t bitmapDigest = crc64Init();
++    for (uint64_t b = 0; b < bitmapCount; ++b) {
++      bitmapDigest = crc64Update(bitmapDigest, bitmap + b * kBlock, kBlock);
++      if (!ops.write(bitmapStart + b, 1, bitmap + b * kBlock)) return false;
++    }
++    const uint64_t bitmapCrc = crc64Finish(bitmapDigest);
++
++    uint64_t checksumDigest = crc64Init();
++    uint8_t image[kBlock], pageImage[kBlock];
++    for (uint64_t b = 0; b < checksumCount; ++b) {
++      memset(image, 0, sizeof image);
++      const uint64_t first = b * (kBlock / 4ULL);
++      const uint64_t end = first + kBlock / 4ULL < pages
++                               ? first + kBlock / 4ULL : pages;
++      for (uint64_t pageIndex = first; pageIndex < end; ++pageIndex) {
++        if (!rawHas(pageIndex)) continue;
++        if (!readPageUnlocked(ops, pageIndex, pageImage)) {
++          return false;
++        }
++        const uint32_t checksum = crc32(pageImage, kBlock);
++        put32(image + (pageIndex - first) * 4, checksum);
++      }
++      checksumDigest = crc64Update(checksumDigest, image, kBlock);
++      if (!ops.write(checksumBase + b, 1, image)) return false;
++    }
++    const uint64_t checksumCrc = crc64Finish(checksumDigest);
++
++    uint8_t header[kBlock];
++    if (!encodeSnapshotHeader(header, bank, sequence, generation, present,
++                              bitmapCrc, checksumCrc) ||
++        !ops.write(start, 1, header) ||
++        !ops.sync()) {
++      return false;
++    }
++    return true;
++  }
++
++  template <class Ops>
++  bool loadSnapshotUnlocked(Ops &ops, uint32_t bank, uint64_t sequence,
++                            uint64_t generation)
++  {
++    uint64_t bitmapCount = 0, checksumCount = 0, headerPresent = 0;
++    uint64_t bitmapExpected = 0, checksumExpected = 0;
++    if (!checkpointCapable || !bitmapBlocksFor(pages, &bitmapCount) ||
++        !checksumBlocksFor(pages, &checksumCount)) return false;
++    const uint64_t start = snapshotStart(bank);
++    const uint64_t bitmapStart = start + kSnapshotHeaderBlocks;
++    const uint64_t checksumBase = bitmapStart + bitmapCount;
++    uint8_t block[kBlock];
++    if (!ops.read(start, 1, block) ||
++        !decodeSnapshotHeader(block, bank, sequence, generation,
++                              &headerPresent, &bitmapExpected,
++                              &checksumExpected)) {
++      return false;
++    }
++
++    uint64_t bitmapDigest = crc64Init();
++    uint64_t presentCount = 0;
++    for (uint64_t b = 0; b < bitmapCount; ++b) {
++      if (!ops.read(bitmapStart + b, 1, bitmap + b * kBlock)) return false;
++      bitmapDigest = crc64Update(bitmapDigest, bitmap + b * kBlock, kBlock);
++    }
++    if (crc64Finish(bitmapDigest) != bitmapExpected) return false;
++    for (uint64_t pageIndex = 0; pageIndex < pages; ++pageIndex)
++      if (rawHas(pageIndex)) ++presentCount;
++    if (presentCount != headerPresent) return false;
++    for (uint64_t i = pages; i < bitmapCount * kBlock * 8ULL; ++i)
++      if (rawHas(i)) return false;
++
++    uint64_t checksumDigest = crc64Init();
++    for (uint64_t b = 0; b < checksumCount; ++b) {
++      if (!ops.read(checksumBase + b, 1, block)) return false;
++      checksumDigest = crc64Update(checksumDigest, block, kBlock);
++    }
++    if (crc64Finish(checksumDigest) != checksumExpected) return false;
++    present = presentCount;
++    return true;
++  }
++
++  template <class Ops>
++  bool verifyEffectiveUnlocked(Ops &ops)
++  {
++    uint8_t page[kBlock];
++    for (uint64_t index = 0; index < pages; ++index) {
++      if (!rawHas(index)) continue;
++      if (!readPageUnlocked(ops, index, page)) return false;
++    }
++    return true;
++  }
++
++  template <class Ops>
++  bool clearWalUnlocked(Ops &ops)
++  {
++    uint8_t zero[kBlock] = {};
++    // A one-block source cannot be mistaken for a larger contiguous transfer.
++    // The UFS StoreOps layer may coalesce safe runs above this interface.
++    for (uint64_t blockIndex = 0; blockIndex < walBlocks; ++blockIndex)
++      if (!ops.write(walStart + blockIndex, 1, zero)) return false;
++    return ops.sync();
++  }
++
++  template <class Ops>
++  bool checkpointUnlocked(Ops &ops)
++  {
++    if (!active || readOnly || inconsistent || checkpointFailed ||
++        !checkpointCapable || checkpointGeneration == UINT64_MAX ||
++        lastSequence < baseSequence) {
++      return false;
++    }
++    if (lastSequence == baseSequence) return ops.sync();
++
++    uint8_t page[kBlock];
++    for (uint64_t i = 0; i < pages; ++i) {
++      if (!rawHas(i)) continue;
++      if (!readPageUnlocked(ops, i, page) ||
++          !ops.write(layout.baseStart + i, 1, page)) {
++        checkpointFailed = true;
++        fail();
++        return false;
++      }
++    }
++    if (!ops.sync()) {
++      checkpointFailed = true;
++      fail();
++      return false;
++    }
++
++    const uint32_t newBank = checkpointBank == kSnapshotBankA
++                                 ? kSnapshotBankB : kSnapshotBankA;
++    const uint64_t newGeneration = checkpointGeneration + 1;
++    if (!writeSnapshotUnlocked(ops, newBank, lastSequence, newGeneration)) {
++      checkpointFailed = true;
++      fail();
++      return false;
++    }
++
++    uint8_t rootA[kBlock], rootB[kBlock];
++    encodeRoot(rootA, pages, seedCopy, lastSequence, newGeneration,
++               walStart, walBlocks, newBank, layout.snapshotBlocks,
++               layout.baseStart, layout.baseBlocks, 0);
++    encodeRoot(rootB, pages, seedCopy, lastSequence, newGeneration,
++               walStart, walBlocks, newBank, layout.snapshotBlocks,
++               layout.baseStart, layout.baseBlocks, 0);
++    if (!ops.write(kRootSlotB, 1, rootB) || !ops.sync() ||
++        !ops.write(kRootSlotA, 1, rootA) || !ops.sync()) {
++      checkpointFailed = true;
++      fail();
++      return false;
++    }
++
++    checkpointBank = newBank;
++    checkpointGeneration = newGeneration;
++    baseSequence = lastSequence;
++    walHeadSlot = 0;
++    walHeadSequence = baseSequence + 1;
++    spaceExhausted = false;
++    if (!clearWalUnlocked(ops) || !indexRebuild()) {
++      checkpointFailed = true;
++      fail();
++      return false;
++    }
++    nextSlot = 0;
++    nextSequence = baseSequence + 1;
++    recoveredCommittedTail = false;
++    stoppedAtUncommittedTail = false;
++    return true;
++  }
++
++  template <class Ops>
++  bool checkpoint(Ops &ops)
++  {
++    if (!active || readOnly || inconsistent || !checkpointCapable) return false;
++    lockWordWait(&operationLock);
++    const bool ok = checkpointUnlocked(ops);
++    unlockWord(&operationLock);
++    return ok;
++  }
++
++  template <class Ops>
++  bool appendTransactionUnlocked(Ops &ops, uint64_t index, uint32_t count,
++                                 const void *data, uint32_t kind)
++  {
++    if (!readOnly && active && !inconsistent && nextSlot >= slotCount) {
++      spaceExhausted = true;
++      if (!checkpointUnlocked(ops)) {
++        lastFault = 1;
++        fail();
++        return false;
++      }
++    }
++    if (readOnly || !active || inconsistent ||
++        lastSequence >= UINT64_MAX - 1 ||
++        (kind == kTransactionKindNormal &&
++         (!count || count > kPagesPerTransaction || index >= pages ||
++          count > pages - index || !data ||
++          !entryCanAccept(index, count))) ||
++        (kind == kTransactionKindReset && count != 0)) {
++      lastFault = 2;
++      return false;
++    }
++    if (nextSlot >= slotCount) {
++      spaceExhausted = true;
++      lastFault = 3;
++      return false;
++    }
++
++    uint64_t slotOffset = 0, slotStart = 0;
++    if (!checkedMul(nextSlot, kTransactionBlocks, &slotOffset) ||
++        !checkedAdd(walStart, slotOffset, &slotStart)) {
++      fail();
++      lastFault = 4;
++      return false;
++    }
++
++    uint8_t begin[kBlock], commit[kBlock];
++    memset(begin, 0, sizeof begin);
++    memset(commit, 0, sizeof commit);
++    memcpy(begin, "SHNGV2JB", 8);
++    put32(begin + 8, kVersion);
++    put32(begin + 12, kBeginBytes);
++    put64(begin + 16, nextSequence);
++    put64(begin + 24, lastSequence);
++    memcpy(begin + 32, seedCopy, 32);
++    put64(begin + 64, pages);
++    put32(begin + 72, count);
++    put32(begin + 76, kind);
++    put32(begin + 80, uint32_t(nextSlot));
++
++    const uint8_t *bytes = static_cast<const uint8_t *>(data);
++    if (kind == kTransactionKindNormal) {
++      for (uint32_t i = 0; i < count; ++i) {
++        uint8_t *descriptor = begin + 128 + i * 24;
++        put64(descriptor, index + i);
++        put32(descriptor + 8, i + 1);
++        put32(descriptor + 12, crc32(bytes + size_t(i) * kBlock, kBlock));
++      }
++    }
++    put64(begin + 320, crc64(begin, 320));
++
++    if (!ops.write(slotStart, 1, begin) ||
++        (count && !ops.write(slotStart + 1, count, data)) ||
++        !ops.sync()) {
++      fail();
++      lastFault = 5;
++      return false;
++    }
++
++    const uint64_t beginCrc = get64(begin + 320);
++    uint64_t digestState = crc64Update(crc64Init(), begin, sizeof begin);
++    for (uint32_t i = 0; i < count; ++i)
++      digestState = crc64Update(digestState, bytes + size_t(i) * kBlock, kBlock);
++    const uint64_t digest = crc64Finish(digestState);
++    for (uint32_t copy = 0; copy < 2; ++copy) {
++      uint8_t *record = commit + copy * kCommitCopyOffset;
++      memcpy(record, "SHNGV2JC", 8);
++      put32(record + 8, kVersion);
++      put64(record + 16, nextSequence);
++      put64(record + 24, beginCrc);
++      put64(record + 32, digest);
++      put32(record + 40, uint32_t(nextSlot));
++      put32(record + 44, kind);
++      put64(record + 48, crc64(record, 48));
++    }
++    if (!ops.write(slotStart + 1 + kPagesPerTransaction, 1, commit) ||
++        !ops.sync()) {
++      fail();
++      lastFault = 6;
++      return false;
++    }
++
++    if (kind == kTransactionKindReset) {
++      memset(bitmap, 0, size_t(bitmapBlocksForValue()) * kBlock);
++      if (!indexRebuild()) {
++        fail();
++        lastFault = 7;
++        return false;
++      }
++      present = 0;
++    } else {
++      for (uint32_t i = 0; i < count; ++i) {
++        bool added = false;
++        if (!entryPublish(index + i, slotStart + 1 + i, nextSequence,
++                          crc32(bytes + size_t(i) * kBlock, kBlock), &added)) {
++          fail();
++          lastFault = 8;
++          return false;
++        }
++        if (added && !rawHas(index + i)) ++present;
++        atomicOrByte(&bitmap[(index + i) >> 3],
++                     uint8_t(1U << ((index + i) & 7)), kAtomicRelease);
++      }
++    }
++    ++nextSlot;
++    lastSequence = nextSequence++;
++    return true;
++  }
++
++  template <class Ops>
++  bool writeChunk(Ops &ops, uint64_t index, uint32_t count, const void *data)
++  {
++    return appendTransactionUnlocked(ops, index, count, data,
++                                     kTransactionKindNormal);
++  }
++
++  template <class Ops>
++  bool writePages(Ops &ops, uint64_t index, uint32_t count, const void *data)
++  {
++    if (!count || index >= pages || count > pages - index) return false;
++    while (count) {
++      lockWordWait(&operationLock);
++      const uint32_t chunk =
++          count > kPagesPerTransaction ? kPagesPerTransaction : count;
++      const bool ok = writeChunk(ops, index, chunk, data);
++      unlockWord(&operationLock);
++      if (!ok) return false;
++      index += chunk;
++      count -= chunk;
++      data = static_cast<const uint8_t *>(data) + size_t(chunk) * kBlock;
++    }
++    return true;
++  }
++
++  template <class Ops>
++  bool resetTransaction(Ops &ops)
++  {
++    if (!active || readOnly || inconsistent) return false;
++    lockWordWait(&operationLock);
++    if (!checkpointCapable) {
++      unlockWord(&operationLock);
++      fail();
++      return false;
++    }
++    bool ok = appendTransactionUnlocked(ops, 0, 0, nullptr,
++                                        kTransactionKindReset);
++    if (ok) ok = checkpointUnlocked(ops);
++    unlockWord(&operationLock);
++    if (!ok) fail();
++    return ok;
++  }
++
++  template <class Ops>
++  bool initializeCheckpointStore(Ops &ops, uint64_t pageCount,
++                                 const uint8_t seed[32], bool ro,
++                                 uint8_t *bits, Entry *table,
++                                 uint32_t tableCapacity,
++                                 uint64_t requestedWalBlocks)
++  {
++    if (ro || !bits || !table || !tableCapacity ||
++        !layoutFor(pageCount, requestedWalBlocks, &layout)) {
++      fail();
++      return false;
++    }
++    pages = pageCount;
++    bitmap = bits;
++    entries = table;
++    entryCapacity = tableCapacity;
++    walStart = layout.walStart;
++    walBlocks = layout.walBlocks;
++    slotCount = walBlocks / kTransactionBlocks;
++    checkpointCapable = true;
++    readOnly = false;
++    active = true;
++    inconsistent = false;
++    present = 0;
++    memset(bitmap, 0, size_t(bitmapBlocksForValue()) * kBlock);
++    if (!indexRebuild()) {
++      fail();
++      return false;
++    }
++    memcpy(seedCopy, seed, 32);
++    checkpointBank = kSnapshotBankA;
++    checkpointGeneration = 1;
++    baseSequence = lastSequence = 1;
++    nextSequence = 2;
++    walHeadSlot = 0;
++    walHeadSequence = 2;
++    if (!writeSnapshotUnlocked(ops, checkpointBank, baseSequence,
++                               checkpointGeneration)) {
++      fail();
++      return false;
++    }
++    uint8_t rootA[kBlock], rootB[kBlock];
++    encodeRoot(rootA, pages, seedCopy, baseSequence, checkpointGeneration,
++               walStart, walBlocks, checkpointBank, layout.snapshotBlocks,
++               layout.baseStart, layout.baseBlocks, walHeadSlot);
++    encodeRoot(rootB, pages, seedCopy, baseSequence, checkpointGeneration,
++               walStart, walBlocks, checkpointBank, layout.snapshotBlocks,
++               layout.baseStart, layout.baseBlocks, walHeadSlot);
++    if (!ops.write(kRootSlotB, 1, rootB) || !ops.sync() ||
++        !ops.write(kRootSlotA, 1, rootA) || !ops.sync() ||
++        !clearWalUnlocked(ops)) {
++      fail();
++      return false;
++    }
++    return true;
++  }
++
++  template <class Ops>
++  bool readRoots(Ops &ops, uint64_t pageCount, const uint8_t seed[32],
++                 bool ro, uint8_t *bits, Entry *table, uint32_t tableCapacity,
++                 uint64_t requestedWalBlocks, bool reset, bool initialize)
++  {
++    pages = pageCount;
++    bitmap = bits;
++    entries = table;
++    entryCapacity = tableCapacity;
++    active = false;
++    readOnly = ro;
++    inconsistent = false;
++    checkpointCapable = false;
++    checkpointFailed = false;
++    present = 0;
++    lastSequence = baseSequence = 0;
++    nextSlot = walHeadSlot = 0;
++    recoveredCommittedTail = false;
++    stoppedAtUncommittedTail = false;
++    spaceExhausted = false;
++    if (initialize) {
++      if (!initializeCheckpointStore(ops, pageCount, seed, ro, bits, table,
++                                     tableCapacity, requestedWalBlocks)) {
++        return false;
++      }
++      if (reset) return true;
++      fail();
++      return false;
++    }
++    if (!pages || !bitmap || !entries || !entryCapacity ||
++        !requestedWalBlocks) {
++      fail();
++      return false;
++    }
++
++    uint8_t rootBlockA[kBlock], rootBlockB[kBlock];
++    if (!ops.read(kRootSlotA, 1, rootBlockA) ||
++        !ops.read(kRootSlotB, 1, rootBlockB)) {
++      fail();
++      return false;
++    }
++    Root rootA, rootB;
++    const bool validA = decodeRoot(rootBlockA, pages, seed, &rootA);
++    const bool validB = decodeRoot(rootBlockB, pages, seed, &rootB);
++    if (!validA && !validB) {
++      fail();
++      return false;
++    }
++    if (validA && validB &&
++        rootA.checkpointGeneration == rootB.checkpointGeneration &&
++        (rootA.flags != rootB.flags ||
++         rootA.snapshotBank != rootB.snapshotBank ||
++         rootA.baseSequence != rootB.baseSequence ||
++         rootA.walStart != rootB.walStart ||
++         rootA.walBlocks != rootB.walBlocks ||
++         rootA.walHeadSlot != rootB.walHeadSlot)) {
++      fail();
++      return false;
++    }
++    const Root &root =
++        validB && (!validA ||
++                   rootB.checkpointGeneration > rootA.checkpointGeneration)
++            ? rootB : rootA;
++    checkpointCapable = root.flags == kRootFlagsCheckpoint;
++    const bool layoutOk = checkpointCapable
++                              ? layoutFor(pages, requestedWalBlocks, &layout)
++                              : legacyLayoutFor(pages, requestedWalBlocks, &layout);
++    if (!layoutOk || root.walStart != layout.walStart ||
++        root.walBlocks != layout.walBlocks) {
++      fail();
++      return false;
++    }
++    if (checkpointCapable &&
++        (root.snapshotBlocks != layout.snapshotBlocks ||
++         root.baseStart != layout.baseStart ||
++         root.baseBlocks != layout.baseBlocks ||
++         root.walHeadSlot >= slotCountFor(root.walBlocks))) {
++      fail();
++      return false;
++    }
++
++    walStart = root.walStart;
++    walBlocks = root.walBlocks;
++    slotCount = walBlocks / kTransactionBlocks;
++    checkpointBank = root.snapshotBank;
++    checkpointGeneration = root.checkpointGeneration;
++    baseSequence = lastSequence = root.baseSequence;
++    walHeadSlot = root.walHeadSlot;
++    walHeadSequence = root.walHeadSequence;
++    memcpy(seedCopy, seed, 32);
++    if (!indexRebuild()) {
++      fail();
++      return false;
++    }
++    if (checkpointCapable) {
++      active = true;
++      if (!loadSnapshotUnlocked(ops, checkpointBank, root.snapshotSequence,
++                                checkpointGeneration)) {
++        fail();
++        return false;
++      }
++    } else {
++      present = 0;
++      memset(bitmap, 0, size_t(bitmapBlocksForValue()) * kBlock);
++    }
++
++    uint8_t begin[kBlock], commit[kBlock], pageData[kBlock];
++    uint64_t scanned = 0;
++    for (; scanned < slotCount; ++scanned) {
++      const uint64_t slot = (walHeadSlot + scanned) % slotCount;
++      const uint64_t slotOffset = slot * kTransactionBlocks;
++      const uint64_t slotStart = walStart + slotOffset;
++      if (!ops.read(slotStart, 1, begin)) {
++        fail();
++        return false;
++      }
++      if (allZero(begin, sizeof begin)) {
++        nextSlot = slot;
++        stoppedAtUncommittedTail = true;
++        break;
++      }
++      if (memcmp(begin, "SHNGV2JB", 8) ||
++          get32(begin + 8) != kVersion ||
++          get32(begin + 12) != kBeginBytes ||
++          get64(begin + 64) != pages ||
++          memcmp(begin + 32, seed, 32) ||
++          get64(begin + 320) != crc64(begin, 320)) {
++        if (scanned == 0 || get64(begin + 16) <= baseSequence) {
++          nextSlot = slot;
++          stoppedAtUncommittedTail = true;
++          break;
++        }
++        fail();
++        return false;
++      }
++      const uint64_t sequence = get64(begin + 16);
++      const uint32_t count = get32(begin + 72);
++      const uint32_t kind = get32(begin + 76);
++      if (sequence <= baseSequence) {
++        nextSlot = slot;
++        stoppedAtUncommittedTail = true;
++        break;
++      }
++      if (lastSequence == UINT64_MAX || sequence != lastSequence + 1 ||
++          get64(begin + 24) != lastSequence ||
++          get32(begin + 80) != uint32_t(slot) ||
++          !allZero(begin + 84, 44) ||
++          !allZero(begin + 328, kBlock - 328) ||
++          (kind == kTransactionKindNormal &&
++           (count < 1 || count > kPagesPerTransaction)) ||
++          (kind == kTransactionKindReset && count != 0) ||
++          (kind != kTransactionKindNormal &&
++           kind != kTransactionKindReset)) {
++        fail();
++        return false;
++      }
++      if (kind == kTransactionKindNormal &&
++          (!allZero(begin + 128 + size_t(count) * 24,
++                    size_t(kPagesPerTransaction - count) * 24))) {
++        nextSlot = slot;
++        stoppedAtUncommittedTail = true;
++        break;
++      }
++      if (kind == kTransactionKindReset &&
++          !allZero(begin + 128, size_t(kPagesPerTransaction) * 24)) {
++        fail();
++        return false;
++      }
++
++      if (!ops.read(slotStart + 1 + kPagesPerTransaction, 1, commit)) {
++        fail();
++        return false;
++      }
++      uint8_t firstRecord[64], secondRecord[64];
++      memcpy(firstRecord, commit, sizeof firstRecord);
++      memcpy(secondRecord, commit + kCommitCopyOffset, sizeof secondRecord);
++      const bool firstValid =
++          !memcmp(firstRecord, "SHNGV2JC", 8) &&
++          get32(firstRecord + 8) == kVersion &&
++          get64(firstRecord + 16) == sequence &&
++          get64(firstRecord + 24) == get64(begin + 320) &&
++          get32(firstRecord + 40) == uint32_t(slot) &&
++          get32(firstRecord + 44) == kind &&
++          get64(firstRecord + 48) == crc64(firstRecord, 48);
++      const bool secondValid =
++          !memcmp(secondRecord, "SHNGV2JC", 8) &&
++          get32(secondRecord + 8) == kVersion &&
++          get64(secondRecord + 16) == sequence &&
++          get64(secondRecord + 24) == get64(begin + 320) &&
++          get32(secondRecord + 40) == uint32_t(slot) &&
++          get32(secondRecord + 44) == kind &&
++          get64(secondRecord + 48) == crc64(secondRecord, 48);
++      if (!firstValid || !secondValid ||
++          memcmp(firstRecord, secondRecord, 56) ||
++          !allZero(commit + 56, kCommitCopyOffset - 56) ||
++          !allZero(commit + kCommitCopyOffset + 56,
++                   kCommitCopyOffset - 56)) {
++        nextSlot = slot;
++        stoppedAtUncommittedTail = true;
++        break;
++      }
++
++      uint64_t digestState = crc64Update(crc64Init(), begin, sizeof begin);
++      if (kind == kTransactionKindReset) {
++        memset(bitmap, 0, size_t(bitmapBlocksForValue()) * kBlock);
++        if (!indexRebuild()) {
++          fail();
++          return false;
++        }
++        present = 0;
++      } else {
++        uint32_t processed = 0;
++        for (; processed < count; ++processed) {
++          const uint8_t *descriptor = begin + 128 + processed * 24;
++          const uint64_t logical = get64(descriptor);
++          bool duplicate = false;
++          for (uint32_t previous = 0; previous < processed; ++previous)
++            if (get64(begin + 128 + previous * 24) == logical)
++              duplicate = true;
++          if (logical >= pages || duplicate ||
++              get32(descriptor + 8) != processed + 1 ||
++              !allZero(descriptor + 16, 8) ||
++              !ops.read(slotStart + 1 + processed, 1, pageData)) {
++            nextSlot = slot;
++            stoppedAtUncommittedTail = true;
++            break;
++          }
++          const uint32_t checksum = crc32(pageData, sizeof pageData);
++          if (checksum != get32(descriptor + 12)) {
++            nextSlot = slot;
++            stoppedAtUncommittedTail = true;
++            break;
++          }
++          digestState =
++              crc64Update(digestState, pageData, sizeof pageData);
++        }
++        if (processed != count) break;
++        if (crc64Finish(digestState) != get64(firstRecord + 32)) {
++          nextSlot = slot;
++          stoppedAtUncommittedTail = true;
++          break;
++        }
++        for (uint32_t processedAgain = 0; processedAgain < count;
++             ++processedAgain) {
++          const uint8_t *descriptor =
++              begin + 128 + processedAgain * 24;
++          bool added = false;
++          if (!entryPublish(get64(descriptor),
++                            slotStart + 1 + processedAgain, sequence,
++                            get32(descriptor + 12), &added)) {
++            fail();
++            return false;
++          }
++          if (added && !rawHas(get64(descriptor))) ++present;
++          atomicOrByte(&bitmap[get64(descriptor) >> 3],
++                       uint8_t(1U << (get64(descriptor) & 7)),
++                       kAtomicRelease);
++        }
++      }
++      lastSequence = sequence;
++      recoveredCommittedTail = true;
++    }
++    if (scanned == slotCount) {
++      nextSlot = walHeadSlot;
++      spaceExhausted = true;
++    }
++    if (!verifyEffectiveUnlocked(ops)) {
++      fail();
++      return false;
++    }
++    if (lastSequence >= UINT64_MAX - 1) {
++      fail();
++      return false;
++    }
++    nextSequence = lastSequence + 1;
++    active = true;
++    readOnly = ro;
++    if (reset) {
++      if (!checkpointCapable || !resetTransaction(ops)) {
++        fail();
++        return false;
++      }
++    }
++    return true;
++  }
++
++  template <class Ops, class Load>
++  bool forEachPresent(Ops &ops, Load &load, uint8_t *scratch, uint32_t maxRun)
++  {
++    if (!active || !scratch || !maxRun) return false;
++    for (uint64_t i = 0; i < pages; ++i) {
++      if (!has(i)) continue;
++      if (!readPage(ops, i, scratch)) return false;
++      if (!load(i, scratch)) return false;
++    }
++    return true;
++  }
++
++  uint64_t bitmapBlocksForValue() const
++  {
++    uint64_t blocks = 0;
++    return bitmapBlocksFor(pages, &blocks) ? blocks : 0;
++  }
++
++  static uint64_t slotCountFor(uint64_t blocks)
++  {
++    return blocks / kTransactionBlocks;
++  }
++
++  uint8_t seedCopy[32] = {};
++};
++
++inline uint64_t bitmapBlocks(uint64_t pages)
++{
++  uint64_t value = 0;
++  return bitmapBlocksFor(pages, &value) ? value : 0;
++}
++
++inline bool windowBlocksFor(uint64_t pages, uint64_t walBlocks, uint64_t *blocks)
++{
++  Layout layout;
++  if (!blocks || !layoutFor(pages, walBlocks, &layout)) return false;
++  *blocks = layout.windowBlocks;
++  return true;
++}
++
++}  // namespace wal
++}  // namespace persist
+diff --git a/PersistState.h b/PersistState.h
+new file mode 100644
+--- /dev/null
++++ b/PersistState.h
+@@ -0,0 +1,139 @@
++// SPDX-License-Identifier: BSD-2-Clause-Patent
++#pragma once
++
++// Serializes the lifetime of a persistent Data store. The state is deny-by-default:
++// writes are allowed while a verified attachment is still in progress, or only after
++// the caller publishes a write-through/write-back role. Any authority epoch change or
++// store error permanently fails this attachment. A harmless failure before the store
++// was touched can abort back to Detached for one complete retry.
++
++#include <stdint.h>
++
++namespace persist {
++
++enum class StoreRole : uint32_t {
++  Detached = 0,
++  Attaching = 1,
++  ReadOnly = 2,
++  WriteThrough = 3,
++  WriteBack = 4,
++  Failed = 5
++};
++
++enum class StoreFault : uint32_t {
++  None = 0,
++  AttachRejected = 1,
++  AuthorityChanged = 2,
++  AuthorityRejected = 3,
++  StoreWrite = 4,
++  StoreSync = 5,
++  OverlayReset = 6,
++  OverlayFlush = 7,
++  InvalidState = 8
++};
++
++class StoreState {
++  uint32_t stateValue = static_cast<uint32_t>(StoreRole::Detached);
++  uint32_t expectedEpoch = 0;
++  uint32_t faultValue = static_cast<uint32_t>(StoreFault::None);
++  uint32_t attachGeneration = 0;
++  uint64_t failureCount = 0;
++
++public:
++  StoreRole role() const
++  {
++    return static_cast<StoreRole>(__atomic_load_n(&stateValue, __ATOMIC_ACQUIRE));
++  }
++
++  StoreFault fault() const
++  {
++    return static_cast<StoreFault>(__atomic_load_n(&faultValue, __ATOMIC_ACQUIRE));
++  }
++
++  uint32_t expected() const { return __atomic_load_n(&expectedEpoch, __ATOMIC_ACQUIRE); }
++  uint32_t generation() const { return __atomic_load_n(&attachGeneration, __ATOMIC_ACQUIRE); }
++  uint64_t failures() const { return __atomic_load_n(&failureCount, __ATOMIC_ACQUIRE); }
++
++  bool isFailed() const { return role() == StoreRole::Failed; }
++  bool isAttaching() const { return role() == StoreRole::Attaching; }
++  bool isReadOnly() const { return role() == StoreRole::ReadOnly; }
++  bool isWritable() const
++  {
++    const StoreRole value = role();
++    return value == StoreRole::WriteThrough || value == StoreRole::WriteBack;
++  }
++  bool isAttached() const
++  {
++    const StoreRole value = role();
++    return value == StoreRole::ReadOnly || value == StoreRole::WriteThrough || value == StoreRole::WriteBack;
++  }
++  bool canBeginAttach() const { return role() == StoreRole::Detached; }
++
++  bool beginAttach(uint32_t authorityEpoch)
++  {
++    if (!authorityEpoch) return false;
++    uint32_t expected = static_cast<uint32_t>(StoreRole::Detached);
++    if (!__atomic_compare_exchange_n(&stateValue, &expected, static_cast<uint32_t>(StoreRole::Attaching),
++                                     false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return false;
++    __atomic_store_n(&expectedEpoch, authorityEpoch, __ATOMIC_RELEASE);
++    __atomic_store_n(&faultValue, static_cast<uint32_t>(StoreFault::None), __ATOMIC_RELEASE);
++    __atomic_add_fetch(&attachGeneration, 1, __ATOMIC_ACQ_REL);
++    return true;
++  }
++
++  // Only valid before open() has performed any store I/O.
++  bool abortAttach()
++  {
++    uint32_t expected = static_cast<uint32_t>(StoreRole::Attaching);
++    return __atomic_compare_exchange_n(&stateValue, &expected, static_cast<uint32_t>(StoreRole::Detached),
++                                       false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
++  }
++
++  bool commitReadOnly()
++  {
++    uint32_t expected = static_cast<uint32_t>(StoreRole::Attaching);
++    return __atomic_compare_exchange_n(&stateValue, &expected, static_cast<uint32_t>(StoreRole::ReadOnly),
++                                       false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
++  }
++
++  bool commitWritable(bool writeBack)
++  {
++    const StoreRole target = writeBack ? StoreRole::WriteBack : StoreRole::WriteThrough;
++    uint32_t expected = static_cast<uint32_t>(StoreRole::Attaching);
++    return __atomic_compare_exchange_n(&stateValue, &expected, static_cast<uint32_t>(target),
++                                       false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
++  }
++
++  // The attachment may perform its reset writes before writable state is published,
++  // but every such operation is still bound to the epoch verified at beginAttach().
++  bool authorizes(uint32_t currentEpoch) const
++  {
++    const StoreRole value = role();
++    return currentEpoch && expected() == currentEpoch &&
++           (value == StoreRole::Attaching || value == StoreRole::WriteThrough || value == StoreRole::WriteBack);
++  }
++
++  bool authorityStable(uint32_t currentEpoch) const
++  {
++    const StoreRole value = role();
++    return currentEpoch && expected() == currentEpoch &&
++           (value == StoreRole::Attaching || value == StoreRole::ReadOnly ||
++            value == StoreRole::WriteThrough || value == StoreRole::WriteBack);
++  }
++
++  bool fail(StoreFault reason)
++  {
++    for (;;) {
++      uint32_t current = __atomic_load_n(&stateValue, __ATOMIC_ACQUIRE);
++      if (current == static_cast<uint32_t>(StoreRole::Failed)) return false;
++      if (__atomic_compare_exchange_n(&stateValue, &current, static_cast<uint32_t>(StoreRole::Failed),
++                                      false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
++        __atomic_store_n(&faultValue, static_cast<uint32_t>(reason), __ATOMIC_RELEASE);
++        __atomic_add_fetch(&failureCount, 1, __ATOMIC_ACQ_REL);
++        return true;
++      }
++    }
++  }
++};
++
++}  // namespace persist
