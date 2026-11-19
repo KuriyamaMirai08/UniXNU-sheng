@@ -6,6 +6,14 @@ name: Stage 0C-1B production ARM64 compile
 # error summaries and relocatable-object size/hash records.
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Stage 0C-1B mode: patched (default) or the baseline attribution run'
+        type: choice
+        options:
+          - patched
+          - baseline
+        default: patched
 
 permissions:
   contents: read
@@ -77,11 +85,13 @@ jobs:
           echo /opt/homebrew/opt/lld/bin >> "$GITHUB_PATH"
           echo /opt/homebrew/opt/bison/bin >> "$GITHUB_PATH"
           rustup toolchain install 1.98.0 --profile minimal --component rust-src
-      - name: Compile the patched production sources
+      - name: Compile the production sources
         env:
           # The pinned public-header fetcher sends this contents-read token
           # only to GitHub hosts; anonymous hosted-runner requests hit HTTP 403.
           GITHUB_TOKEN: ${{ github.token }}
+          # patched = the reviewed storage changes; baseline = untouched pins
+          STAGE0C1B_MODE: ${{ inputs.mode }}
         run: python3 -B scripts/repro/run-stage0c1b.py
       - name: Upload compile evidence (logs, hashes, object sizes only)
         if: always()
