@@ -21,6 +21,28 @@ OPTIONAL = {
     'ufsWriteAuthorityInflight': 'uint64_t',
 }
 
+def sdk_flags():
+    """Resolve the real macOS SDK so the C/C++ standard headers are found.
+
+    UfsWriteAuthority.h has no includes of its own: it relies on its consumer
+    for <stdint.h>/<string.h>, the headers NativeUfs.cpp brings in first. The
+    strict diagnostic run must therefore compile with the active SDK instead of
+    bare Apple clang, which ships no libc or libc++ headers by itself.
+    """
+    try:
+        sdk = subprocess.run(['xcrun', '--sdk', 'macosx', '--show-sdk-path'],
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    path = sdk.stdout.strip()
+    if sdk.returncode or not path or not Path(path).is_dir():
+        return []
+    flags = ['-isysroot', path]
+    cxx = Path(path) / 'usr/include/c++/v1'
+    if cxx.is_dir():
+        flags += ['-isystem', str(cxx)]
+    return flags
+
 # Direct consumers in the reviewed NativeUfs.cpp and RootCommands.h. Taking
 # their addresses marks those entry points used without calling fake hardware.
 # Deliberately omit OPTIONAL so its original static declarations fail.
@@ -66,6 +88,8 @@ def main():
     version = subprocess.run([args.compiler, '--version'], capture_output=True,
                              text=True, check=True).stdout
     print(version, end='')
+    standards = sdk_flags()
+    print(json.dumps(dict(case='sdk_probe', compiler=args.compiler, flags=standards)))
 
     with tempfile.TemporaryDirectory(prefix='stage0c1b-authority-') as directory:
         scratch = Path(directory)
@@ -81,7 +105,7 @@ def main():
             header_text = (scratch / 'UfsWriteAuthority.h').read_text(encoding='utf-8')
 
         source = scratch / 'consumers.cpp'
-        source.write_text('#include <cstdint>\n#include <cstring>\n'
+        source.write_text('#include <stdint.h>\n#include <string.h>\n'
                           '#include "UfsWriteAuthority.h"\n'
                           'void stage0c1b_authority_consumers ()\n{\n' +
                           ''.join('  (void)&' + name + ';\n' for name in CONSUMERS) +
@@ -91,7 +115,7 @@ def main():
             (scratch / 'UfsWriteAuthority.h').write_text(contents, encoding='utf-8')
             command = [args.compiler, '-x', 'c++', '-std=gnu++2b',
                        '-Wall', '-Wextra', '-Werror', '-Wunused-function',
-                       '-fsyntax-only', str(source)]
+                       *standards, '-fsyntax-only', str(source)]
             result = subprocess.run(command, capture_output=True, text=True)
             output = result.stdout + result.stderr
             found = {helper for helper in OPTIONAL
