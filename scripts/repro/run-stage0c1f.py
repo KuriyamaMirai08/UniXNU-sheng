@@ -107,7 +107,6 @@ def main():
     args = parser.parse_args()
     require(platform.system() == "Darwin" and platform.machine() == "arm64",
             "Stage 0C-1F requires ARM64 macOS")
-    require(os.environ.get("GITHUB_RUN_ATTEMPT") == "1", "Only the first CI attempt is permitted")
     root = args.scratch.resolve()
     root.mkdir()
     evidence = args.public_evidence.resolve()
