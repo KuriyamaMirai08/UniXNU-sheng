@@ -87,6 +87,10 @@ def collect_object_evidence(tree, evidence, sources):
                 row['object'] = str(candidate)
                 row['object_bytes'] = candidate.stat().st_size
                 row['object_sha256'] = sha256(candidate)
+                try:
+                    row['object_segments'] = macho_segment_bytes(candidate)
+                except Exception as error:
+                    row['object_segments_error'] = str(error)
                 break
         log = storage / (stem + '.log')
         if log.is_file():
@@ -143,6 +147,30 @@ def probe_prelink_layout(fw, evidence):
     return result.returncode
 
 
+def macho_segment_bytes(path):
+    """Sum section bytes per segment of a 64-bit little-endian Mach-O object."""
+    import struct
+    data = Path(path).read_bytes()
+    if len(data) < 32 or struct.unpack_from('<I', data, 0)[0] != 0xfeedfacf:
+        return None
+    commands = struct.unpack_from('<I', data, 16)[0]
+    at, segments = 32, {}
+    for _ in range(commands):
+        command, size = struct.unpack_from('<II', data, at)
+        if command == 0x19:
+            name = data[at + 8:at + 24].rstrip(b'\0').decode('ascii', 'replace')
+            parts = {}
+            for index in range(struct.unpack_from('<I', data, at + 64)[0]):
+                section = at + 72 + index * 80
+                section_name = data[section:section + 16].rstrip(b'\0').decode('ascii', 'replace')
+                parts[section_name] = parts.get(section_name, 0) + struct.unpack_from('<Q', data, section + 40)[0]
+            segments[name] = dict(total=sum(parts.values()), sections=parts)
+        if size < 8:
+            return None
+        at += size
+    return segments
+
+
 def finalize_evidence(tree, evidence, sources, states):
     """Collect completed objects and compiler errors even when the build failed."""
     result = collect_object_evidence(tree, evidence, sources)
@@ -166,6 +194,9 @@ def main():
     os.environ['PYTHONPATH'] = str(Path(__file__).parent.resolve())
     os.environ['PYTHONUNBUFFERED'] = '1'
     os.environ['RUSTUP_TOOLCHAIN'] = '1.98.0'
+    mode = os.environ.get('STAGE0C1B_MODE', 'patched')
+    if mode not in ('patched', 'baseline'):
+        raise RuntimeError('Unknown STAGE0C1B_MODE: ' + mode)
     states = []
     sources = {}
     tree = root / 'out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree'
@@ -223,7 +254,13 @@ def main():
         step('environment', ['bash', '-c',
              'sw_vers; uname -a; sysctl -n hw.memsize hw.ncpu; xcodebuild -version; '
              'xcrun clang --version; xcrun --sdk iphoneos --show-sdk-version; '
-             'ld -v; rustc +1.98.0 --version'])
+             'xcrun --sdk macosx --show-sdk-version; xcrun --sdk macosx --show-sdk-path; '
+             'ld -v; rustc +1.98.0 --version; '
+             '/opt/homebrew/opt/llvm/bin/clang --version; '
+             '/opt/homebrew/opt/lld/bin/ld64.lld --version; '
+             'which -a clang clang++ ld ld64.lld; '
+             'shasum -a 256 $(xcrun --find clang) $(xcrun --find ld) '
+             '/opt/homebrew/opt/llvm/bin/clang /opt/homebrew/opt/lld/bin/ld64.lld 2>/dev/null || true'])
         if shutil.disk_usage(root).free < 12 * 1024 ** 3:
             raise RuntimeError('Less than 12 GiB free before source fetch')
         for key in list(os.environ):
@@ -250,9 +287,15 @@ def main():
         device = root / 'device'
         fw = root / 'UniXNU'
         configure_source_paths(device, fw, evidence)
-        apply_patch(device / 'drivers/ShengUfs', PATCHES / 'shenguFs.patch', 'device/drivers/ShengUfs')
-        apply_patch(fw / 'drivers/RamBlock', PATCHES / 'ramblock.patch', 'framework/drivers/RamBlock')
-        apply_patch(device, PATCHES / 'bootlog.patch', 'device package/BootLog.c')
+        (evidence / 'stage0c1b-mode.json').write_text(json.dumps(
+            dict(mode=mode, patches_applied=mode != 'baseline'), indent=2) + '\n')
+        if mode == 'baseline':
+            print('STAGE0C1B baseline mode: the Stage 0A..0B-3B patches are NOT applied',
+                  flush=True)
+        else:
+            apply_patch(device / 'drivers/ShengUfs', PATCHES / 'shenguFs.patch', 'device/drivers/ShengUfs')
+            apply_patch(fw / 'drivers/RamBlock', PATCHES / 'ramblock.patch', 'framework/drivers/RamBlock')
+            apply_patch(device, PATCHES / 'bootlog.patch', 'device package/BootLog.c')
         # Record the content actually being compiled.
         sources = {
             'NativeUfs.cpp': device / 'drivers/ShengUfs/NativeUfs.cpp',
