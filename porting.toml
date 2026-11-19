@@ -269,6 +269,11 @@ command = "Git archive bdbf6dbda75d7055bc99df79de3674617be50cff; retained-input 
 revision = "bdbf6dbda75d7055bc99df79de3674617be50cff"
 result = "The exact archived implementation commit preserves the reviewed fixture bytes and passes all 12 tests. Actual unchanged-engine emission independently verifies 16 recovered imports, refuses the remaining five and preserves the original input hashes. No candidate kernel, boot image, full build or device operation was produced."
 
+[[area.evidence]]
+kind = "source"
+reference = ".github/workflows/sheng-stage0c1b-compile.yml"
+result = "Stage 0C-1B run 44316260394 attempt 19 used hosted macos-26 and Xcode 26.6, but stopped before target compilation while restoring public DriverKit headers: HTTP 403 rate limit exceeded. The isolated compile step now supplies the existing contents-read job token to the pinned host-restricted fetcher, retaining source tags and Git blob checks. Object/error evidence is collected after failed builds as well as successful ones. Production patches and strict checks remain unchanged; the next ARM64 compile result is pending."
+
 [[area]]
 id = "firmware"
 status = "implemented"

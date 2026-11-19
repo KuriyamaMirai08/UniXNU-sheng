@@ -76,6 +76,10 @@ jobs:
           echo /opt/homebrew/opt/bison/bin >> "$GITHUB_PATH"
           rustup toolchain install 1.98.0 --profile minimal --component rust-src
       - name: Compile the patched production sources
+        env:
+          # The pinned public-header fetcher sends this contents-read token
+          # only to GitHub hosts; anonymous hosted-runner requests hit HTTP 403.
+          GITHUB_TOKEN: ${{ github.token }}
         run: python3 -B scripts/repro/run-stage0c1b.py
       - name: Upload compile evidence (logs, hashes, object sizes only)
         if: always()

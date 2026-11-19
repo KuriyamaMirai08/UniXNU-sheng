@@ -15,6 +15,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -110,6 +111,17 @@ def collect_object_evidence(tree, evidence, sources):
     return result
 
 
+def finalize_evidence(tree, evidence, sources, states):
+    """Collect completed objects and compiler errors even when the build failed."""
+    result = collect_object_evidence(tree, evidence, sources)
+    result['stages'] = [dict(stage=row['stage'], status=row.get('status'),
+                             returncode=row.get('returncode')) for row in states]
+    result['kernel_stage_passed'] = any(
+        row['stage'] == 'kernel' and row.get('status') == 'passed' for row in states)
+    (Path(evidence) / 'stage0c1b-result.json').write_text(json.dumps(result, indent=2) + '\n')
+    return result
+
+
 def main():
     root = (Path(os.environ['RUNNER_TEMP']) / 'stage0c1b' /
             f"{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}" / 'current')
@@ -123,6 +135,8 @@ def main():
     os.environ['PYTHONUNBUFFERED'] = '1'
     os.environ['RUSTUP_TOOLCHAIN'] = '1.98.0'
     states = []
+    sources = {}
+    tree = root / 'out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree'
     deadline = time.monotonic() + 280 * 60
 
     def step(name, argv, cwd=root):
@@ -227,11 +241,17 @@ def main():
                            ('bluetooth-firmware', ['python3', 'scripts/stage-bluetooth-firmware.py',
                                                    '.cache/bt-stage', '--fetch'])]:
             step(name, args, device)
-        tree = root / 'out/sheng/ipados-27.0.1-24A446/sheng_ipados27/tree'
         step('kernel', ['python3', str(fw / 'unixnu'), 'build', 'kernel', '-D', str(device), *common])
-        result = collect_object_evidence(tree, evidence, sources)
-        (evidence / 'stage0c1b-result.json').write_text(json.dumps(result, indent=2) + '\n')
     finally:
+        build_failed = sys.exc_info()[0] is not None
+        collection_error = None
+        try:
+            finalize_evidence(tree, evidence, sources, states)
+        except Exception as error:
+            # Preserve the original build failure instead of replacing its
+            # traceback with a secondary evidence-collection exception.
+            collection_error = error
+            (evidence / 'evidence-collection-error.txt').write_text(str(error) + '\n')
         summary = root / 'evidence/stage0c1b-summary.json'
         if not summary.exists():
             (root / 'evidence/stage0c1b-summary.json').write_text(json.dumps(
@@ -239,6 +259,8 @@ def main():
                 indent=2) + '\n')
         with open(os.environ['GITHUB_ENV'], 'a') as stream:
             stream.write('STAGE0C1B_ROOT=' + str(root) + '\n')
+        if collection_error is not None and not build_failed:
+            raise collection_error
 
 
 if __name__ == '__main__':
