@@ -1,0 +1,95 @@
+name: Stage 0C-1B production ARM64 compile
+
+# Manual, evidence-only compile of the Stage 0A..0B-3B storage changes.
+# It never runs the release, never packs a boot image or payload, and never
+# touches a device. The single uploaded artifact is limited to compiler logs,
+# error summaries and relocatable-object size/hash records.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unixnu-sheng-stage0c1b-compile
+  cancel-in-progress: false
+
+jobs:
+  environment:
+    name: Toolchain identity (run 41 reference)
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Record toolchain and SDK identity
+        run: |
+          set -x
+          test -d "$DEVELOPER_DIR"
+          sw_vers
+          uname -a
+          sysctl -n hw.memsize hw.ncpu || true
+          xcodebuild -version
+          xcrun clang --version
+          xcrun --find clang
+          xcrun --find ld
+          xcrun --sdk iphoneos --show-sdk-path
+          xcrun --sdk iphoneos --show-sdk-version
+          ld -v || true
+          python3 --version
+      - name: Check the reviewed patch files are intact and parse
+        run: |
+          set -x
+          expect() { echo "$2  $1" | shasum -a 256 -c -; }
+          expect stage0c1b/patches/shenguFs.patch 31d8e5539e5e390785b871c09e380e117cdac7c06c867f230444a933818a1b2e
+          expect stage0c1b/patches/ramblock.patch 49e36f20899f7500e3c3a2cd4e64e0450c55f05b7a6e24edd84a3ef0a2bf857e
+          expect stage0c1b/patches/bootlog.patch  9db2391d1c1e347341911527e4fc1a3caf0fa43f72496bc20c42c6e3af4de896
+          git apply --numstat stage0c1b/patches/shenguFs.patch
+          git apply --numstat stage0c1b/patches/ramblock.patch
+          git apply --numstat stage0c1b/patches/bootlog.patch
+      - name: Check optional authority helpers with strict diagnostics
+        run: python3 -B scripts/repro/check-stage0c1b-authority-header.py --compiler "$(xcrun --find clang)"
+
+  compile:
+    name: Real ARM64 production compile
+    runs-on: macos-26
+    timeout-minutes: 330
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install the pinned build tools
+        run: |
+          test -d "$DEVELOPER_DIR"
+          brew install dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw
+          python3 -m venv "$RUNNER_TEMP/c1b-python"
+          "$RUNNER_TEMP/c1b-python/bin/pip" install cryptography
+          echo "$RUNNER_TEMP/c1b-python/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          echo /opt/homebrew/opt/llvm/bin >> "$GITHUB_PATH"
+          echo /opt/homebrew/opt/lld/bin >> "$GITHUB_PATH"
+          echo /opt/homebrew/opt/bison/bin >> "$GITHUB_PATH"
+          rustup toolchain install 1.98.0 --profile minimal --component rust-src
+      - name: Compile the patched production sources
+        env:
+          # The pinned public-header fetcher sends this contents-read token
+          # only to GitHub hosts; anonymous hosted-runner requests hit HTTP 403.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/repro/run-stage0c1b.py
+      - name: Upload compile evidence (logs, hashes, object sizes only)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: stage0c1b-compile-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/stage0c1b/*/current/evidence/
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 6
