@@ -45,12 +45,14 @@ jobs:
         run: |
           set -x
           expect() { echo "$2  $1" | shasum -a 256 -c -; }
-          expect stage0c1b/patches/shenguFs.patch 0fb8bf078fcfbd83b411252c7bfcfe528c1840a5401fc851331d0a86d753d1af
+          expect stage0c1b/patches/shenguFs.patch 31d8e5539e5e390785b871c09e380e117cdac7c06c867f230444a933818a1b2e
           expect stage0c1b/patches/ramblock.patch 49e36f20899f7500e3c3a2cd4e64e0450c55f05b7a6e24edd84a3ef0a2bf857e
           expect stage0c1b/patches/bootlog.patch  9db2391d1c1e347341911527e4fc1a3caf0fa43f72496bc20c42c6e3af4de896
           git apply --numstat stage0c1b/patches/shenguFs.patch
           git apply --numstat stage0c1b/patches/ramblock.patch
           git apply --numstat stage0c1b/patches/bootlog.patch
+      - name: Check optional authority helpers with strict diagnostics
+        run: python3 -B scripts/repro/check-stage0c1b-authority-header.py --compiler "$(xcrun --find clang)"
 
   compile:
     name: Real ARM64 production compile

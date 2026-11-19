@@ -1914,7 +1914,7 @@ new file mode 100644
 +  }
 +}
 +
-+static bool ufsWriteAuthorityHasPlatformLock (void)
++static inline bool ufsWriteAuthorityHasPlatformLock (void)
 +{
 +  return gUfsAuthorityLockOps.acquire != nullptr && gUfsAuthorityLockOps.release != nullptr;
 +}
@@ -1977,7 +1977,7 @@ new file mode 100644
 +// Test-only linearization probes. Production leaves the pointer null (a single predictable branch).
 +enum { UfsProbeAfterCheck = 1, UfsProbeAfterDoorbell = 2, UfsProbeSubmitted = 3, UfsProbeAfterRelease = 4 };
 +static void (*gUfsAuthorityProbe)(int) = nullptr;
-+static void ufsWriteAuthoritySetProbe (void (*probe)(int)) { gUfsAuthorityProbe = probe; }
++static inline void ufsWriteAuthoritySetProbe (void (*probe)(int)) { gUfsAuthorityProbe = probe; }
 +static void ufsAuthorityProbe (int point) { if (gUfsAuthorityProbe) gUfsAuthorityProbe (point); }
 +
 +static bool ufsWriteGuidNonzero (const uint8_t *guid)
@@ -2248,7 +2248,7 @@ new file mode 100644
 +  return true;
 +}
 +
-+static bool ufsWriteAuthorityAllows (UfsWriteRole role, uint8_t lun, uint64_t lba, uint32_t blocks)
++static inline bool ufsWriteAuthorityAllows (UfsWriteRole role, uint8_t lun, uint64_t lba, uint32_t blocks)
 +{
 +  ufsWriteAuthorityAcquire ();
 +  const bool ok = ufsWriteAuthorityAllowsLocked (role, lun, lba, blocks);
@@ -2282,7 +2282,7 @@ new file mode 100644
 +  ufsWriteAuthorityRelease ();
 +}
 +
-+static uint64_t ufsWriteAuthorityInflight (void)
++static inline uint64_t ufsWriteAuthorityInflight (void)
 +{
 +  ufsWriteAuthorityAcquire ();
 +  const uint64_t inflight = gUfsWriteAuthority.inflight;
