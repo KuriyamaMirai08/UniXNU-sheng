@@ -4,6 +4,7 @@ on:
   push:
     branches-ignore:
       - codex/stage0c1f-separate-data-20261119
+      - codex/stage0c1f-separate-data-r2-20261119
   pull_request:
 
 permissions:

@@ -2,6 +2,7 @@
 """Install digest-addressed ARM64 Tahoe bottles in the hosted runner keg paths."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import platform
 import shutil
@@ -49,23 +50,30 @@ def main():
     runner_temp.mkdir()
     evidence.parent.mkdir(exist_ok=True)
     records = {}
+    brew_env = dict(os.environ, HOMEBREW_NO_AUTO_UPDATE="1", HOMEBREW_NO_INSTALL_UPGRADE="1",
+                    HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK="1", HOMEBREW_NO_INSTALL_CLEANUP="1")
     for name, (bottle_sha, binary_pins) in BOTTLES.items():
-        archive = runner_temp / f"{name}.tar.gz"
+        archive = runner_temp / f"{name}--{VERSION}.arm64_tahoe.bottle.tar.gz"
         fetch(name, bottle_sha, archive)
         keg = PREFIX / "Cellar" / name / VERSION
         opt = PREFIX / "opt" / name
         if keg.exists() or (opt.exists() and not opt.is_symlink()):
             raise ValueError(f"Unexpected existing keg or opt directory for {name}")
-        # git and native build recipes use /opt/homebrew/opt/<name> regardless of PATH.
         with tarfile.open(archive) as source:
-            source.extractall(PREFIX / "Cellar", filter="tar")
-        for binary, expected in binary_pins.items():
-            if digest(keg / "bin" / binary) != expected:
-                raise ValueError(f"{binary} differs from the reviewed bottle bytes")
-        link = opt.with_name(f".{name}-stage0c1f")
-        link.symlink_to(keg, target_is_directory=True)
-        link.replace(opt)
-        records[name] = dict(bottle_sha256=bottle_sha, binary_sha256=binary_pins)
+            for binary, expected in binary_pins.items():
+                member = source.getmember(f"{name}/{VERSION}/bin/{binary}")
+                if not member.isfile():
+                    raise ValueError(f"Expected regular bottle member {member.name}")
+                with source.extractfile(member) as stream:
+                    if hashlib.file_digest(stream, "sha256").hexdigest() != expected:
+                        raise ValueError(f"{binary} differs from the reviewed bottle bytes")
+        # Runtime dependencies are installed by the workflow. Keep the second
+        # pour from resolving LLVM through the rolling formula registry.
+        subprocess.run([PREFIX / "bin/brew", "install", "--formula", "--ignore-dependencies", archive],
+                       env=brew_env, check=True)
+        if opt.resolve(strict=True) != keg.resolve(strict=True):
+            raise ValueError(f"{name} did not select the pinned keg")
+        records[name] = dict(bottle_sha256=bottle_sha, packaged_binary_sha256=binary_pins)
         archive.unlink()
     for name, paths in {"llvm": ("clang", "llvm-objcopy", "llvm-nm", "llvm-ar"),
                         "lld": ("ld64.lld", "ld.lld")}.items():
@@ -76,6 +84,17 @@ def main():
             if not any(VERSION == word for word in version.split()):
                 raise ValueError(f"Unexpected {program} version")
             records[name]["versions"][program] = dict(version=version, sha256=digest(executable))
+    expected_dependencies = [PREFIX / "opt/z3/lib/libz3.5.3.dylib",
+                             PREFIX / "opt/zstd/lib/libzstd.1.dylib"]
+    library = PREFIX / "opt/llvm/lib/libLLVM.23.1.dylib"
+    linkage = subprocess.check_output(["otool", "-L", library], text=True)
+    for path in expected_dependencies:
+        if str(path) not in linkage:
+            raise ValueError(f"LLVM runtime load command is missing {path}")
+    if "@@HOMEBREW_" in linkage:
+        raise ValueError("Homebrew did not resolve LLVM runtime paths")
+    records["llvm"]["libLLVM_sha256"] = digest(library)
+    records["llvm"]["runtime_dependency_sha256"] = {str(path): digest(path) for path in expected_dependencies}
     evidence.write_text(json.dumps(records, indent=2) + "\n", encoding="utf-8")
 
 
