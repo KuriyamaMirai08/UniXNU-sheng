@@ -11,6 +11,7 @@ summaries and relocatable-object size/hash records.
 """
 import hashlib
 import json
+import re
 import os
 import shutil
 import signal
@@ -109,6 +110,37 @@ def collect_object_evidence(tree, evidence, sources):
         shutil.copyfile(drivers, Path(evidence) / 'source-drivers-report.json')
         result['source_drivers_report'] = json.loads(drivers.read_text())
     return result
+
+
+def probe_prelink_layout(fw, evidence):
+    """Report the exact prelink text/data boundary the guard compares.
+
+    The production kit raises "Native code would collide with collection data"
+    without printing the two addresses. When the kernel log contains the real
+    emit_prelink.py invocation, replay its inputs through the read-only probe so
+    the evidence carries the exact overrun instead of an unexplained failure.
+    """
+    log = evidence / 'kernel.log'
+    if not log.is_file():
+        return None
+    line = next((row for row in log.read_text(errors='replace').splitlines()
+                 if 'emit_prelink.py' in row), None)
+    if line is None:
+        return None
+    kernel = re.search(r'--kernel\s+(\S+)', line)
+    prelinked = re.search(r'--prelinked\s+(\S+)', line)
+    if not kernel or not prelinked:
+        return None
+    command = [sys.executable, str(REPO / 'scripts/repro/prelink-layout-probe.py'),
+               '--kit', str(Path(fw) / 'kits/XnuPrelink'),
+               '--kernel', kernel.group(1), '--prelinked', prelinked.group(1),
+               '--output', str(evidence / 'prelink-layout-probe.json')]
+    for root in re.findall(r'--root\s+(\S+)', line):
+        command += ['--root', root]
+    result = subprocess.run(command, capture_output=True, text=True)
+    (evidence / 'prelink-layout-probe.log').write_text(
+        result.stdout + result.stderr)
+    return result.returncode
 
 
 def finalize_evidence(tree, evidence, sources, states):
@@ -252,6 +284,10 @@ def main():
             # traceback with a secondary evidence-collection exception.
             collection_error = error
             (evidence / 'evidence-collection-error.txt').write_text(str(error) + '\n')
+        try:
+            probe_prelink_layout(fw, evidence)
+        except Exception as error:
+            (evidence / 'prelink-layout-probe-error.txt').write_text(str(error) + '\n')
         summary = root / 'evidence/stage0c1b-summary.json'
         if not summary.exists():
             (root / 'evidence/stage0c1b-summary.json').write_text(json.dumps(
