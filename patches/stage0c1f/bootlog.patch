@@ -1,0 +1,14 @@
+diff --git a/package/BootLog.c b/package/BootLog.c
+--- a/package/BootLog.c
++++ b/package/BootLog.c
+@@ -1695,8 +1695,8 @@
+              native_swipe_stats[5] % 1000, native_swipe_stats[6] / 1000, native_swipe_stats[6] % 1000, native_swipe_stats[7] / 1000,
+              native_swipe_stats[7] % 1000);
+     at = put(out, at, cap, row, sizeof row);
+-    snprintf(row, sizeof row, "[swipe2] heavy=%u.%03us controlcenter..%u.%03us notification..%u.%03us apps..%u.%03us", native_swipe_stats[16] / 1000,
+-             native_swipe_stats[16] % 1000, native_swipe_stats[9] / 1000, native_swipe_stats[9] % 1000, native_swipe_stats[10] / 1000,
++    snprintf(row, sizeof row, "[swipe2] heavy=%u.%03us controlcenter..%u.%03us notification..%u.%03us apps..%u.%03us", native_swipe_stats[8] / 1000,
++             native_swipe_stats[8] % 1000, native_swipe_stats[9] / 1000, native_swipe_stats[9] % 1000, native_swipe_stats[10] / 1000,
+              native_swipe_stats[10] % 1000, native_swipe_stats[11] / 1000, native_swipe_stats[11] % 1000);
+     at = put(out, at, cap, row, sizeof row);
+   }

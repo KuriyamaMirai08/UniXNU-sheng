@@ -1,0 +1,2828 @@
+diff --git a/NativeUfs.cpp b/NativeUfs.cpp
+--- a/NativeUfs.cpp
++++ b/NativeUfs.cpp
+@@ -494,6 +494,12 @@
+   }
+ 
+   auto command = [&] (uint8_t lun, const uint8_t *cdb, unsigned cdbLength, bool toHost, uint32_t length) -> UfsResult {
++    // This legacy diagnostic/adoption path is read-only. A data-out SCSI
++    // command would be an unguarded media write, so reject it before touching
++    // the UTRD, command descriptor or doorbell.
++    if (!toHost && length) {
++      return { 0xf, 0xff, 0xff, 0, 0, 0 };
++    }
+     uint8_t *utrd = virt;
+     uint8_t *ucd = virt + ucdOffset;
+     zero32 (utrd, 32);
+@@ -996,6 +1002,8 @@
+ static uint64_t hostDmaAddress (const void *va);
+ #include "RootCommands.h"
+ 
++static uint64_t gLun0CapacityBlocks = 0;
++
+ // ---- Completion interrupt ------------------------------------------------------------------------------------------
+ // The controller's interrupt (GIC SPI 265, level) with only UTRCS enabled (IE bit 0), as in UFSHCI's legacy doorbell mode under Linux
+ // ufshcd. The handler clears UTRCS, then, like ufshcd's completion of the requests whose doorbell bits cleared, finds the outstanding
+@@ -1139,8 +1147,27 @@
+ // Bring the live controller up for reading: map, SMMU pass-through for the UFS stream, take over
+ // the request list, wake the device from UFS-PowerDown and wait for LUN 0 to be ready.
+ // `why` receives a short reason on failure.
++// ---- Write-authority lock -----------------------------------------------------------------------------------------
++// One IOLock serializes every authorization transition and the check -> WRITE doorbell window
++// (the storage of these runs in RootCommands.h). It is installed here, before any window can be
++// registered; until then the Sealed state denies every write. A panic context never blocks on it:
++// the write path uses the try-acquire route and fails closed when the lock is busy.
++static IOLock *gAuthorityLock = nullptr;
++static bool authorityLockTryAcquire (void *) { return gAuthorityLock ? IOLockTryLock (gAuthorityLock) : false; }
++static void authorityLockAcquire (void *) { if (gAuthorityLock) IOLockLock (gAuthorityLock); }
++static void authorityLockRelease (void *) { if (gAuthorityLock) IOLockUnlock (gAuthorityLock); }
++static void installAuthorityLock (void)
++{
++  if (!gAuthorityLock) gAuthorityLock = IOLockAlloc ();
++  if (gAuthorityLock) {
++    const UfsAuthorityLockOps ops = { &authorityLockTryAcquire, &authorityLockAcquire, &authorityLockRelease, nullptr };
++    ufsWriteAuthoritySetLock (&ops);
++  }
++}
++
+ static bool hostBringUp (const char **why)
+ {
++  installAuthorityLock ();
+   if (gHost.poisoned) {
+     *why = "transport quarantined";
+     return false;
+@@ -1378,20 +1405,32 @@
+     IOSleep (50);
+   }
+   gRootDiagnostic.stage = "LUN ready";
++  bool ready = false;
+   for (unsigned attempt = 0; attempt < 20; attempt++) {
+     uint8_t tur[6] = { 0, 0, 0, 0, 0, 0 };
+     uint32_t scsi = 0;
+     if (hostScsi (0, tur, 6, false, 0, 200000, &scsi) == kIOReturnSuccess) {
+-      gHost.ready = true;
+-      hostEnableInterrupt ();
+-      return true;
++      ready = true;
++      break;
+     }
+     if (gHost.poisoned) break;
+     IOSleep (10);
+   }
+-  gHost.ready = false;
+-  *why = "LUN 0 not ready";
+-  return false;
++  if (!ready) {
++    gHost.ready = false;
++    *why = "LUN 0 not ready";
++    return false;
++  }
++  gRootDiagnostic.stage = "LUN capacity";
++  if (hostReadCapacity10 (&gLun0CapacityBlocks) != kIOReturnSuccess) gLun0CapacityBlocks = 0;
++  if (gHost.poisoned) {
++    gHost.ready = false;
++    *why = "LUN capacity";
++    return false;
++  }
++  gHost.ready = true;
++  hostEnableInterrupt ();
++  return true;
+ }
+ }
+ 
+@@ -1405,6 +1444,36 @@
+ #include "RootWindowRead.h"
+ #include "RootPublication.h"
+ 
++}
++
++static bool validateRootWriteContract (const RootLayout *layout, const char **why)
++{
++  if (!layout || !gHost.ready || !gLun0CapacityBlocks) {
++    *why = "UFS capacity unavailable";
++    return false;
++  }
++  if (memcmp (layout->partitionTypeGuid, kUfsDarwinTypeGuid, 16)) {
++    *why = "darwin type contract mismatch";
++    return false;
++  }
++  if (layout->userdataLast >= gLun0CapacityBlocks ||
++      layout->gptBackupHeaderLba != gLun0CapacityBlocks - 1 ||
++      layout->gptBackupEntriesLba <= layout->userdataLast ||
++      layout->gptBackupEntriesLba >= layout->gptBackupHeaderLba) {
++    *why = "darwin/GPT/UFS capacity mismatch";
++    return false;
++  }
++  if (layout->imageBytes & 4095) {
++    *why = "root image alignment";
++    return false;
++  }
++  const uint64_t imageBlocks = layout->imageBytes / 4096;
++  constexpr uint64_t guardBlocks = 1024;
++  if (imageBlocks > layout->userdataBlocks || layout->userdataBlocks - imageBlocks < guardBlocks) {
++    *why = "root image and guard exceed darwin";
++    return false;
++  }
++  return true;
+ }
+ 
+ // ---- Persistent Data store window (data-persist) ----------------------------------------------------------
+@@ -1455,6 +1524,15 @@
+ 
+ extern "C" unsigned native_ufs_store_mode (void) { return storeMode (); }
+ 
++static bool checkedWriteLba (uint64_t base, uint64_t relative, uint32_t blocks, uint64_t *lba)
++{
++  if (!lba || !blocks || base > UINT32_MAX || relative > UINT32_MAX - base) return false;
++  const uint64_t absolute = base + relative;
++  if (blocks - 1 > UINT32_MAX - absolute) return false;
++  *lba = absolute;
++  return true;
++}
++
+ // Returns 1 and the first absolute 4096-byte LBA of the window, 0 on refusal (reason in *why, may be null).
+ extern "C" int native_ufs_store_open (uint64_t blocks, uint64_t *firstLba, const char **why)
+ {
+@@ -1523,7 +1601,9 @@
+   int ok = 1;
+   while (blocks) {
+     uint32_t chunk = blocks > kXferMax / 4096 ? static_cast<uint32_t> (kXferMax / 4096) : blocks;
+-    if (hostWrite4k (0, gStoreRegionFirst + rel, chunk, src, fua) != kIOReturnSuccess) { ok = 0; break; }
++    uint64_t lba = 0;
++    if (!checkedWriteLba (gStoreRegionFirst, rel, chunk, &lba) ||
++        hostWrite4k (UfsWriteRole::Data, 0, lba, chunk, src, fua) != kIOReturnSuccess) { ok = 0; break; }
+     src = static_cast<const uint8_t *> (src) + chunk * 4096ULL;
+     rel += chunk;
+     blocks -= chunk;
+@@ -1549,7 +1629,7 @@
+ {
+   if (storeMode () != 2 || !gStoreRegionBlocks) return 0;
+   const uint64_t t0 = mach_absolute_time ();
+-  const int ok = hostSyncCache () == kIOReturnSuccess;
++  const int ok = hostSyncCache (UfsWriteRole::Data) == kIOReturnSuccess;
+   storeAccount (&native_ufs_store_sync_ops, &native_ufs_store_sync_ticks, t0);
+   return ok;
+ }
+@@ -1685,12 +1765,13 @@
+   else {
+     uint64_t partition = gStoreGeometry.last - gStoreGeometry.first + 1;
+     uint64_t imageBlocks = (gStoreGeometry.imageBytes + 4095) / 4096;
+-    if (reserveBlocks () < kLogReserveBlocks + kExportBlocks) reason = "reserve too small for the log";
+-    else if (partition - reserveBlocks () < imageBlocks + 1024) reason = "overlaps the root image";
++    const uint64_t reserve = reserveBlocks ();
++    if (reserve < kLogReserveBlocks + kExportBlocks) reason = "reserve too small for the log";
++    else if (reserve >= partition || partition - reserve < imageBlocks + 1024) reason = "overlaps the root image";
+     else {
+       uint64_t first = gStoreGeometry.last + 1 - kLogReserveBlocks;
+       // One write window covers the export region and the log: [first - kExportBlocks, first + kLogReserveBlocks).
+-      if (!hostLogOpen (first - kExportBlocks, kExportBlocks + kLogReserveBlocks)) reason = "window refused";
++      if (!hostLogOpen (first - kExportBlocks, kExportBlocks, first, kLogReserveBlocks)) reason = "window refused";
+       else {
+         gLogRegionFirst = first;
+         gLogRegionBlocks = kLogReserveBlocks;
+@@ -1709,7 +1790,9 @@
+   if (!gLogRegionBlocks || !src || !blocks || rel >= gLogRegionBlocks || blocks > gLogRegionBlocks - rel) return 0;
+   while (blocks) {
+     uint32_t chunk = blocks > kDataMax / 4096 ? static_cast<uint32_t> (kDataMax / 4096) : blocks;
+-    if (hostWrite4k (0, gLogRegionFirst + rel, chunk, src) != kIOReturnSuccess) return 0;
++    uint64_t lba = 0;
++    if (!checkedWriteLba (gLogRegionFirst, rel, chunk, &lba) ||
++        hostWrite4k (gHostPanic ? UfsWriteRole::Panic : UfsWriteRole::Log, 0, lba, chunk, src) != kIOReturnSuccess) return 0;
+     src = static_cast<const uint8_t *> (src) + chunk * 4096ULL;
+     rel += chunk;
+     blocks -= chunk;
+@@ -1726,7 +1809,9 @@
+   const uint64_t base = gLogRegionFirst - kExportBlocks;
+   while (blocks) {
+     uint32_t chunk = blocks > kDataMax / 4096 ? static_cast<uint32_t> (kDataMax / 4096) : blocks;
+-    if (hostWrite4k (0, base + rel, chunk, src) != kIOReturnSuccess) return 0;
++    uint64_t lba = 0;
++    if (!checkedWriteLba (base, rel, chunk, &lba) ||
++        hostWrite4k (UfsWriteRole::Export, 0, lba, chunk, src) != kIOReturnSuccess) return 0;
+     src = static_cast<const uint8_t *> (src) + chunk * 4096ULL;
+     rel += chunk;
+     blocks -= chunk;
+@@ -1769,29 +1854,128 @@
+ 
+ extern "C" int native_ufs_log_sync (void)
+ {
+-  return gLogRegionBlocks && hostSyncCache () == kIOReturnSuccess;
++  return gLogRegionBlocks &&
++    hostSyncCache (gHostPanic ? UfsWriteRole::Panic : UfsWriteRole::Log) == kIOReturnSuccess;
+ }
+ 
+ // From a panic, before the log writes that keep its message: later host commands no longer wait on the host lock. 1 = the log is open.
+ extern "C" int native_ufs_log_panic (void)
+ {
+   gHostPanic = true;
+-  return gLogRegionBlocks != 0;
+-}
+-
+-// Re-read the GPT header and entry array and compare their CRCs with what was recorded at root start. 0 = unchanged.
++  return gLogRegionBlocks != 0 && ufsWriteAuthoritySnapshot ().state == UfsWriteState::Ready;
++}
++
++// Re-read both GPT copies and revoke every write role on any transport or content mismatch.
++// 0 = unchanged and still authorized.
+ extern "C" unsigned native_ufs_store_gpt_check (void)
+ {
+   if (!gStoreGeometry.valid || !gHost.ready) return 1;
+-  static uint8_t block[4096];
+-  if (hostRead4k (0, 1, 1, block) != kIOReturnSuccess) return 2;
+-  uint32_t headerBytes = le32 (block + 12);
+-  if (headerBytes < 92 || headerBytes > 4096 || rootCrc32 (block, headerBytes, true) != le32 (block + 16) ||
+-      le32 (block + 16) != gStoreGeometry.headerCrc) return 3;
+-  uint32_t blocks = (gStoreGeometry.entryCount * 128 + 4095) / 4096;
+-  static uint8_t entries[4096 * 4];
+-  if (blocks > 4 || hostRead4k (0, gStoreGeometry.entriesLba, blocks, entries) != kIOReturnSuccess) return 4;
+-  return rootCrc32 (entries, gStoreGeometry.entryCount * 128) == gStoreGeometry.entriesCrc ? 0 : 5;
++  // Compare the live GPT against one consistent authority snapshot; the epoch is re-read before any
++  // revocation so a transition that happened during our reads owns the outcome.
++  const UfsWriteAuthority auth = ufsWriteAuthoritySnapshot ();
++  if (auth.state != UfsWriteState::Ready) return 1;
++  static uint8_t primaryHeader[4096], backupHeader[4096];
++  static uint8_t primaryEntries[4096 * 4], backupEntries[4096 * 4];
++  if (hostRead4k (0, 1, 1, primaryHeader) != kIOReturnSuccess) {
++    hostWriteWindowsRevoke (true);
++    return 2;
++  }
++  const uint32_t headerBytes = le32 (primaryHeader + 12);
++  if (headerBytes < 92 || headerBytes > 4096 ||
++      rootCrc32 (primaryHeader, headerBytes, true) != le32 (primaryHeader + 16) ||
++      le32 (primaryHeader + 16) != gStoreGeometry.headerCrc ||
++      gStoreGeometry.entryCount == 0 || gStoreGeometry.entryCount > 128) {
++    hostWriteWindowsRevoke (false);
++    return 3;
++  }
++  const uint32_t blocks = (gStoreGeometry.entryCount * 128 + 4095) / 4096;
++  if (blocks > 4 || hostRead4k (0, gStoreGeometry.entriesLba, blocks, primaryEntries) != kIOReturnSuccess) {
++    hostWriteWindowsRevoke (true);
++    return 4;
++  }
++  if (rootCrc32 (primaryEntries, gStoreGeometry.entryCount * 128) != gStoreGeometry.entriesCrc) {
++    hostWriteWindowsRevoke (false);
++    return 5;
++  }
++  if (auth.matchedEntry >= gStoreGeometry.entryCount) {
++    hostWriteWindowsRevoke (false);
++    return 5;
++  }
++  const uint8_t *matched = primaryEntries + auth.matchedEntry * 128;
++  if (!rootEntryUsed (matched) || !rootNameIsDarwin (matched) ||
++      memcmp (matched, auth.typeGuid, 16) ||
++      memcmp (matched + 16, auth.partitionGuid, 16) ||
++      le64 (matched + 32) != auth.partitionFirst ||
++      le64 (matched + 40) != auth.partitionLast) {
++    hostWriteWindowsRevoke (false);
++    return 5;
++  }
++  if (hostRead4k (0, auth.backupHeaderLba, 1, backupHeader) != kIOReturnSuccess) {
++    hostWriteWindowsRevoke (true);
++    return 6;
++  }
++  const uint32_t backupHeaderBytes = le32 (backupHeader + 12);
++  if (backupHeaderBytes < 92 || backupHeaderBytes > 4096 ||
++      le64 (backupHeader + 24) != auth.backupHeaderLba ||
++      le64 (backupHeader + 32) != 1 ||
++      le32 (backupHeader + 80) != gStoreGeometry.entryCount ||
++      le32 (backupHeader + 84) != 128 ||
++      le32 (backupHeader + 88) != auth.backupEntriesCrc ||
++      memcmp (backupHeader + 56, auth.diskGuid, 16) ||
++      rootCrc32 (backupHeader, backupHeaderBytes, true) != auth.backupHeaderCrc) {
++    hostWriteWindowsRevoke (false);
++    return 7;
++  }
++  if (hostRead4k (0, auth.backupEntriesLba, blocks, backupEntries) != kIOReturnSuccess) {
++    hostWriteWindowsRevoke (true);
++    return 8;
++  }
++  const uint32_t entryBytes = gStoreGeometry.entryCount * 128;
++  if (rootCrc32 (backupEntries, entryBytes) != auth.backupEntriesCrc ||
++      memcmp (primaryEntries, backupEntries, entryBytes)) {
++    hostWriteWindowsRevoke (false);
++    return 9;
++  }
++  if (ufsWriteAuthorityEpoch () != auth.epoch) return 12;   // a concurrent transition owns the outcome
++  return 0;
++}
++
++// Narrow state handoff for RamBlock. The values mirror UfsWriteState; Ready is 1.
++// RamBlock binds its entire attachment lifetime to this epoch. A failed or revoked
++// authority changes the epoch and state before any later hostWrite4k can be accepted.
++extern "C" uint32_t native_ufs_store_authority_epoch (void)
++{
++  return ufsWriteAuthorityEpoch ();
++}
++
++extern "C" uint32_t native_ufs_store_authority_state (void)
++{
++  return static_cast<uint32_t> (ufsWriteAuthorityState ());
++}
++
++// Revalidate the complete darwin/GPT identity and controller-reported LUN 0 capacity
++// before a new top-level persistent write or synchronization. Any mismatch revokes
++// every role. 0 means the current authority base is still identical and Ready.
++extern "C" unsigned native_ufs_store_authority_verify (void)
++{
++  if (!gStoreGeometry.valid || !gHost.ready) return 1;
++  const unsigned gpt = native_ufs_store_gpt_check ();
++  if (gpt) return 10 + gpt;
++  uint64_t capacity = 0;
++  if (hostReadCapacity10 (&capacity) != kIOReturnSuccess) {
++    hostWriteWindowsRevoke (true);
++    return 20;
++  }
++  const UfsWriteAuthority auth = ufsWriteAuthoritySnapshot ();
++  if (capacity != auth.capacityBlocks) {
++    hostWriteWindowsRevoke (false);
++    return 21;
++  }
++  if (!ufsWriteAuthorityBaseValid (auth)) {
++    hostWriteWindowsRevoke (false);
++    return 22;
++  }
++  return 0;
+ }
+ 
+ // One read-only window of the root image as a block device: 512-byte sectors on top of 4096-byte
+@@ -2541,6 +2725,10 @@
+ bool NativeUfs::startRoot (IOService *provider)
+ {
+   const char *why = "";
++  hostWriteWindowsReset ();
++  gStoreGeometry = {};
++  gStoreRegionFirst = gStoreRegionBlocks = 0;
++  gLogRegionFirst = gLogRegionBlocks = 0;
+   native_ufs_root_step = 1;
+   if (!hostBringUp (&why)) {
+     rootDiagnosticFailure (why);
+@@ -2560,6 +2748,25 @@
+     rootDiagnosticFailure ("root manifest rejected");
+     IOLog ("NativeUfs: no valid root manifest in userdata (status %u, magic %08x %08x)\n",
+            layout->manifestStatus, layout->magic0, layout->magic1);
++    IOFree (layout, sizeof (RootLayout));
++    return false;
++  }
++  if (!validateRootWriteContract (layout, &why)) {
++    rootDiagnosticFailure (why);
++    IOLog ("NativeUfs: root write contract failed: %s\n", why);
++    IOFree (layout, sizeof (RootLayout));
++    return false;
++  }
++  const uint64_t imageBlocks = layout->imageBytes / 4096;
++  const uint64_t protectedFloor = layout->userdataFirst + imageBlocks + 1024;
++  if (!ufsWriteAuthorityEstablish (
++        gLun0CapacityBlocks, layout->userdataFirst, layout->userdataLast, protectedFloor,
++        layout->gptBackupHeaderLba, layout->gptBackupEntriesLba,
++        layout->gptHeaderCrc, layout->gptEntriesCrc,
++        layout->gptBackupHeaderCrc, layout->gptBackupEntriesCrc, layout->gptMatchedEntry,
++        layout->gptDiskGuid, layout->partitionTypeGuid, layout->partitionGuid)) {
++    rootDiagnosticFailure ("write authority base rejected");
++    IOLog ("NativeUfs: write authority base rejected\n");
+     IOFree (layout, sizeof (RootLayout));
+     return false;
+   }
+@@ -2572,11 +2779,17 @@
+   for (unsigned i = 0; i < layout->windows; ++i) names[i] = layout->window[i].name;
+   if (!ufsBuildRootPlan (names, layout->windows, gPublicationPlan)) {
+     rootDiagnosticFailure ("root windows require distinct OS and SystemOS");
++    hostWriteWindowsRevoke (false);
++    gStoreGeometry = {};
++    gStoreRegionFirst = gStoreRegionBlocks = 0;
+     IOFree (layout, sizeof (RootLayout));
+     return false;
+   }
+   if (!IOService::start (provider)) {
+     rootDiagnosticFailure ("root IOService start failed");
++    hostWriteWindowsRevoke (false);
++    gStoreGeometry = {};
++    gStoreRegionFirst = gStoreRegionBlocks = 0;
+     IOFree (layout, sizeof (RootLayout));
+     return false;
+   }
+@@ -2638,6 +2851,9 @@
+   IOFree (layout, sizeof (RootLayout));
+   if (result.phase != UfsRootPhase::Complete) {
+     gPending = 0;
++    hostWriteWindowsRevoke (false);
++    gStoreGeometry = {};
++    gStoreRegionFirst = gStoreRegionBlocks = 0;
+     gRootDiagnostic.result = result.phase == UfsRootPhase::Identity ? kIOReturnNotPrivileged :
+       result.phase == UfsRootPhase::Schedule ? kIOReturnNoResources : kIOReturnError;
+     IOLog ("NativeUfs: root preparation failed phase=%u window=%u; nothing published\n",
+@@ -2653,6 +2869,10 @@
+ 
+ void NativeUfs::stop (IOService *provider)
+ {
++  hostWriteWindowsRevoke (false);
++  gStoreGeometry = {};
++  gStoreRegionFirst = gStoreRegionBlocks = 0;
++  gLogRegionFirst = gLogRegionBlocks = 0;
+   fCmdDesc.reset ();
+   fMap.reset ();
+   IOService::stop (provider);
+diff --git a/RootCommands.h b/RootCommands.h
+--- a/RootCommands.h
++++ b/RootCommands.h
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: BSD-2-Clause-Patent
+ // Shared production command path. Included inside the root transport namespace.
+ // The host harness replaces only MMIO, DMA synchronization, clock and lock primitives.
++#include "UfsWriteAuthority.h"
+ // One command slot (RootTransportLayout.h): its request list entry, command descriptor and data area.
+ struct UfsSlot {
+   unsigned index;
+@@ -244,16 +245,17 @@
+   return kIOReturnSuccess;
+ }
+ 
+-// Run a SCSI command. direction 0: no data, 1: host -> device from the DMA data area (already filled by the caller), 2: device
+-// -> host into the DMA data area. Callers other than hostWrite4k never pass direction 1.
++// Run a read-only SCSI command. direction 0 has no data; direction 2 flows device -> host. Host ->
++// device is deliberately unavailable here and has a separate WRITE(10)-only entry below.
+ // The task tag is the slot's request list entry, unique among the commands in flight. hostScsiIssue builds and rings the command,
+ // hostScsiAwait waits for it and checks its response; hostScsiDir runs both.
+-static IOReturn hostScsiIssue (const UfsSlot &slot, uint8_t lun, const uint8_t *cdb, unsigned cdbLength, unsigned direction,
+-                               uint32_t dataBytes, uint32_t timeoutUs, uint64_t *deadline, uint32_t *scsiStatus,
+-                               const UfsPrd *prd = nullptr, unsigned prds = 0, const void *buffer = nullptr)
+-{
+-  *scsiStatus = 0xffff;
+-  if (!cdb || !cdbLength || cdbLength > 16 || dataBytes > (prds ? kXferMax : kDataMax) || direction > 2 ||
++// hostScsiPrepare fills the descriptor and rings nothing: a caller that must submit under the authority lock (the WRITE path) or
++// that wants the descriptor built before taking a lock (the synchronize path) uses it and then calls hostIssue itself.
++static IOReturn hostScsiPrepare (const UfsSlot &slot, uint8_t lun, const uint8_t *cdb, unsigned cdbLength, unsigned direction,
++                                 uint32_t dataBytes, const UfsPrd *prd, unsigned prds, const void *buffer)
++{
++  (void) prd; (void) buffer;   // the descriptor is filled from the CDB; the PRDT is built by hostIssue
++  if (direction == 1 || !cdb || !cdbLength || cdbLength > 16 || dataBytes > (prds ? kXferMax : kDataMax) || direction > 2 ||
+       (dataBytes & 3) || (dataBytes ? !direction : direction)) return kIOReturnBadArgument;
+   if (!hostClearUcd (slot)) return kIOReturnNotReady;
+   uint8_t *ucd = slot.ucd;
+@@ -266,6 +268,16 @@
+   for (unsigned index = 0; index < cdbLength; index++) {
+     ucd[16 + index] = cdb[index];
+   }
++  return kIOReturnSuccess;
++}
++
++static IOReturn hostScsiIssue (const UfsSlot &slot, uint8_t lun, const uint8_t *cdb, unsigned cdbLength, unsigned direction,
++                               uint32_t dataBytes, uint32_t timeoutUs, uint64_t *deadline, uint32_t *scsiStatus,
++                               const UfsPrd *prd = nullptr, unsigned prds = 0, const void *buffer = nullptr)
++{
++  *scsiStatus = 0xffff;
++  IOReturn prepared = hostScsiPrepare (slot, lun, cdb, cdbLength, direction, dataBytes, prd, prds, buffer);
++  if (prepared != kIOReturnSuccess) return prepared;
+   uint32_t ocs = 0xf;
+   return hostIssue (slot, direction ? direction : 0U, dataBytes, timeoutUs, deadline, &ocs, prd, prds, buffer);
+ }
+@@ -309,12 +321,53 @@
+   return status != kIOReturnSuccess ? status : hostScsiAwait (slot, lun, dataBytes, deadline, scsiStatus, prds ? buffer : nullptr);
+ }
+ 
++// The descriptor half of the sole media-write entry. No production call site other than hostWrite4k
++// reaches this function; hostScsiIssue/hostScsiDir reject direction 1. It rings nothing: hostWrite4k
++// calls hostIssue itself while holding the authority lock, so the permission check and the doorbell
++// are one linearized step.
++static IOReturn hostScsiWritePrepare (const UfsSlot &slot, const uint8_t *cdb, unsigned cdbLength, uint32_t dataBytes,
++                                      const UfsPrd *prd, unsigned prds, const void *buffer)
++{
++  (void) prd;   // the PRDT is built by hostIssue from the caller's buffer
++  if (!cdb || cdbLength != 10 || !dataBytes || dataBytes > (prds ? kXferMax : kDataMax) ||
++      (dataBytes & 3) || !buffer) return kIOReturnBadArgument;
++  if (!hostClearUcd (slot)) return kIOReturnNotReady;
++  uint8_t *ucd = slot.ucd;
++  const uint8_t tag = static_cast<uint8_t> (slot.entry);
++  ucd[0] = 0x01;
++  ucd[1] = 0x20;
++  ucd[2] = 0;
++  ucd[3] = tag;
++  putBe32 (ucd + 12, dataBytes);
++  for (unsigned index = 0; index < cdbLength; index++) ucd[16 + index] = cdb[index];
++  return kIOReturnSuccess;
++}
++
+ // The original read-only entry point: data, when present, always flows device -> host.
+ static IOReturn hostScsi (uint8_t lun, const uint8_t *cdb, unsigned cdbLength, bool toHost, uint32_t dataBytes,
+                           uint32_t timeoutUs, uint32_t *scsiStatus)
+ {
+   if (dataBytes && !toHost) { *scsiStatus = 0xffff; return kIOReturnBadArgument; }
+   return hostScsiDir (ufsSlot (0), lun, cdb, cdbLength, dataBytes ? 2U : 0U, dataBytes, timeoutUs, scsiStatus);
++}
++
++// SCSI READ CAPACITY(10), LUN 0. The GPT and every write use 4096-byte units; return failure for a
++// different reported logical block size or a malformed response.
++static IOReturn hostReadCapacity10 (uint64_t *capacityBlocks)
++{
++  if (!capacityBlocks) return kIOReturnBadArgument;
++  *capacityBlocks = 0;
++  const UfsSlot slot = ufsSlot (0);
++  uint8_t cdb[10] = { 0x25 };
++  uint32_t scsi = 0;
++  IOReturn status = hostScsiDir (slot, 0, cdb, 10, 2, 8, 1000000, &scsi);
++  if (status != kIOReturnSuccess) return status;
++  const uint32_t lastLba = loadBe32 (slot.data);
++  const uint32_t blockBytes = loadBe32 (slot.data + 4);
++  if (!blockBytes) return kIOReturnNotReady;
++  if (blockBytes != 4096) return hostProtocolError (8);
++  *capacityBlocks = uint64_t (lastLba) + 1;
++  return kIOReturnSuccess;
+ }
+ 
+ // Query read request (opcode 0x03 READ ATTRIBUTE / 0x05 READ FLAG). Returns the value field.
+@@ -494,50 +547,108 @@
+ }
+ 
+ // ---- Persistent store and log windows ------------------------------------------------------------------------------
+-// The only place this driver writes. At most two windows of 4096-byte LBAs on LUN 0 (the Data store and the diagnostic log),
+-// each opened once by its integration after it has proved that the window lies inside the userdata partition and clear of the
+-// root image; every write is checked against them again here, so nothing outside them can be written even if a caller is wrong.
++// Role windows are registered only after the darwin identity/GPT/capacity base is Ready. Data,
++// export and log ranges must lie in that partition above the root-image guard and may not overlap.
+ static bool gStoreOpen = false, gLogOpen = false;
+ static uint64_t gStoreFirst = 0, gStoreBlocks = 0, gLogFirst = 0, gLogBlocks = 0;
+ 
+-static bool hostLogOpen (uint64_t first, uint64_t blocks)
+-{
+-  if (gLogOpen || !blocks || first > 0xffffffffULL || blocks > 0xffffffffULL - first) return false;
+-  if (gStoreOpen && first < gStoreFirst + gStoreBlocks && gStoreFirst < first + blocks) return false;
+-  gLogFirst = first;
+-  gLogBlocks = blocks;
++static void hostWriteWindowsReset (void)
++{
++  gStoreOpen = gLogOpen = false;
++  gStoreFirst = gStoreBlocks = gLogFirst = gLogBlocks = 0;
++  ufsWriteAuthorityReset ();
++}
++
++static void hostWriteWindowsRevoke (bool failed)
++{
++  gStoreOpen = gLogOpen = false;
++  gStoreFirst = gStoreBlocks = gLogFirst = gLogBlocks = 0;
++  ufsWriteAuthorityRevoke (failed);
++}
++
++static bool hostLogOpen (uint64_t exportFirst, uint64_t exportBlocks, uint64_t logFirst, uint64_t logBlocks)
++{
++  if (gLogOpen) return false;
++  // Both windows publish under one acquisition; a partial registration cannot escape.
++  if (!ufsWriteAuthorityRegisterPair (UfsWriteRole::Export, exportFirst, exportBlocks,
++                                      UfsWriteRole::Log, logFirst, logBlocks)) return false;
++  gLogFirst = logFirst;
++  gLogBlocks = logBlocks;
+   gLogOpen = true;
+   return true;
+ }
+ 
+-static bool hostInWindow (uint64_t lba, uint32_t blocks)
+-{
+-  if (gStoreOpen && lba >= gStoreFirst && lba - gStoreFirst < gStoreBlocks && blocks <= gStoreBlocks - (lba - gStoreFirst)) return true;
+-  return gLogOpen && lba >= gLogFirst && lba - gLogFirst < gLogBlocks && blocks <= gLogBlocks - (lba - gLogFirst);
+-}
+-
+ static bool hostStoreOpen (uint64_t first, uint64_t blocks)
+ {
+-  if (gStoreOpen || !blocks || first > 0xffffffffULL || blocks > 0xffffffffULL - first) return false;
+-  if (gLogOpen && first < gLogFirst + gLogBlocks && gLogFirst < first + blocks) return false;
++  if (gStoreOpen || !ufsWriteAuthorityRegister (UfsWriteRole::Data, first, blocks)) return false;
+   gStoreFirst = first;
+   gStoreBlocks = blocks;
+   gStoreOpen = true;
+   return true;
+ }
+ 
+-// WRITE(10) of `blocks` 4096-byte blocks from src to lba on LUN 0; the range must lie inside one open window.
+-static IOReturn hostWrite4k (uint8_t lun, uint64_t lba, uint32_t blocks, const void *src, bool fua = false)
+-{
+-  if (!gHost.ready || !src || !blocks || blocks > kXferMax / 4096 || lun != 0 || !hostInWindow (lba, blocks)) {
++// Prepare and submit one WRITE(10). The permission check and the doorbell run under the authority
++// lock, so a withdrawal that has linearized can never be overtaken by this doorbell. While the lock
++// is held across hostIssue a normal writer waits for a concurrent withdrawal (and vice versa); the
++// panic path cannot wait, so it fails closed when the lock is busy. A submitted command is
++// registered in flight and stays so until its completion is observed. On entry *issued is false; it
++// becomes true only once the doorbell has rung.
++static IOReturn hostWriteSubmit (const UfsSlot &slot, UfsWriteRole role, uint64_t lba, uint32_t blocks, const void *src,
++                                 const UfsPrd *prd, unsigned prds, bool fua, uint32_t *scsi, bool *issued)
++{
++  *issued = false;
++  uint8_t cdb[10] = { 0x2a, uint8_t (fua ? 0x08 : 0), uint8_t (lba >> 24), uint8_t (lba >> 16), uint8_t (lba >> 8), uint8_t (lba),
++                      0, uint8_t (blocks >> 8), uint8_t (blocks), 0 };
++  IOReturn prepared = hostScsiWritePrepare (slot, cdb, 10, blocks * 4096U, prd, prds, src);
++  if (prepared != kIOReturnSuccess) return prepared;
++  if (gHostPanic) {
++    if (!ufsWriteAuthorityTryAcquire ()) return kIOReturnNotPrivileged;   // never wait on a lock from a panicking CPU
++  } else {
++    ufsWriteAuthorityAcquire ();
++  }
++  if (!ufsWriteAuthorityAllowsLocked (role, 0, lba, blocks)) {
++    ufsWriteAuthorityRelease ();
++    return kIOReturnNotPrivileged;
++  }
++  ufsAuthorityProbe (UfsProbeAfterCheck);
++  ufsWriteAuthorityEnterInflightLocked ();
++  uint64_t deadline = 0;
++  uint32_t ocs = 0x0f;
++  IOReturn status = hostIssue (slot, 1, blocks * 4096U, 2000000, &deadline, &ocs, prd, prds, src);
++  if (status != kIOReturnSuccess) {
++    ufsWriteAuthorityExitInflightLocked ();   // the doorbell never rang
++    ufsWriteAuthorityRelease ();
++    return status;
++  }
++  *issued = true;
++  ufsAuthorityProbe (UfsProbeAfterDoorbell);
++  ufsWriteAuthorityRelease ();
++  ufsAuthorityProbe (UfsProbeAfterRelease);
++  status = hostScsiAwait (slot, 0, blocks * 4096U, deadline, scsi, prds ? src : nullptr);
++  ufsWriteAuthorityExitInflight ();
++  ufsAuthorityProbe (UfsProbeSubmitted);
++  return status;
++}
++
++// Sole WRITE(10) entry. The role and complete range are checked under the authority lock immediately
++// before every doorbell. A storage command that was actually submitted and failed revokes every role.
++static IOReturn hostWrite4k (UfsWriteRole role, uint8_t lun, uint64_t lba, uint32_t blocks, const void *src, bool fua = false)
++{
++  if (!gHost.ready || !src || !blocks || blocks > kXferMax / 4096 || lun != 0) {
+     return kIOReturnBadArgument;
++  }
++  if ((gHostPanic && role != UfsWriteRole::Panic) ||
++      (!gHostPanic && role != UfsWriteRole::Data && role != UfsWriteRole::Export && role != UfsWriteRole::Log)) {
++    ufsWriteAuthorityNoteDenied (8);
++    return kIOReturnNotPrivileged;
+   }
+   UfsPrd prd[kMaxPrds];
+   const unsigned prds = hostBuildPrds (src, uint64_t (blocks) * 4096, prd);
+   if (!prds && blocks > kDataMax / 4096) {
+     for (uint32_t done = 0; done < blocks; done += kDataMax / 4096) {
+       const uint32_t chunk = blocks - done > kDataMax / 4096 ? kDataMax / 4096 : blocks - done;
+-      IOReturn status = hostWrite4k (lun, lba + done, chunk, static_cast<const uint8_t *> (src) + uint64_t (done) * 4096, fua);
++      IOReturn status = hostWrite4k (role, lun, lba + done, chunk,
++                                     static_cast<const uint8_t *> (src) + uint64_t (done) * 4096, fua);
+       if (status != kIOReturnSuccess) return status;
+     }
+     return kIOReturnSuccess;
+@@ -546,32 +657,77 @@
+   const UfsSlot slot = hostSlotTake (&pooled);
+   gRootDiagnostic.lba = lba;
+   if (!prds) memcpy (slot.data, src, blocks * 4096U);
+-  uint8_t cdb[10] = { 0x2a, uint8_t (fua ? 0x08 : 0), uint8_t (lba >> 24), uint8_t (lba >> 16), uint8_t (lba >> 8), uint8_t (lba),
+-                      0, uint8_t (blocks >> 8), uint8_t (blocks), 0 };
+   uint32_t scsi = 0;
+-  IOReturn status;
++  IOReturn status = kIOReturnSuccess;
++  bool anyIssued = false;
+   for (unsigned attempt = 0;; ++attempt) {
+-    status = hostScsiDir (slot, 0, cdb, 10, 1, blocks * 4096U, 2000000, &scsi, prds ? prd : nullptr, prds, prds ? src : nullptr);
++    bool issued = false;
++    status = hostWriteSubmit (slot, role, lba, blocks, src, prds ? prd : nullptr, prds, fua, &scsi, &issued);
++    if (issued) anyIssued = true;
+     if (!hostRetryable (status, scsi, attempt)) break;
+   }
+   hostSlotGive (slot, pooled);
++  if (status != kIOReturnSuccess && anyIssued) ufsWriteAuthorityRevoke (true);
+   return status;
+ }
+ 
+-// SYNCHRONIZE CACHE(10) for the whole LUN: every write that completed before this call is on the medium when it returns.
+-static IOReturn hostSyncCache (void)
+-{
+-  if (!gHost.ready || (!gStoreOpen && !gLogOpen)) return kIOReturnNotReady;
+-  bool pooled;
+-  const UfsSlot slot = hostSlotTake (&pooled);
+-  uint8_t cdb[10] = { 0x35 };
+-  uint32_t scsi = 0;
+-  IOReturn status;
+-  for (unsigned attempt = 0;; ++attempt) {
+-    status = hostScsiDir (slot, 0, cdb, 10, 0, 0, 10000000, &scsi);
+-    if (!hostRetryable (status, scsi, attempt)) break;
+-  }
+-  hostSlotGive (slot, pooled);
++// SYNCHRONIZE CACHE(10) for one authorized role window. Chunks avoid count=0, which would mean
++// "to end of device" in READ/WRITE/SYNCHRONIZE CACHE(10). Like the WRITE path, the window check and
++// the doorbell run under the authority lock.
++static IOReturn hostSyncCache (UfsWriteRole role)
++{
++  if (!gHost.ready ||
++      (gHostPanic && role != UfsWriteRole::Panic) ||
++      (!gHostPanic && role == UfsWriteRole::Panic)) {
++    return kIOReturnNotPrivileged;
++  }
++  uint64_t lba = 0, blocks = 0;
++  if (!ufsWriteAuthorityRoleWindow (role, &lba, &blocks)) return kIOReturnNotPrivileged;
++  IOReturn status = kIOReturnSuccess;
++  bool anyIssued = false;
++  while (blocks && status == kIOReturnSuccess) {
++    const uint32_t chunk = blocks > 0xffff ? 0xffff : static_cast<uint32_t> (blocks);
++    bool pooled;
++    const UfsSlot slot = hostSlotTake (&pooled);
++    uint8_t cdb[10] = { 0x35, 0, uint8_t (lba >> 24), uint8_t (lba >> 16), uint8_t (lba >> 8), uint8_t (lba),
++                        0, uint8_t (chunk >> 8), uint8_t (chunk), 0 };
++    uint32_t scsi = 0;
++    for (unsigned attempt = 0;; ++attempt) {
++      IOReturn prepared = hostScsiPrepare (slot, 0, cdb, 10, 0, 0, nullptr, 0, nullptr);
++      if (prepared != kIOReturnSuccess) { status = prepared; break; }
++      if (gHostPanic) {
++        if (!ufsWriteAuthorityTryAcquire ()) { status = kIOReturnNotPrivileged; break; }
++      } else {
++        ufsWriteAuthorityAcquire ();
++      }
++      uint64_t winFirst = 0, winBlocks = 0;
++      if (!ufsWriteAuthorityRoleWindowLocked (role, &winFirst, &winBlocks) || lba < winFirst ||
++          chunk > winBlocks || lba - winFirst > winBlocks - chunk) {
++        ufsWriteAuthorityRelease ();
++        status = kIOReturnNotPrivileged;
++        break;
++      }
++      ufsWriteAuthorityEnterInflightLocked ();
++      uint64_t deadline = 0;
++      uint32_t ocs = 0x0f;
++      IOReturn issued = hostIssue (slot, 0, 0, 10000000, &deadline, &ocs);
++      if (issued != kIOReturnSuccess) {
++        ufsWriteAuthorityExitInflightLocked ();
++        ufsWriteAuthorityRelease ();
++        status = issued;
++        break;
++      }
++      anyIssued = true;
++      ufsWriteAuthorityRelease ();
++      status = hostScsiAwait (slot, 0, 0, deadline, &scsi);
++      ufsWriteAuthorityExitInflight ();
++      if (!hostRetryable (status, scsi, attempt)) break;
++    }
++    hostSlotGive (slot, pooled);
++    lba += chunk;
++    blocks -= chunk;
++  }
++  if (status != kIOReturnSuccess && anyIssued) ufsWriteAuthorityRevoke (true);
+   return status;
+ }
+ 
+diff --git a/RootLayout.h b/RootLayout.h
+--- a/RootLayout.h
++++ b/RootLayout.h
+@@ -4,16 +4,23 @@
+ // ---- LUN 0 GPT and the root-image manifest -------------------------------------------------
+ struct RootWindow {
+   char name[32];
+-  uint64_t offset;   // bytes from the start of the userdata partition
++  uint64_t offset;   // bytes from the start of the darwin container
+   uint64_t size;     // bytes
+   uint8_t sha256[32];
+ };
+ 
+ struct RootLayout {
+-  uint64_t userdataFirst, userdataLast;   // 4096-byte LBAs on LUN 0
++  // Names are retained for source compatibility with existing root-store callers.
++  uint64_t userdataFirst, userdataLast;   // darwin LBAs on LUN 0, 4096-byte sectors
++  uint64_t userdataBlocks;                // non-zero capacity in GPT sectors
+   uint64_t imageBytes;                    // size of the flashed root image from the manifest (0 when none)
+   uint64_t gptEntriesLba;                 // GPT facts recorded for the persistent store's before/after comparison
+   uint32_t gptHeaderCrc, gptEntriesCrc, gptEntryCount;
++  uint64_t gptBackupHeaderLba, gptBackupEntriesLba;
++  uint32_t gptBackupHeaderCrc, gptBackupEntriesCrc, gptMatchedEntry;
++  uint8_t gptDiskGuid[16];
++  uint8_t partitionTypeGuid[16];
++  uint8_t partitionGuid[16];
+   uint32_t windows;
+   RootWindow window[4];
+   uint32_t objects;                       // version 2: data the kernel reads itself (policy tables, firmware)
+@@ -56,22 +63,58 @@
+   return used != 0;
+ }
+ 
+-// Find the partition named "userdata" in LUN 0's primary GPT (4096-byte sectors), then read the
+-// manifest at its first block. Read-only. Returns false only if the GPT itself is unusable.
++static bool rootGuidEqual (const uint8_t *left, const uint8_t *right)
++{
++  return memcmp (left, right, 16) == 0;
++}
++
++static bool rootGuidNonzero (const uint8_t *guid)
++{
++  uint8_t used = 0;
++  for (unsigned i = 0; i < 16; ++i) used |= guid[i];
++  return used != 0;
++}
++
++static bool rootRead10Range (uint64_t lba, uint32_t blocks)
++{
++  return blocks && lba <= UINT32_MAX && uint64_t (blocks - 1) <= UINT32_MAX - lba;
++}
++
++// A GPT name is exactly 36 UTF-16LE code units. Compare the complete field so text after an
++// embedded NUL cannot turn another name into "darwin".
++static bool rootNameIsDarwin (const uint8_t *entry)
++{
++  static const char wanted[] = "darwin";
++  const size_t letters = sizeof (wanted) - 1;
++  for (unsigned i = 0; i < 36; ++i) {
++    uint8_t expected = i < letters ? static_cast<uint8_t> (wanted[i]) : 0;
++    if (entry[56 + 2 * i] != expected || entry[57 + 2 * i] != 0) return false;
++  }
++  return true;
++}
++
++// Find the unique partition named exactly "darwin" in LUN 0's GPT (4096-byte sectors), verify
++// both GPT copies and its required type/nonzero identity, then read the root manifest at the
++// container's first block. Read-only. A missing or ambiguous darwin container is a hard failure.
+ static bool findRootLayout (RootLayout *layout, const char **why)
+ {
++  static const uint8_t darwinType[16] = {
++    0xaf, 0x3d, 0xc6, 0x0f, 0x83, 0x84, 0x72, 0x47,
++    0x8e, 0x79, 0x3d, 0x69, 0xd8, 0x47, 0x7d, 0xe4
++  };
+   gRootDiagnostic.stage = "GPT header";
+   bzero (layout, sizeof (*layout));
+   if (hostRead4k (0, 1, 1, gScratch) != kIOReturnSuccess) {
+     *why = "GPT header read";
+     return false;
+   }
+-  if (le32 (gScratch) != 0x20494645U || le32 (gScratch + 4) != 0x54524150U || le32 (gScratch + 84) != 128) {
++  if (le32 (gScratch) != 0x20494645U || le32 (gScratch + 4) != 0x54524150U) {
+     *why = "GPT header";
+     return false;
+   }
+   uint32_t headerBytes = le32 (gScratch + 12);
+-  if (le32 (gScratch + 8) != 0x00010000 || headerBytes < 92 || headerBytes > 4096 ||
++  uint32_t entryBytes = le32 (gScratch + 84);
++  if (le32 (gScratch + 8) != 0x00010000 || headerBytes < 92 || headerBytes > 4096 || entryBytes != 128 ||
+       le32 (gScratch + 20) || le64 (gScratch + 24) != 1 ||
+       rootCrc32 (gScratch, headerBytes, true) != le32 (gScratch + 16)) {
+     *why = "GPT header CRC/revision";
+@@ -85,13 +128,16 @@
+   layout->gptEntriesCrc = entriesCrc;
+   layout->gptEntriesLba = entriesLba;
+   layout->gptEntryCount = count;
+-  if (entriesLba < 2 || entriesLba > 64 || !count || count > 128) {
++  layout->gptBackupHeaderLba = backup;
++  memcpy (layout->gptDiskGuid, gScratch + 56, 16);
++  if (!count || count > 128 || !rootGuidNonzero (layout->gptDiskGuid)) {
+     *why = "GPT geometry";
+     return false;
+   }
+-  uint32_t blocks = (count * 128 + 4095) / 4096;
++  uint32_t blocks = (count * entryBytes + 4095) / 4096;
+   // This path uses READ(10), so reject geometry beyond its actual LBA range.
+-  if (first < entriesLba + blocks || last < first || backup <= last || backup > UINT32_MAX ||
++  if (entriesLba < 2 || !rootRead10Range (entriesLba, blocks) || first > UINT32_MAX - blocks ||
++      first < entriesLba + blocks || last < first || backup <= last || !rootRead10Range (backup, 1) ||
+       backup - last <= blocks) {
+     *why = "GPT usable range";
+     return false;
+@@ -105,7 +151,6 @@
+     *why = "GPT entries CRC";
+     return false;
+   }
+-  static const char wanted[] = "userdata";
+   bool found = false;
+   for (uint32_t index = 0; index < count; index++) {
+     const uint8_t *entry = gScratch + index * 128;
+@@ -122,33 +167,103 @@
+         return false;
+       }
+     }
+-    bool match = true;
+-    for (unsigned c = 0; c < sizeof (wanted); c++) {
+-      if (entry[56 + 2 * c] != static_cast<uint8_t> (wanted[c]) || entry[57 + 2 * c] != 0) {
+-        match = false;
+-        break;
+-      }
+-    }
+-    if (match) {
++    if (rootNameIsDarwin (entry)) {
+       if (found) {
+-        *why = "duplicate userdata partition";
++        *why = "duplicate darwin partition";
+         return false;
+       }
+-      layout->userdataFirst = le64 (entry + 32);
+-      layout->userdataLast = le64 (entry + 40);
++      if (!rootGuidEqual (entry, darwinType)) {
++        *why = "darwin partition type";
++        return false;
++      }
++      if (!rootGuidNonzero (entry + 16)) {
++        *why = "darwin partition identity";
++        return false;
++      }
++      layout->userdataFirst = entryFirst;
++      layout->userdataLast = entryLast;
++      layout->gptMatchedEntry = index;
++      memcpy (layout->partitionTypeGuid, entry, 16);
++      memcpy (layout->partitionGuid, entry + 16, 16);
+       found = true;
+     }
+   }
+-  if (!found || layout->userdataLast < layout->userdataFirst) {
+-    *why = "no userdata partition";
+-    return false;
+-  }
++  if (!found || layout->userdataLast < layout->userdataFirst || !rootRead10Range (layout->userdataFirst, 1)) {
++    *why = "no darwin partition";
++    return false;
++  }
++  for (uint32_t index = 0; index < count; ++index) {
++    const uint8_t *entry = gScratch + index * 128;
++    if (index != layout->gptMatchedEntry && rootEntryUsed (entry) && rootGuidEqual (entry + 16, layout->partitionGuid)) {
++      *why = "duplicate GPT partition identity";
++      return false;
++    }
++  }
++  if (layout->userdataLast == UINT64_MAX ||
++      (layout->userdataLast - layout->userdataFirst) == UINT64_MAX) {
++    *why = "darwin capacity overflow";
++    return false;
++  }
++  layout->userdataBlocks = layout->userdataLast - layout->userdataFirst + 1;
++  if (!layout->userdataBlocks || layout->userdataBlocks > UINT64_MAX / 4096ULL) {
++    *why = "darwin capacity overflow";
++    return false;
++  }
++
++  // Require the backup GPT to agree with the primary. Keep the primary entry array at the
++  // start of the scratch buffer and load the backup copy after it for an exact comparison.
++  gRootDiagnostic.stage = "backup GPT header";
++  uint8_t *loadedPrimaryEntries = gScratch;
++  uint8_t *loadedBackupEntries = gScratch + count * entryBytes;
++  uint8_t *loadedBackupHeader = gScratch + 8 * 4096;
++  if (hostRead4k (0, backup, 1, loadedBackupHeader) != kIOReturnSuccess) {
++    *why = "GPT backup header read";
++    return false;
++  }
++  uint32_t backupHeaderBytes = le32 (loadedBackupHeader + 12);
++  uint64_t loadedBackupEntriesLba = le64 (loadedBackupHeader + 72);
++  uint32_t backupCount = le32 (loadedBackupHeader + 80);
++  uint32_t backupEntryBytes = le32 (loadedBackupHeader + 84);
++  uint32_t backupEntriesCrc = le32 (loadedBackupHeader + 88);
++  if (le32 (loadedBackupHeader) != 0x20494645U || le32 (loadedBackupHeader + 4) != 0x54524150U ||
++      le32 (loadedBackupHeader + 8) != 0x00010000 || backupHeaderBytes != headerBytes ||
++      le32 (loadedBackupHeader + 20) || le64 (loadedBackupHeader + 24) != backup ||
++      le64 (loadedBackupHeader + 32) != 1 || le64 (loadedBackupHeader + 40) != first ||
++      le64 (loadedBackupHeader + 48) != last ||
++      memcmp (loadedBackupHeader + 56, layout->gptDiskGuid, 16) || backupCount != count ||
++      backupEntryBytes != entryBytes || backupEntriesCrc != entriesCrc ||
++      rootCrc32 (loadedBackupHeader, backupHeaderBytes, true) != le32 (loadedBackupHeader + 16)) {
++    *why = "GPT backup header mismatch";
++    return false;
++  }
++  if (loadedBackupEntriesLba <= last || !rootRead10Range (loadedBackupEntriesLba, blocks) ||
++      loadedBackupEntriesLba > backup - blocks) {
++    *why = "GPT backup entries geometry";
++    return false;
++  }
++  gRootDiagnostic.stage = "backup GPT entries";
++  if (hostRead4k (0, loadedBackupEntriesLba, blocks, loadedBackupEntries) != kIOReturnSuccess) {
++    *why = "GPT backup entries read";
++    return false;
++  }
++  if (rootCrc32 (loadedBackupEntries, count * entryBytes) != backupEntriesCrc) {
++    *why = "GPT backup entries CRC";
++    return false;
++  }
++  if (memcmp (loadedPrimaryEntries, loadedBackupEntries, count * entryBytes)) {
++    *why = "GPT primary/backup mismatch";
++    return false;
++  }
++  layout->gptBackupEntriesLba = loadedBackupEntriesLba;
++  layout->gptBackupHeaderCrc = le32 (loadedBackupHeader + 16);
++  layout->gptBackupEntriesCrc = backupEntriesCrc;
++
+   gRootDiagnostic.first = layout->userdataFirst;
+   gRootDiagnostic.last = layout->userdataLast;
+   gRootDiagnostic.stage = "root manifest";
+   // First block of the partition: manifest if the root image was flashed, ext4 otherwise.
+   if (hostRead4k (0, layout->userdataFirst, 1, gScratch) != kIOReturnSuccess) {
+-    *why = "userdata first block read";
++    *why = "darwin first block read";
+     return false;
+   }
+   layout->magic0 = le32 (gScratch);
+@@ -170,7 +285,7 @@
+       SHA256_Final (digest, &context);
+       layout->manifestStatus = 3;
+       if (memcmp (digest, gScratch + 4064, 32) == 0) {
+-        uint64_t partitionBytes = (layout->userdataLast - layout->userdataFirst + 1) * 4096ULL;
++        uint64_t partitionBytes = layout->userdataBlocks * 4096ULL;
+         layout->manifestStatus = 4;
+         bool bounds = imageBytes >= 4096 && !(imageBytes & 4095) && imageBytes <= partitionBytes;
+         for (uint32_t index = 0; index < n && bounds; index++) {
+diff --git a/tests/RootCommands.cpp b/tests/RootCommands.cpp
+--- a/tests/RootCommands.cpp
++++ b/tests/RootCommands.cpp
+@@ -6,10 +6,14 @@
+ #include <string>
+ #include <vector>
+ enum class Fault { None, Empty, Type, Tag, Lun, Query, Residual, Underflow,
+-  Oversize, SenseLength, CheckCondition, Timeout, Fatal, Stop, Start, HighBase, Busy, TaskSetFull };
++  Oversize, SenseLength, CheckCondition, Timeout, Fatal, Stop, Start, HighBase, Busy, TaskSetFull,
++  CapacitySize };
+ static unsigned busyLeft;      // Busy/TaskSetFull: commands answered with that status before the device accepts again
+ static unsigned lastSlot;      // the slot of the last command rung
+ static std::vector<uint8_t> written;   // the data of the last WRITE(10)
++static uint32_t capacityBlocks; // LUN size returned by READ CAPACITY(10)
++static uint64_t lastCdbLba;
++static uint32_t lastCdbBlocks, writeCommands;
+ static Fault fault;
+ static std::array<uint8_t,kDmaBytes> device;
+ static std::array<uint32_t,64> registers;
+@@ -36,15 +40,19 @@
+       const uint8_t *utrd=device.data()+ufsSlotUtrdOffset(slot);
+       uint64_t ucd=*reinterpret_cast<const uint32_t *>(utrd+16)|uint64_t(*reinterpret_cast<const uint32_t *>(utrd+20))<<32;
+       assert(ucd==gHost.phys+ufsSlotUcdOffset(slot));
++      uint8_t *cmd=device.data()+ufsSlotUcdOffset(slot), *rsp=cmd+kRspOffset;
+       if (fault==Fault::Fatal) { registers[0x20/4]=0x20000; return 0; }
+       registers[0x58/4]=0;
+       if (fault==Fault::Timeout) return 0;
+-      uint8_t *cmd=device.data()+ufsSlotUcdOffset(slot), *rsp=cmd+kRspOffset;
+       if (cmd[0]==1) assert(cmd[3]==entry);            // SCSI task tag: the request list entry
++      if (cmd[0]==1) {
++        lastCdbLba=uint64_t(cmd[18])<<24|uint64_t(cmd[19])<<16|uint64_t(cmd[20])<<8|cmd[21];
++        lastCdbBlocks=uint32_t(cmd[23])<<8|cmd[24];
++      }
+       std::fill(rsp,rsp+512,0);
+       if (cmd[0]==1 && cmd[16]==0x2a) {                 // WRITE(10): keep what the data area held
+-        const uint32_t n=uint32_t(cmd[23])<<8|cmd[24];
+-        written.assign(device.data()+ufsSlotDataOffset(slot),device.data()+ufsSlotDataOffset(slot)+n*4096);
++        ++writeCommands;
++        written.assign(device.data()+ufsSlotDataOffset(slot),device.data()+ufsSlotDataOffset(slot)+lastCdbBlocks*4096);
+       }
+       if (!(cmd[0]==1 && cmd[16]==0x2a)) memset(device.data()+ufsSlotDataOffset(slot),0x7b+slot,kDataMax);   // a write leaves its buffer
+       *reinterpret_cast<uint32_t *>(device.data()+ufsSlotUtrdOffset(slot)+8)=0;
+@@ -52,6 +60,10 @@
+       memcpy(rsp,cmd,32); rsp[0]=cmd[0]+0x20; rsp[1]=0;
+       if (cmd[0]==1) putBe32(rsp+12,0);
+       if (cmd[0]==0x16) putBe32(rsp+20,0x11);
++      if (cmd[0]==1 && cmd[16]==0x25) {
++        putBe32(device.data()+ufsSlotDataOffset(slot),capacityBlocks-1);
++        putBe32(device.data()+ufsSlotDataOffset(slot)+4,fault==Fault::CapacitySize?512:4096);
++      }
+       if (fault==Fault::Type) rsp[0]=0x3f;
+       if (fault==Fault::Tag) ++rsp[3];
+       if (fault==Fault::Lun) ++rsp[2];
+@@ -79,14 +91,16 @@
+ }
+ static void reset(Fault f=Fault::None)
+ {
+-  fault=f; device.fill(0); registers.fill(0); now=0; writes=releases=0; released=false;
++  fault=f; device.fill(0); registers.fill(0); now=0; writes=releases=writeCommands=0; released=false;
++  busyLeft=0; lastCdbLba=lastCdbBlocks=0; capacityBlocks=1024; written.clear();
+   registers[0x34/4]=1; registers[0x30/4]=15; registers[0x60/4]=1;
+   ufs_test_reset(io,0x8cb5e9000);
+ }
+ static void assertQuarantined()
+ {
+   assert(ufs_test_poisoned());
+-  std::array<uint8_t,kDmaBytes> old; memcpy(old.data(),memory,sizeof(memory));
++  static std::array<uint8_t,kDmaBytes> old;
++  memcpy(old.data(),memory,sizeof(memory));
+   unsigned oldWrites=writes, oldReleases=releases;
+   uint8_t cdb[6]={}; uint32_t scsi=0, value=0xabcdef;
+   assert(ufs_test_nop()!=0);
+@@ -151,12 +165,114 @@
+   assert(ufs_test_read(0,7,1,out.data())==0 && lastSlot==2 && out[0]==uint8_t(0x7b+2));   // the first free slot
+   assert(ufs_test_free_slots()==(1U<<(kRegionSlots-1))-1-3);                                    // given back after the command
+   ufs_test_slot_give(0); ufs_test_slot_give(1);
+-  assert(ufs_test_store_open(100,64)==1);
+-  { std::vector<uint8_t> data(8192,0x55); assert(ufs_test_write(0,110,2,data.data())==0 && written==data); }
+-  assert(ufs_test_sync()==0 && ufs_test_free_slots()==(1U<<(kRegionSlots-1))-1);
+-  reset(Fault::Busy); busyLeft=3; assert(ufs_test_read(0,1,1,out.data())==0 && !gHost.poisoned);
+-  reset(Fault::TaskSetFull); busyLeft=5; assert(ufs_test_store_open(100,64)==1);
+-  { std::vector<uint8_t> data(4096,0x66); assert(ufs_test_write(0,100,1,data.data())==0 && written==data); }
++
++  // READ CAPACITY drives the geometry used by the write contract.
++  reset();
++  uint64_t capacity=0;
++  assert(ufs_test_capacity(&capacity)==0 && capacity==capacityBlocks);
++  reset(Fault::CapacitySize); capacity=0xabcdef;
++  assert(ufs_test_capacity(&capacity)==kIOReturnIOError && capacity==0 && gHost.poisoned);
++
++  // Deny by default: before a verified darwin/GPT/capacity authority exists,
++  // no role may open a window and no write may publish a DMA descriptor.
++  reset();
++  std::vector<uint8_t> block(4096,0x5a);
++  auto noDma=[&](auto action) {
++    const unsigned beforeWrites=writes,beforeReleases=releases,beforeCommands=writeCommands;
++    const uint32_t result=action();
++    assert(writes==beforeWrites && releases==beforeReleases && writeCommands==beforeCommands);
++    return result;
++  };
++  assert(noDma([&]{return ufs_test_write(uint32_t(UfsWriteRole::Data),0,210,1,block.data());})==kIOReturnNotPrivileged);
++  assert(noDma([&]{return ufs_test_sync(uint32_t(UfsWriteRole::Data));})==kIOReturnNotPrivileged);
++  assert(noDma([&]{return ufs_test_store_open(210,20)?0U:kIOReturnNotPrivileged;})==kIOReturnNotPrivileged);
++  assert(gUfsWriteAuthority.state==UfsWriteState::Sealed);
++
++  // A verified base is still not a write grant. Exact role windows then admit
++  // only their first and last blocks; wrong roles, LUNs and overruns stop before I/O.
++  reset();
++  assert(ufs_test_establish(1024,100,900,200,1023,1022)==1);
++  assert(gUfsWriteAuthority.state==UfsWriteState::Ready);
++  assert(noDma([&]{return ufs_test_write(uint32_t(UfsWriteRole::Data),0,210,1,block.data());})==kIOReturnNotPrivileged);
++  assert(ufs_test_store_open(210,20)==1);
++  assert(writes==0 && releases==0);
++  assert(ufs_test_write(uint32_t(UfsWriteRole::Data),0,210,1,block.data())==0 && written==block);
++  assert(ufs_test_write(uint32_t(UfsWriteRole::Data),0,229,1,block.data())==0 && written==block);
++  assert(ufs_test_sync(uint32_t(UfsWriteRole::Data))==0);
++  assert(lastCdbLba==210 && lastCdbBlocks==20);
++  const unsigned goodWrites=writeCommands;
++  for (auto request: {
++         std::array<uint64_t,2>{209,1}, std::array<uint64_t,2>{229,2}, std::array<uint64_t,2>{230,1},
++         std::array<uint64_t,2>{300,1}, std::array<uint64_t,2>{UINT32_MAX,2}}) {
++    assert(noDma([&]{return ufs_test_write(uint32_t(UfsWriteRole::Data),0,request[0],uint32_t(request[1]),block.data());})==kIOReturnNotPrivileged);
++  }
++  assert(noDma([&]{return ufs_test_write(uint32_t(UfsWriteRole::Export),0,300,1,block.data());})==kIOReturnNotPrivileged);
++  assert(noDma([&]{return ufs_test_write(uint32_t(UfsWriteRole::Data),1,210,1,block.data());})==kIOReturnBadArgument);
++  assert(noDma([&]{return ufs_test_write(uint32_t(UfsWriteRole::Data),0,210,0,block.data());})==kIOReturnBadArgument);
++  assert(noDma([&]{return ufs_test_write(uint32_t(UfsWriteRole::None),0,210,1,block.data());})==kIOReturnNotPrivileged);
++  assert(writeCommands==goodWrites);
++
++  // Export and log are separate, non-overlapping grants. Panic shares the log
++  // range and is unavailable until the panic path is entered.
++  reset();
++  assert(ufs_test_establish(1024,100,900,200,1023,1022)==1);
++  assert(ufs_test_log_open(300,10,400,16)==1);
++  assert(ufs_test_log_open(300,10,400,16)==0);
++  assert(ufs_test_write(uint32_t(UfsWriteRole::Export),0,300,1,block.data())==0);
++  assert(ufs_test_write(uint32_t(UfsWriteRole::Export),0,309,1,block.data())==0);
++  assert(ufs_test_write(uint32_t(UfsWriteRole::Log),0,400,1,block.data())==0);
++  assert(ufs_test_write(uint32_t(UfsWriteRole::Log),0,415,1,block.data())==0);
++  for (auto request: {
++         std::array<uint64_t,3>{uint32_t(UfsWriteRole::Export),299,1},
++         std::array<uint64_t,3>{uint32_t(UfsWriteRole::Export),309,2},
++         std::array<uint64_t,3>{uint32_t(UfsWriteRole::Log),399,1},
++         std::array<uint64_t,3>{uint32_t(UfsWriteRole::Log),415,2},
++         std::array<uint64_t,3>{uint32_t(UfsWriteRole::Data),300,1},
++         std::array<uint64_t,3>{uint32_t(UfsWriteRole::Panic),400,1}}) {
++    assert(noDma([&]{return ufs_test_write(uint32_t(request[0]),0,request[1],uint32_t(request[2]),block.data());})==kIOReturnNotPrivileged);
++  }
++  ufs_test_panic();
++  assert(noDma([&]{return ufs_test_write(uint32_t(UfsWriteRole::Log),0,400,1,block.data());})==kIOReturnNotPrivileged);
++  assert(ufs_test_write(uint32_t(UfsWriteRole::Panic),0,400,1,block.data())==0);
++  assert(ufs_test_sync(uint32_t(UfsWriteRole::Panic))==0);
++
++  // Window registration itself rejects post-partition, first-before-floor,
++  // overlapping and over-capacity geometry before a write can run.
++  reset();
++  assert(ufs_test_establish(1024,100,900,200,1023,1022)==1);
++  assert(ufs_test_store_open(199,1)==0);
++  assert(ufs_test_store_open(901,1)==0);
++  assert(ufs_test_store_open(900,2)==0);
++  assert(ufs_test_store_open(210,20)==1);
++  assert(ufs_test_log_open(220,10,240,10)==0);
++  reset();
++  assert(ufs_test_establish(1023,100,900,200,1023,1022)==0);
++  assert(gUfsWriteAuthority.state==UfsWriteState::Sealed);
++
++  // A storage-command failure revokes every role; later requests are refused
++  // before DMA publication, slot acquisition or another doorbell.
++  reset(Fault::CheckCondition);
++  assert(ufs_test_establish(1024,100,900,200,1023,1022)==1);
++  assert(ufs_test_store_open(210,20)==1);
++  assert(ufs_test_write(uint32_t(UfsWriteRole::Data),0,210,1,block.data())==kIOReturnNotReady);
++  assert(gUfsWriteAuthority.state==UfsWriteState::Failed);
++  assert(noDma([&]{return ufs_test_write(uint32_t(UfsWriteRole::Data),0,210,1,block.data());})==kIOReturnNotPrivileged);
++
++  reset(Fault::Busy); busyLeft=3;
++  assert(ufs_test_establish(1024,100,900,200,1023,1022)==1);
++  assert(ufs_test_store_open(210,20)==1);
++  assert(ufs_test_write(uint32_t(UfsWriteRole::Data),0,210,1,block.data())==0 && writeCommands==4);
++  reset(Fault::TaskSetFull); busyLeft=5;
++  assert(ufs_test_establish(1024,100,900,200,1023,1022)==1);
++  assert(ufs_test_store_open(210,20)==1);
++  assert(ufs_test_write(uint32_t(UfsWriteRole::Data),0,210,1,block.data())==0 && writeCommands==6);
++  reset(Fault::Busy); busyLeft=100;
++  assert(ufs_test_establish(1024,100,900,200,1023,1022)==1);
++  assert(ufs_test_store_open(210,20)==1);
++  assert(ufs_test_write(uint32_t(UfsWriteRole::Data),0,210,1,block.data())==kIOReturnNotReady);
++  assert(gUfsWriteAuthority.state==UfsWriteState::Failed);
++
++  assert(ufs_test_free_slots()==(1U<<(kRegionSlots-1))-1 || gHostPanic);
+   reset(Fault::Busy); busyLeft=1000; assert(ufs_test_read(0,1,1,out.data())==kIOReturnNotReady && !gHost.poisoned);
+   assert(ufs_test_free_slots()==(1U<<(kRegionSlots-1))-1);                                      // a failed command gives its slot back
+   reset(); ufs_test_panic(); assert(ufs_test_read(0,1,1,out.data())==0 && lastSlot==kRegionSlots-1);
+@@ -165,5 +281,6 @@
+   assert(ufs_test_read(0,1,1,out.data())==0 && lastSlot==0 && ufs_test_free_slots()==1);
+   ufs_test_panic(); assert(ufs_test_read(0,1,1,out.data())==0 && lastSlot==0);
+   puts("PASS: command slots: per-slot entry, descriptor, tag and data; pool; busy and task-set-full retries; panic slot; one-slot fallback");
++  puts("PASS: deny-by-default WRITE(10), darwin/GPT/capacity authority, exact role boundaries, LUN/overflow checks and failure revocation");
+   puts("PASS: actual command/queue path; malformed DMA responses, bounds, short reads, sense, quarantine, queue refusal and full-width DMA");
+ }
+diff --git a/tests/RootCommandsArm64.cpp b/tests/RootCommandsArm64.cpp
+--- a/tests/RootCommandsArm64.cpp
++++ b/tests/RootCommandsArm64.cpp
+@@ -8,6 +8,11 @@
+   for (size_t i=0;i<n;++i) d[i]=s[i];
+   return out;
+ }
++extern "C" int memcmp(const void *left,const void *right,size_t n) {
++  auto a=static_cast<const uint8_t *>(left), b=static_cast<const uint8_t *>(right);
++  for (size_t i=0;i<n;++i) if(a[i]!=b[i]) return int(a[i])-int(b[i]);
++  return 0;
++}
+ #include "../RootDiagnostics.h"
+ #include "../TransferPoll.h"
+ #include "../RootTransportLayout.h"
+@@ -15,6 +20,7 @@
+ constexpr IOReturn kIOReturnSuccess=0, kIOReturnError=0xe00002bc,
+   kIOReturnBadArgument=0xe00002c2, kIOReturnIOError=0xe00002ca,
+   kIOReturnBusy=0xe00002d5, kIOReturnTimeout=0xe00002d6, kIOReturnNotReady=0xe00002d8;
++constexpr IOReturn kIOReturnNotPrivileged=0xe00002c1;
+ constexpr unsigned kMicrosecondScale=1, kMillisecondScale=1000;
+ struct Host { uint8_t *virt; uint64_t phys; bool ready,poisoned; uintptr_t hc; void *lock; };
+ static Host gHost;
+diff --git a/tests/RootCommandsBridge.cpp b/tests/RootCommandsBridge.cpp
+--- a/tests/RootCommandsBridge.cpp
++++ b/tests/RootCommandsBridge.cpp
+@@ -5,12 +5,41 @@
+ #include <cstdio>
+ #include <cstring>
+ #include <cassert>
++#include <mutex>
++#if defined(_MSC_VER)
++// The host fixture is deliberately single-threaded. These replace only the
++// compiler atomics/bit primitive used by the production command code.
++#define __ATOMIC_RELEASE 0
++static uint32_t testAtomicOrFetch(volatile uint32_t *object, uint32_t operand)
++{
++  *object = *object | operand;
++  return *object;
++}
++static uint32_t testAtomicAndFetch(volatile uint32_t *object, uint32_t operand)
++{
++  *object = *object & operand;
++  return *object;
++}
++static unsigned testCtz(uint32_t value)
++{
++  unsigned bit = 0;
++  while (value && !(value & 1U)) {
++    value >>= 1;
++    ++bit;
++  }
++  return bit;
++}
++#define __atomic_or_fetch(object,operand,order) testAtomicOrFetch((object),(operand))
++#define __atomic_and_fetch(object,operand,order) testAtomicAndFetch((object),(operand))
++#define __builtin_ctz(value) testCtz((value))
++#endif
+ #include "../RootDiagnostics.h"
+ #include "../TransferPoll.h"
+ using IOReturn = uint32_t;
+ constexpr IOReturn kIOReturnSuccess=0, kIOReturnError=0xe00002bc,
+   kIOReturnBadArgument=0xe00002c2, kIOReturnIOError=0xe00002ca,
+   kIOReturnBusy=0xe00002d5, kIOReturnTimeout=0xe00002d6, kIOReturnNotReady=0xe00002d8;
++constexpr IOReturn kIOReturnNotPrivileged=0xe00002c1; // Test-only mirror of the XNU constant.
+ #include "../RootTransportLayout.h"
+ constexpr unsigned kMicrosecondScale=1;
+ constexpr unsigned kMillisecondScale=1000;
+@@ -35,12 +64,16 @@
+ }
+ static uint64_t mach_absolute_time() { return callback(4,0,0,nullptr); }
+ static void IODelay(uint32_t us) { callback(5,0,us,nullptr); }
+-static void IOLockLock(void *) {}
+-static void IOLockUnlock(void *) {}
+-static bool IOLockTryLock(void *) { return true; }
+ struct IOLock;
+ constexpr int THREAD_UNINT=0;
+-static int IOLockSleep(void *, void *, int) { assert(!"single-threaded harness: the slot pool never runs empty"); return 0; }
++// A real mutex so a concurrency test can give the slot pool an actual lock; the single-threaded
++// harness passes null and keeps the previous no-op behavior. IOLockSleep/IOLockWakeup are only
++// reached when the slot pool runs dry, which no harness does (a test must size the pool so it
++// never empties), so their bodies stay as guards.
++static void IOLockLock(void *lock) { if (lock) static_cast<std::mutex *>(lock)->lock(); }
++static void IOLockUnlock(void *lock) { if (lock) static_cast<std::mutex *>(lock)->unlock(); }
++static bool IOLockTryLock(void *lock) { return lock ? static_cast<std::mutex *>(lock)->try_lock() : true; }
++static int IOLockSleep(void *, void *, int) { assert(!"harness slot pool ran empty: size the pool for the test"); return 0; }
+ static void IOLockWakeup(void *, void *, bool) {}
+ static IOReturn recordTransport(IOReturn result,uint32_t ocs) {
+   gRootDiagnostic.result=result; gRootDiagnostic.ocs=ocs; return result;
+@@ -58,6 +91,7 @@
+   gHost={memory,physical,true,false,0,nullptr}; gRootDiagnostic=UfsRootDiagnostics{};
+   gStoreOpen=gLogOpen=false; gStoreFirst=gStoreBlocks=gLogFirst=gLogBlocks=0;
+   hostSlotGeometryRegionA(kRegionSlots); hostSlotsInit(kRegionSlots,nullptr); gHostPanic=false; gOutstanding=0;
++  hostWriteWindowsReset();
+ }
+ void ufs_test_slots(unsigned count) { hostSlotGeometryRegionA(count); hostSlotsInit(count,nullptr); }
+ unsigned ufs_test_slot_count() { return gSlotCount; }
+@@ -77,10 +111,25 @@
+   return hostScsi(lun,cdb,length,read,bytes,200000,scsi);
+ }
+ uint32_t ufs_test_read(uint8_t lun,uint64_t lba,uint32_t blocks,void *out) { return hostRead4k(lun,lba,blocks,out); }
++uint32_t ufs_test_capacity(uint64_t *blocks) { return hostReadCapacity10(blocks); }
++uint32_t ufs_test_establish(uint64_t capacity,uint64_t first,uint64_t last,uint64_t floor,
++                            uint64_t backupHeader,uint64_t backupEntries) {
++  static const uint8_t diskGuid[16]={0x10,0x32,0x54,0x76,0x98,0xba,0xdc,0xfe,
++                                     0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef};
++  static const uint8_t partitionGuid[16]={0x20,0x42,0x64,0x86,0xa8,0xca,0xec,0x0e,
++                                          0x11,0x33,0x55,0x77,0x99,0xbb,0xdd,0xff};
++  return ufsWriteAuthorityEstablish(capacity,first,last,floor,backupHeader,backupEntries,
++                                    0x11112222,0x22223333,0xaaaabbbb,0x22223333,0,
++                                    diskGuid,kUfsDarwinTypeGuid,partitionGuid) ? 1 : 0;
++}
+ uint32_t ufs_test_store_open(uint64_t first,uint64_t blocks) { return hostStoreOpen(first,blocks) ? 1 : 0; }
+-uint32_t ufs_test_log_open(uint64_t first,uint64_t blocks) { return hostLogOpen(first,blocks) ? 1 : 0; }
+-uint32_t ufs_test_write(uint8_t lun,uint64_t lba,uint32_t blocks,const void *src) { return hostWrite4k(lun,lba,blocks,src); }
+-uint32_t ufs_test_sync() { return hostSyncCache(); }
++uint32_t ufs_test_log_open(uint64_t exportFirst,uint64_t exportBlocks,uint64_t logFirst,uint64_t logBlocks) {
++  return hostLogOpen(exportFirst,exportBlocks,logFirst,logBlocks) ? 1 : 0;
++}
++uint32_t ufs_test_write(uint32_t role,uint8_t lun,uint64_t lba,uint32_t blocks,const void *src) {
++  return hostWrite4k(static_cast<UfsWriteRole>(role),lun,lba,blocks,src);
++}
++uint32_t ufs_test_sync(uint32_t role) { return hostSyncCache(static_cast<UfsWriteRole>(role)); }
+ uint32_t ufs_test_nop() {
+   return hostNop();
+ }
+diff --git a/tests/RootLayout.cpp b/tests/RootLayout.cpp
+--- a/tests/RootLayout.cpp
++++ b/tests/RootLayout.cpp
+@@ -1,92 +1,250 @@
+ // SPDX-License-Identifier: BSD-2-Clause-Patent
++#ifdef _WIN32
++#define WIN32_LEAN_AND_MEAN
++#define NOMINMAX
++#define _CRT_SECURE_NO_WARNINGS
++#include <windows.h>
++#include <bcrypt.h>
++#pragma comment(lib,"bcrypt.lib")
++#undef far
++#else
+ #define OPENSSL_SUPPRESS_DEPRECATED
+ #include <openssl/sha.h>
++#endif
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstring>
+ #include <cassert>
+ #include <functional>
+ #include <fstream>
++#include <limits>
+ #include "../RootDiagnostics.h"
+ using IOReturn=uint32_t;
+ constexpr IOReturn kIOReturnSuccess=0;
+ constexpr unsigned kDataMax=131072;
+ static UfsRootDiagnostics gRootDiagnostic;
+-static uint8_t header[4096],entries[16384],manifest[4096];
+-static uint64_t userdata=8;
+-static unsigned reads;
+-static bool failRead;
+-static IOReturn hostRead4k(uint8_t,uint64_t lba,uint32_t blocks,void *out) {
+-  ++reads; if(failRead) return 1;
+-  if(lba==1 && blocks==1) memcpy(out,header,4096);
+-  else if(lba==2 && blocks<=4) memcpy(out,entries,blocks*4096);
+-  else if(lba==userdata && blocks==1) memcpy(out,manifest,4096);
+-  else { assert(false); }
++
++#ifdef _WIN32
++struct SHA256_CTX {
++  BCRYPT_ALG_HANDLE algorithm;
++  BCRYPT_HASH_HANDLE hash;
++  PUCHAR object;
++  ULONG objectBytes;
++};
++static void shaCheck(NTSTATUS status) { assert(status >= 0); }
++static void SHA256_Init(SHA256_CTX *context) {
++  DWORD result=0;
++  shaCheck(BCryptOpenAlgorithmProvider(&context->algorithm,BCRYPT_SHA256_ALGORITHM,nullptr,0));
++  shaCheck(BCryptGetProperty(context->algorithm,BCRYPT_OBJECT_LENGTH,
++                             reinterpret_cast<PUCHAR>(&context->objectBytes),sizeof(context->objectBytes),&result,0));
++  context->object=static_cast<PUCHAR>(HeapAlloc(GetProcessHeap(),0,context->objectBytes));
++  assert(context->object);
++  shaCheck(BCryptCreateHash(context->algorithm,&context->hash,context->object,context->objectBytes,nullptr,0,0));
++}
++static void SHA256_Update(SHA256_CTX *context,const void *data,size_t bytes) {
++  assert(bytes<=(std::numeric_limits<ULONG>::max)());
++  shaCheck(BCryptHashData(context->hash,static_cast<PUCHAR>(const_cast<void *>(data)),static_cast<ULONG>(bytes),0));
++}
++static void SHA256_Final(unsigned char digest[32],SHA256_CTX *context) {
++  shaCheck(BCryptFinishHash(context->hash,digest,32,0));
++  shaCheck(BCryptDestroyHash(context->hash));
++  shaCheck(BCryptCloseAlgorithmProvider(context->algorithm,0));
++  HeapFree(GetProcessHeap(),0,context->object);
++}
++static void SHA256(const unsigned char *data,size_t bytes,unsigned char digest[32]) {
++  SHA256_CTX context;
++  SHA256_Init(&context);
++  SHA256_Update(&context,data,bytes);
++  SHA256_Final(digest,&context);
++}
++static void bzero(void *data,size_t bytes) { memset(data,0,bytes); }
++#endif
++
++static uint8_t primaryHeader[4096],backupHeader[4096];
++static uint8_t primaryEntries[16384],backupEntries[16384],manifest[4096];
++static uint64_t rootFirst=8,rootLast=506;
++static uint64_t firstUsable=6,lastUsable=506,backupHeaderLba=511,backupEntriesLba=507;
++static uint64_t reads;
++static bool failRead,allReadsLunZero;
++
++static IOReturn hostRead4k(uint8_t lun,uint64_t lba,uint32_t blocks,void *out) {
++  ++reads;
++  allReadsLunZero=allReadsLunZero && lun==0;
++  if(lun!=0 || failRead) return 1;
++  if(lba==1 && blocks==1) memcpy(out,primaryHeader,4096);
++  else if(lba==2 && blocks==4) memcpy(out,primaryEntries,16384);
++  else if(lba==backupEntriesLba && blocks==4) memcpy(out,backupEntries,16384);
++  else if(lba==backupHeaderLba && blocks==1) memcpy(out,backupHeader,4096);
++  else if(lba==rootFirst && blocks==1) memcpy(out,manifest,4096);
++  else return 1;
+   return 0;
+ }
+ #include "../RootLayout.h"
++
+ static void put32(uint8_t *p,uint32_t v) { for(unsigned i=0;i<4;++i)p[i]=uint8_t(v>>(i*8)); }
+ static void put64(uint8_t *p,uint64_t v) { for(unsigned i=0;i<8;++i)p[i]=uint8_t(v>>(i*8)); }
++static const uint8_t darwinType[16]={0xaf,0x3d,0xc6,0x0f,0x83,0x84,0x72,0x47,
++                                     0x8e,0x79,0x3d,0x69,0xd8,0x47,0x7d,0xe4};
++static const uint8_t diskGuid[16]={0x10,0x32,0x54,0x76,0x98,0xba,0xdc,0xfe,
++                                   0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef};
++static const uint8_t partitionGuid[16]={0x20,0x42,0x64,0x86,0xa8,0xca,0xec,0x0e,
++                                        0x11,0x33,0x55,0x77,0x99,0xbb,0xdd,0xff};
++
+ static void checksums() {
+   SHA256(manifest,4064,manifest+4064);
+-  put32(header+88,rootCrc32(entries,32*128));
+-  put32(header+16,rootCrc32(header,92,true));
++  put32(primaryHeader+88,rootCrc32(primaryEntries,16384));
++  put32(backupHeader+88,rootCrc32(backupEntries,16384));
++  put32(primaryHeader+16,rootCrc32(primaryHeader,92,true));
++  put32(backupHeader+16,rootCrc32(backupHeader,92,true));
++}
++static void buildHeader(uint8_t *header,uint64_t current,uint64_t alternate,uint64_t entriesLba) {
++  memset(header,0,4096);
++  memcpy(header,"EFI PART",8);put32(header+8,0x10000);put32(header+12,92);
++  put64(header+24,current);put64(header+32,alternate);
++  put64(header+40,firstUsable);put64(header+48,lastUsable);memcpy(header+56,diskGuid,16);
++  put64(header+72,entriesLba);put32(header+80,128);put32(header+84,128);
++}
++static void setName(uint8_t *entry,const char *name) {
++  memset(entry+56,0,72);
++  while(*name) {
++    entry[56]=static_cast<uint8_t>(*name++);
++    entry+=2;
++  }
++}
++static void makePartition(uint8_t *entry,const uint8_t *type,const uint8_t *identity,
++                          uint64_t first,uint64_t last,const char *name) {
++  memset(entry,0,128);memcpy(entry,type,16);memcpy(entry+16,identity,16);
++  put64(entry+32,first);put64(entry+40,last);setName(entry,name);
++}
++static void setDarwinGeometry(uint64_t first,uint64_t last) {
++  put64(primaryEntries+32,first);put64(primaryEntries+40,last);
++  put64(backupEntries+32,first);put64(backupEntries+40,last);
+ }
+ static void fixture() {
+-  memset(header,0,sizeof(header)); memset(entries,0,sizeof(entries)); memset(manifest,0,sizeof(manifest));
+-  reads=0; failRead=false; userdata=8;
+-  memcpy(header,"EFI PART",8); put32(header+8,0x10000);put32(header+12,92);
+-  put64(header+24,1);put64(header+32,511);put64(header+40,6);put64(header+48,506);
+-  put64(header+72,2);put32(header+80,32);put32(header+84,128);
+-  entries[0]=1; entries[16]=2;put64(entries+32,8);put64(entries+40,506);
+-  for(unsigned i=0;i<8;++i)entries[56+2*i]="userdata"[i];
++  memset(primaryEntries,0,sizeof(primaryEntries));memset(backupEntries,0,sizeof(backupEntries));
++  memset(manifest,0,sizeof(manifest));
++  reads=0;failRead=false;allReadsLunZero=true;
++  rootFirst=8;rootLast=506;firstUsable=6;lastUsable=506;backupHeaderLba=511;backupEntriesLba=507;
++  buildHeader(primaryHeader,1,backupHeaderLba,2);
++  buildHeader(backupHeader,backupHeaderLba,1,backupEntriesLba);
++  makePartition(primaryEntries,darwinType,partitionGuid,rootFirst,rootLast,"darwin");
++  memcpy(backupEntries,primaryEntries,128);
+   memcpy(manifest,"SHNGROOT",8);put32(manifest+8,1);put32(manifest+12,2);put64(manifest+16,65536);
+   for(unsigned i=0;i<2;++i) {
+-    uint8_t *e=manifest+24+i*128;strcpy(reinterpret_cast<char *>(e),i?"SystemOS":"OS");
++    uint8_t *e=manifest+24+i*128;
++    strcpy(reinterpret_cast<char *>(e),i?"SystemOS":"OS");
+     put64(e+32,4096+i*16384);put64(e+40,8192+512);put32(e+48,512);put32(e+52,1);
+   }
+   checksums();
+ }
+-static void expect(const std::function<void()> &change,bool gpt,uint32_t status,bool rehash=true) {
+-  fixture();change();if(rehash)checksums();RootLayout layout;const char *why=nullptr;
++static void expect(const char *name,const std::function<void()> &change,bool layoutAccepted,
++                   uint32_t status,bool rehash=true) {
++  fixture();change();if(rehash)checksums();
++  RootLayout layout;const char *why=nullptr;
+   bool result=findRootLayout(&layout,&why);
+-  assert(result==gpt);if(gpt)assert(layout.manifestStatus==status);
+-  if(!result || status)assert(layout.windows==0);
+-}
++  if(result!=layoutAccepted || (result && layout.manifestStatus!=status)) {
++    printf("FAIL: %s result=%d why=%s manifest=%u\n",name,result,why?why:"(null)",layout.manifestStatus);
++    assert(false);
++  }
++  if(!result || status) assert(layout.windows==0);
++  assert(allReadsLunZero);
++  printf("PASS: %s -> %s%s%s%s\n",name,result?"accepted":"rejected",
++         why?" (":"",why?why:"",why?")":"");
++}
++
+ int main(int argc,char **argv) {
+   assert(rootCrc32(reinterpret_cast<const uint8_t *>("123456789"),9)==0xcbf43926);
+-  expect([]{},true,0);
+-  expect([]{header[16]^=1;},false,0,false);
+-  expect([]{entries[16]^=1;},false,0,false);
+-  expect([]{put32(header+12,4097);},false,0);
+-  expect([]{put64(header+24,2);},false,0);
+-  expect([]{put32(header+20,1);},false,0);
+-  expect([]{put32(header+80,129);},false,0);
+-  expect([]{put64(header+32,UINT64_MAX);},false,0);
+-  expect([]{put64(header+40,2);},false,0);
+-  expect([]{put64(header+48,511);},false,0);
+-  expect([]{put64(entries+32,1);},false,0);
+-  expect([]{put64(entries+40,UINT64_MAX);},false,0);
+-  expect([]{entries[0]=0;},false,0);
+-  expect([]{memcpy(entries+128,entries,128);},false,0);
+-  expect([]{memcpy(entries+128,entries,128);put64(entries+40,100);put64(entries+128+32,101);},false,0);
+-  expect([]{failRead=true;},false,0);
+-  expect([]{manifest[0]^=1;},true,1);
+-  expect([]{put32(manifest+12,5);},true,2);
+-  expect([]{manifest[4064]^=1;},true,3,false);
+-  expect([]{put64(manifest+16,UINT64_MAX);},true,4);
+-  expect([]{put64(manifest+24+32,0);},true,4);
+-  expect([]{put64(manifest+24+40,UINT64_MAX-511);},true,4);
+-  expect([]{put64(manifest+24+40,512+1);},true,4);
+-  expect([]{put64(manifest+24+128+32,8192);},true,6);
+-  expect([]{strcpy(reinterpret_cast<char *>(manifest+24+128),"OS");},true,5);
+-  expect([]{memset(manifest+24,'A',32);},true,5);
+-  expect([]{manifest[24]='\n';},true,5);
+-  expect([]{manifest[24]=0;},true,5);
+-  expect([]{put32(manifest+24+48,4096);},true,7);
+-  expect([]{put32(manifest+24+52,0);},true,7);
++  expect("valid primary/backup darwin GPT",[]{},true,0);
++  {
++    fixture();RootLayout layout;const char *why=nullptr;
++    assert(findRootLayout(&layout,&why));
++    assert(layout.userdataFirst==rootFirst && layout.userdataLast==rootLast && layout.userdataBlocks==499);
++    assert(layout.gptMatchedEntry==0 && !memcmp(layout.gptDiskGuid,diskGuid,16));
++    assert(!memcmp(layout.partitionTypeGuid,darwinType,16) && !memcmp(layout.partitionGuid,partitionGuid,16));
++  }
++  expect("no manifest is accepted but remains unusable",[]{manifest[0]=0;},true,1);
++  expect("primary header CRC",[]{primaryHeader[16]^=1;},false,0,false);
++  expect("primary entries CRC",[]{primaryEntries[16]^=1;},false,0,false);
++  expect("backup header CRC",[]{backupHeader[16]^=1;},false,0,false);
++  expect("backup entries CRC",[]{backupEntries[16]^=1;},false,0,false);
++  expect("userdata name has no fallback",[]{
++    setName(primaryEntries,"userdata");setName(backupEntries,"userdata");
++  },false,0);
++  expect("exact darwin name rejects trailing text",[]{
++    primaryEntries[56+14]='X';backupEntries[56+14]='X';
++  },false,0);
++  expect("wrong darwin type GUID",[]{
++    primaryEntries[0]^=1;backupEntries[0]^=1;
++  },false,0);
++  expect("zero darwin unique identity",[]{
++    memset(primaryEntries+16,0,16);memset(backupEntries+16,0,16);
++  },false,0);
++  expect("zero disk GUID",[]{
++    memset(primaryHeader+56,0,16);memset(backupHeader+56,0,16);
++  },false,0);
++  expect("duplicate darwin partition",[]{
++    uint8_t secondIdentity[16]={};secondIdentity[0]=1;
++    makePartition(primaryEntries+128,darwinType,secondIdentity,6,7,"darwin");
++    memcpy(backupEntries+128,primaryEntries+128,128);
++  },false,0);
++  expect("duplicate GPT partition identity",[]{
++    makePartition(primaryEntries+128,darwinType,partitionGuid,6,7,"other");
++    memcpy(backupEntries+128,primaryEntries+128,128);
++  },false,0);
++  expect("primary/backup entries differ",[]{
++    backupEntries[16]^=1;
++  },false,0);
++  expect("primary/backup disk GUID differ",[]{
++    backupHeader[56]^=1;
++  },false,0);
++  expect("bad entry size",[]{
++    put32(primaryHeader+84,256);put32(backupHeader+84,256);
++  },false,0);
++  expect("zero entry count",[]{
++    put32(primaryHeader+80,0);put32(backupHeader+80,0);
++  },false,0);
++  expect("darwin first exceeds last",[]{
++    setDarwinGeometry(500,499);
++  },false,0);
++  expect("darwin outside usable range",[]{
++    setDarwinGeometry(rootFirst,lastUsable+1);
++  },false,0);
++  expect("partition overlap",[]{
++    uint8_t secondIdentity[16]={};secondIdentity[0]=1;
++    makePartition(primaryEntries+128,darwinType,secondIdentity,100,200,"other");
++    memcpy(backupEntries+128,primaryEntries+128,128);
++  },false,0);
++  expect("backup alternate LBA mismatch",[]{
++    put64(backupHeader+32,2);
++  },false,0);
++  expect("backup current LBA mismatch",[]{
++    put64(backupHeader+24,backupHeaderLba-1);
++  },false,0);
++  expect("backup usable range mismatch",[]{
++    put64(backupHeader+48,lastUsable-1);
++  },false,0);
++  expect("backup entries collide with header",[]{
++    put64(backupHeader+72,backupHeaderLba);
++  },false,0);
++  expect("GPT header read failure",[]{failRead=true;},false,0);
++  expect("manifest magic",[]{manifest[0]^=1;},true,1);
++  expect("manifest count",[]{put32(manifest+12,5);},true,2);
++  expect("manifest hash",[]{manifest[4064]^=1;},true,3,false);
++  expect("manifest image overflow",[]{put64(manifest+16,UINT64_MAX);},true,4);
++  expect("manifest window zero offset",[]{put64(manifest+24+32,0);},true,4);
++  expect("manifest window overflow",[]{put64(manifest+24+40,UINT64_MAX-511);},true,4);
++  expect("manifest window beyond image",[]{put64(manifest+24+40,512+1);},true,4);
++  expect("manifest windows overlap",[]{put64(manifest+24+128+32,8192);},true,6);
++  expect("manifest duplicate name",[]{strcpy(reinterpret_cast<char *>(manifest+24+128),"OS");},true,5);
++  expect("manifest name bytes",[]{memset(manifest+24,'A',32);},true,5);
++  expect("manifest control byte",[]{manifest[24]='\n';},true,5);
++  expect("manifest empty name",[]{manifest[24]=0;},true,5);
++  expect("manifest window alignment",[]{put32(manifest+24+48,4096);},true,7);
++  expect("manifest window flag",[]{put32(manifest+24+52,0);},true,7);
+   // A final physical 4K read may include padding, but cannot enter another window.
+-  expect([]{put64(manifest+24+40,4096+512);put64(manifest+24+128+32,8192);},true,6);
++  expect("manifest final padding overlap",[]{
++    put64(manifest+24+40,4096+512);put64(manifest+24+128+32,8192);
++  },true,6);
+   // Version 2: data objects (flags 3, 4096-byte blocks) are kept apart from the windows.
+   auto object=[](unsigned slot,const char *name,uint64_t offset,uint64_t size){
+     uint8_t *e=manifest+24+slot*128;memset(e,0,128);strcpy(reinterpret_cast<char *>(e),name);
+@@ -99,27 +257,48 @@
+     assert(findRootLayout(&layout,&why) && layout.manifestStatus==0 && layout.windows==2 && layout.objects==2);
+     assert(!strcmp(layout.object[0].name,"OS.vroot") && layout.object[0].size==4064 && layout.object[1].offset==45056);
+   }
+-  expect([&]{put32(manifest+12,3);object(2,"OS.vroot",40960,4096);},true,7);           // objects need version 2
+-  expect([&]{put32(manifest+8,2);put32(manifest+12,1);object(0,"OS.vroot",40960,4096);},true,7);  // no window
+-  expect([&]{put32(manifest+8,2);put32(manifest+12,3);object(2,"OS.vroot",8192,4096);},true,6);   // overlaps a window
+-  expect([&]{put32(manifest+8,2);put32(manifest+12,3);object(2,"OS",40960,4096);},true,5);        // name taken
+-  expect([&]{put32(manifest+8,2);put32(manifest+12,9);},true,2);
+-  expect([&]{put32(manifest+8,2);put32(manifest+12,3);object(2,"OS.vroot",40960,4096);put32(manifest+24+256+48,512);},true,7);
++  expect("version 1 rejects data object",[&]{
++    put32(manifest+12,3);object(2,"OS.vroot",40960,4096);
++  },true,7);
++  expect("version 2 requires a window",[&]{
++    put32(manifest+8,2);put32(manifest+12,1);object(0,"OS.vroot",40960,4096);
++  },true,7);
++  expect("object overlaps a window",[&]{
++    put32(manifest+8,2);put32(manifest+12,3);object(2,"OS.vroot",8192,4096);
++  },true,6);
++  expect("object reuses a name",[&]{
++    put32(manifest+8,2);put32(manifest+12,3);object(2,"OS",40960,4096);
++  },true,5);
++  expect("too many manifest entries",[]{put32(manifest+8,2);put32(manifest+12,9);},true,2);
++  expect("object block size",[&]{
++    put32(manifest+8,2);put32(manifest+12,3);object(2,"OS.vroot",40960,4096);
++    put32(manifest+24+256+48,512);
++  },true,7);
+   // Bounded mutation pass checks parser memory safety, not semantic correctness.
+   for(unsigned i=0;i<2048;++i) {
+-    fixture(); unsigned at=(i*313)%4064;manifest[at]^=uint8_t(1+(i%255));checksums();
++    fixture();unsigned at=(i*313)%4064;manifest[at]^=uint8_t(1+(i%255));checksums();
+     RootLayout layout;const char *why=nullptr;(void)findRootLayout(&layout,&why);
+   }
+   if(argc==2) {
+-    fixture();std::ifstream f(argv[1],std::ios::binary);f.read(reinterpret_cast<char *>(manifest),4096);assert(f.gcount()==4096);
+-    userdata=0x2f3840;put64(entries+32,userdata);put64(entries+40,0x3d0abfa);
+-    put64(header+32,0x3d0abff);put64(header+48,0x3d0abfa);
++    fixture();std::ifstream f(argv[1],std::ios::binary);f.read(reinterpret_cast<char *>(manifest),4096);
++    assert(f.gcount()==4096);
++    rootFirst=0x2f3840;rootLast=0x3d0abfa;firstUsable=6;lastUsable=0x3d0abff;
++    backupHeaderLba=lastUsable+5;backupEntriesLba=lastUsable+1;
++    buildHeader(primaryHeader,1,backupHeaderLba,2);
++    buildHeader(backupHeader,backupHeaderLba,1,backupEntriesLba);
++    makePartition(primaryEntries,darwinType,partitionGuid,rootFirst,rootLast,"darwin");
++    memcpy(backupEntries,primaryEntries,128);
+     // Only the synthetic GPT is rechecksummed. Preserve the actual on-host manifest hash.
+-    put32(header+88,rootCrc32(entries,4096));put32(header+16,rootCrc32(header,92,true));
++    put32(primaryHeader+88,rootCrc32(primaryEntries,16384));
++    put32(backupHeader+88,rootCrc32(backupEntries,16384));
++    put32(primaryHeader+16,rootCrc32(primaryHeader,92,true));
++    put32(backupHeader+16,rootCrc32(backupHeader,92,true));
+     RootLayout layout;const char *why=nullptr;
+     assert(findRootLayout(&layout,&why) && layout.manifestStatus==0 && layout.windows==2);
+-    printf("PASS: existing root image's 4096-byte manifest, OS=%llu SystemOS=%llu; synthetic GPT uses recorded geometry, no full-image rehash\n",
++    printf("PASS: existing root image manifest OS=%llu SystemOS=%llu; synthetic GPT uses recorded geometry\n",
+            (unsigned long long)layout.window[0].size,(unsigned long long)layout.window[1].size);
+   }
+-  puts("PASS: GPT CRC/geometry/partition faults, manifest hashes/names/attributes/overlap/overflow, version 2 objects, 2048 bounded mutations");
+-}
++  puts("PASS: exact darwin name/type/identity/LUN GPTS, primary+backup CRC/content/geometry, "
++       "partition bounds/overlap/capacity, manifest validation and 2048 bounded mutations");
++  assert(allReadsLunZero);
++}
+diff --git a/tests/check_arm64_root_commands.py b/tests/check_arm64_root_commands.py
+--- a/tests/check_arm64_root_commands.py
++++ b/tests/check_arm64_root_commands.py
+@@ -100,7 +100,7 @@
+         results.append({'case':name,'dma_pa':hex(physical),'shareability':sharing,'passed':True,
+                         'registers':dict(re.findall(r'^(\w+)=(0x[0-9a-f]+)$',log,re.M))})
+     files=[production,source/'RootCommandsArm64.cpp',source/'RootCommandsArm64.S',Path(__file__).resolve()]
+-    files += [source.parent/name for name in ('RootCommands.h','RootQueue.h','TransferPoll.h',
++    files += [source.parent/name for name in ('RootCommands.h','UfsWriteAuthority.h','RootQueue.h','TransferPoll.h',
+                                              'RootTransportLayout.h','RootDiagnostics.h')]
+     report={'results':results,'qemu':subprocess.check_output([qemu,'--version'],text=True).splitlines()[0],
+             'compiler':subprocess.check_output([compiler,'--version'],text=True).splitlines()[0],
+diff --git a/tests/check_legacy_descriptors.py b/tests/check_legacy_descriptors.py
+--- a/tests/check_legacy_descriptors.py
++++ b/tests/check_legacy_descriptors.py
+@@ -42,7 +42,7 @@
+ }
+ static void zero32(void *p,unsigned length) { memset(p,0,length); }
+ static void be32(uint8_t *p,uint32_t value) { putBe32(p,value); }
+-struct UfsResult {};
++struct UfsResult { uint32_t ocs,response,scsi,sense,senseLen,seg; };
+ static unsigned cases;
+ static void same(const uint8_t *old) {
+   assert(!memcmp(sent.data(),old,32));
+diff --git a/tests/check_qemu_root_commands.py b/tests/check_qemu_root_commands.py
+--- a/tests/check_qemu_root_commands.py
++++ b/tests/check_qemu_root_commands.py
+@@ -39,13 +39,18 @@
+ lib.ufs_test_scsi.restype = C.c_uint32
+ lib.ufs_test_read.argtypes = [C.c_uint8,C.c_uint64,C.c_uint32,C.c_void_p]
+ lib.ufs_test_read.restype = C.c_uint32
++lib.ufs_test_capacity.argtypes = [C.POINTER(C.c_uint64)]
++lib.ufs_test_capacity.restype = C.c_uint32
++lib.ufs_test_establish.argtypes = [C.c_uint64,C.c_uint64,C.c_uint64,C.c_uint64,C.c_uint64,C.c_uint64]
++lib.ufs_test_establish.restype = C.c_uint32
+ lib.ufs_test_poisoned.restype = C.c_bool
+ lib.ufs_test_store_open.argtypes = [C.c_uint64,C.c_uint64]
+ lib.ufs_test_store_open.restype = C.c_uint32
+-lib.ufs_test_log_open.argtypes = [C.c_uint64,C.c_uint64]
++lib.ufs_test_log_open.argtypes = [C.c_uint64,C.c_uint64,C.c_uint64,C.c_uint64]
+ lib.ufs_test_log_open.restype = C.c_uint32
+-lib.ufs_test_write.argtypes = [C.c_uint8,C.c_uint64,C.c_uint32,C.c_void_p]
++lib.ufs_test_write.argtypes = [C.c_uint32,C.c_uint8,C.c_uint64,C.c_uint32,C.c_void_p]
+ lib.ufs_test_write.restype = C.c_uint32
++lib.ufs_test_sync.argtypes = [C.c_uint32]
+ lib.ufs_test_sync.restype = C.c_uint32
+ lib.ufs_test_report.argtypes = [C.c_void_p,C.c_size_t]
+ lib.ufs_test_stop_queue.restype = C.c_bool
+@@ -166,33 +171,41 @@
+                 assert lib.ufs_test_read(0, 0x10000, 1, rejected) != 0, 'Invalid LBA accepted'
+                 assert bytes(rejected) == bytes([0xa5]) * 4096, 'Error path copied stale payload'
+                 assert not errors, errors
++                # Every write first needs the verified darwin/GPT/capacity base.
++                capacity = C.c_uint64()
++                assert lib.ufs_test_capacity(C.byref(capacity)) == 0 and capacity.value == 512
++                assert lib.ufs_test_establish(capacity.value, 8, 506, 64, 511, 507) == 1
+                 # Persistent-store window: nothing is writable until it is opened; writes outside it are refused before any I/O.
+                 block = (C.c_uint8 * 4096)(*([0x5a] * 4096))
+-                assert lib.ufs_test_write(0, 448, 1, block) == 0xe00002c2, 'Write accepted before the window was opened'
+-                assert lib.ufs_test_sync() == 0xe00002d8, 'Sync accepted before the window was opened'
+-                assert lib.ufs_test_store_open(448, 32) == 1 and lib.ufs_test_store_open(448, 32) == 0, 'Window must open exactly once'
+-                for lba, blocks in ((447, 1), (479, 2), (480, 1), (0, 1), (8, 1)):
+-                    assert lib.ufs_test_write(0, lba, blocks, (C.c_uint8 * (4096 * blocks))()) == 0xe00002c2, f'Write outside the window accepted at {lba}'
+-                assert lib.ufs_test_write(1, 448, 1, block) == 0xe00002c2, 'Write to another LUN accepted'
++                assert lib.ufs_test_write(1, 0, 448, 1, block) == 0xe00002c1, 'Write accepted before the window was opened'
++                assert lib.ufs_test_sync(1) == 0xe00002c1, 'Sync accepted before the window was opened'
++                assert lib.ufs_test_store_open(448, 16) == 1 and lib.ufs_test_store_open(448, 16) == 0, 'Window must open exactly once'
++                for lba, blocks in ((447, 1), (463, 2), (464, 1), (0, 1), (8, 1)):
++                    assert lib.ufs_test_write(1, 0, lba, blocks, (C.c_uint8 * (4096 * blocks))()) == 0xe00002c1, f'Write outside the window accepted at {lba}'
++                assert lib.ufs_test_write(1, 1, 448, 1, block) == 0xe00002c2, 'Write to another LUN accepted'
+                 wpattern = bytes((i * 7 + physical // 4096 + 3) & 255 for i in range(4096 * 5))
+-                assert lib.ufs_test_write(0, 449, 5, wpattern) == 0, 'WRITE(10) failed'
+-                assert lib.ufs_test_sync() == 0, 'SYNCHRONIZE CACHE failed'
++                assert lib.ufs_test_write(1, 0, 449, 5, wpattern) == 0, 'WRITE(10) failed'
++                assert lib.ufs_test_sync(1) == 0, 'SYNCHRONIZE CACHE failed'
+                 back = (C.c_uint8 * (4096 * 5))()
+                 assert lib.ufs_test_read(0, 449, 5, back) == 0 and bytes(back) == wpattern, 'Write did not read back'
+-                assert lib.ufs_test_write(0, 479, 1, block) == 0, 'Last block of the window refused'
+-                assert lib.ufs_test_write(0, 448, 1, block) == 0, 'First block of the window refused'
+-                assert lib.ufs_test_sync() == 0
+-                # Log window: a second window that may not overlap the store window; writes stay inside one of the two.
+-                assert lib.ufs_test_log_open(470, 16) == 0, 'Log window overlapping the store window accepted'
+-                assert lib.ufs_test_log_open(480, 16) == 1 and lib.ufs_test_log_open(480, 16) == 0, 'Log window must open exactly once'
+-                assert lib.ufs_test_write(0, 496, 1, block) == 0xe00002c2, 'Write past the log window accepted'
+-                assert lib.ufs_test_write(0, 479, 2, (C.c_uint8 * 8192)()) == 0xe00002c2, 'Write across two windows accepted'
++                assert lib.ufs_test_write(1, 0, 463, 1, block) == 0, 'Last block of the window refused'
++                assert lib.ufs_test_write(1, 0, 448, 1, block) == 0, 'First block of the window refused'
++                assert lib.ufs_test_sync(1) == 0
++                # Export and log are separate non-overlapping grants.
++                assert lib.ufs_test_log_open(450, 16, 480, 16) == 0, 'Log window overlapping the store window accepted'
++                assert lib.ufs_test_log_open(464, 16, 480, 16) == 1 and lib.ufs_test_log_open(464, 16, 480, 16) == 0, 'Log window must open exactly once'
++                assert lib.ufs_test_write(2, 0, 480, 1, block) == 0xe00002c1, 'Export role crossed into log window'
++                assert lib.ufs_test_write(3, 0, 464, 1, block) == 0xe00002c1, 'Log role crossed into export window'
++                assert lib.ufs_test_write(1, 0, 447, 1, block) == 0xe00002c1, 'Data role crossed into export window'
++                assert lib.ufs_test_write(3, 0, 496, 1, block) == 0xe00002c1, 'Write past the log window accepted'
+                 logblock = (C.c_uint8 * 4096)(*([0x6c] * 4096))
+-                assert lib.ufs_test_write(0, 480, 1, logblock) == 0 and lib.ufs_test_write(0, 495, 1, logblock) == 0, 'Log window refused'
+-                assert lib.ufs_test_sync() == 0
++                assert lib.ufs_test_write(2, 0, 464, 1, logblock) == 0 and lib.ufs_test_write(2, 0, 479, 1, logblock) == 0, 'Export window refused'
++                assert lib.ufs_test_write(3, 0, 480, 1, logblock) == 0 and lib.ufs_test_write(3, 0, 495, 1, logblock) == 0, 'Log window refused'
++                assert lib.ufs_test_sync(3) == 0
+                 assert not lib.ufs_test_poisoned() and not errors, errors
+                 results.append({'dma': hex(physical), 'nop': 'pass', 'power_query': value.value, 'store_window': 'pass',
+-                    'root_path': path_result, 'read_4k': 'pass', 'read_128k': 'pass', 'bad_lba_no_copy': 'pass'})
++            'root_path': path_result, 'read_4k': 'pass', 'read_128k': 'pass', 'bad_lba_no_copy': 'pass',
++            'write_authority': 'pass'})
+         finally:
+             process.terminate()
+             try: process.wait(timeout=5)
+diff --git a/UfsWriteAuthority.h b/UfsWriteAuthority.h
+new file mode 100644
+--- /dev/null
++++ b/UfsWriteAuthority.h
+@@ -0,0 +1,505 @@
++// SPDX-License-Identifier: BSD-2-Clause-Patent
++#pragma once
++
++// Deny-by-default authorization for the UFS command layer. Establishing the base binds every
++// later write to the verified darwin GPT identity and controller-reported LUN capacity. Registering
++// a role then grants only that role's checked window. A revoked or failed authority never reopens
++// without a new root-layout verification.
++//
++// Stage 0B-3B concurrency contract. The whole authority object is guarded by one platform lock.
++// Every transition (Establish, Register, Revoke, Reset, in-flight enter/exit) and the
++// check -> WRITE doorbell submit window run under that lock. The lock is therefore the
++// linearization point of "may this WRITE be submitted?" and of "has the authority been
++// withdrawn?": a withdrawal that has linearized (state left Ready) can never be overtaken by a
++// later doorbell, because the writer re-reads the state under the same lock immediately before
++// every ring.
++//
++// The lock used in production is an IOLock installed by the driver (native_ufs installs it in
++// hostBringUp); a host test may install its own lock. When no platform lock is installed a real
++// compare-exchange spinlock is used, so even the standalone unit test has genuine mutual
++// exclusion -- never a no-op and never a plain volatile flag.
++//
++// In-flight I/O. A WRITE whose doorbell has rung is registered as in flight and stays registered
++// until its completion is observed. Software cannot cancel a submitted DMA; the count only gates
++// whether the authority may be re-published. Establish refuses while any I/O is in flight, so a
++// window that might reuse a region with an outstanding transfer is never re-published.
++
++enum class UfsWriteState : uint32_t {
++  Sealed = 0,      // Uninitialized: no verification has run; every write is denied
++  Ready = 1,       // verified base; a write inside a registered role window is allowed
++  Revoked = 2,     // withdrawn; writes denied until a new Reset + Establish
++  Failed = 3,      // a transport/content failure is latched; writes denied
++  Validating = 4,  // verification in progress; writes denied
++  Revoking = 5     // withdrawal under way with I/O still in flight; writes denied
++};
++
++enum class UfsWriteRole : uint32_t {
++  None = 0,
++  Data = 1,
++  Export = 2,
++  Log = 3,
++  Panic = 4
++};
++
++struct UfsWriteAuthority {
++  UfsWriteState state;
++  uint32_t epoch;
++  uint8_t lun;
++  uint8_t reserved[7];
++  uint64_t capacityBlocks;
++  uint64_t partitionFirst, partitionLast;
++  uint64_t protectedFloor;
++  uint64_t backupHeaderLba, backupEntriesLba;
++  uint64_t dataFirst, dataBlocks;
++  uint64_t exportFirst, exportBlocks;
++  uint64_t logFirst, logBlocks;
++  uint32_t primaryHeaderCrc, primaryEntriesCrc;
++  uint32_t backupHeaderCrc, backupEntriesCrc;
++  uint32_t matchedEntry;
++  uint32_t denialReason;
++  uint64_t allowedWrites, deniedWrites, transportFailures;
++  uint8_t diskGuid[16];
++  uint8_t typeGuid[16];
++  uint8_t partitionGuid[16];
++  // Stage 0B-3B: submissions whose doorbell has rung and whose completion has not been observed.
++  uint64_t inflight;
++  uint8_t revokeFailure;    // a Revoking withdrawal that must end in Failed
++  uint8_t reserved2[7];
++};
++
++static const uint8_t kUfsDarwinTypeGuid[16] = {
++  0xaf, 0x3d, 0xc6, 0x0f, 0x83, 0x84, 0x72, 0x47,
++  0x8e, 0x79, 0x3d, 0x69, 0xd8, 0x47, 0x7d, 0xe4
++};
++
++static UfsWriteAuthority gUfsWriteAuthority = {};
++
++// ---- Platform lock ------------------------------------------------------------------------------------------------
++// All fields must be set together, or none. A partial set is rejected and the fallback is used.
++struct UfsAuthorityLockOps {
++  bool (*tryAcquire)(void *context);
++  void (*acquire)(void *context);
++  void (*release)(void *context);
++  void *context;
++};
++
++static UfsAuthorityLockOps gUfsAuthorityLockOps = { nullptr, nullptr, nullptr, nullptr };
++
++static void ufsWriteAuthoritySetLock (const UfsAuthorityLockOps *ops)
++{
++  if (ops && ops->tryAcquire && ops->acquire && ops->release) {
++    gUfsAuthorityLockOps = *ops;
++  } else {
++    gUfsAuthorityLockOps = { nullptr, nullptr, nullptr, nullptr };
++  }
++}
++
++static inline bool ufsWriteAuthorityHasPlatformLock (void)
++{
++  return gUfsAuthorityLockOps.acquire != nullptr && gUfsAuthorityLockOps.release != nullptr;
++}
++
++// Fallback mutual exclusion: a real test-and-set spinlock over one word. Used only when the
++// platform has not installed its own lock (the standalone host unit test). The kernel installs an
++// IOLock in hostBringUp, so production never spins here.
++static uint32_t gUfsAuthorityWord = 0;
++static bool ufsAuthorityFallbackTry (void)
++{
++#if defined(_MSC_VER)
++  return _InterlockedCompareExchange (reinterpret_cast<volatile long *> (&gUfsAuthorityWord), 1, 0) == 0;
++#else
++  uint32_t expected = 0;
++  return __atomic_compare_exchange_n (&gUfsAuthorityWord, &expected, 1u, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
++#endif
++}
++static void ufsAuthorityFallbackRelease (void)
++{
++#if defined(_MSC_VER)
++  _InterlockedExchange (reinterpret_cast<volatile long *> (&gUfsAuthorityWord), 0);
++#else
++  __atomic_store_n (&gUfsAuthorityWord, 0u, __ATOMIC_RELEASE);
++#endif
++}
++
++// Relax hint for the fallback spin below. The fallback only runs when no platform lock is
++// installed (the standalone host test, or IOLockAlloc failing in the kernel). It is a correct
++// but busy test-and-set, so the waiter must not spin at full memory pressure: yield on arm64,
++// pause on x86, and a bare compiler barrier elsewhere. No semantic change to the lock itself.
++static void ufsAuthorityFallbackRelax (void)
++{
++#if defined(__clang__) || defined(__GNUC__)
++#if defined(__x86_64__) || defined(__i386__)
++  __asm__ __volatile__ ("pause" ::: "memory");
++#elif defined(__aarch64__) || defined(__arm64__)
++  __asm__ __volatile__ ("yield" ::: "memory");
++#else
++  __asm__ __volatile__ ("" ::: "memory");
++#endif
++#endif
++}
++
++static bool ufsWriteAuthorityTryAcquire (void)
++{
++  if (gUfsAuthorityLockOps.tryAcquire) return gUfsAuthorityLockOps.tryAcquire (gUfsAuthorityLockOps.context);
++  return ufsAuthorityFallbackTry ();
++}
++static void ufsWriteAuthorityAcquire (void)
++{
++  if (gUfsAuthorityLockOps.acquire) { gUfsAuthorityLockOps.acquire (gUfsAuthorityLockOps.context); return; }
++  while (!ufsAuthorityFallbackTry ()) ufsAuthorityFallbackRelax ();
++}
++static void ufsWriteAuthorityRelease (void)
++{
++  if (gUfsAuthorityLockOps.release) { gUfsAuthorityLockOps.release (gUfsAuthorityLockOps.context); return; }
++  ufsAuthorityFallbackRelease ();
++}
++
++// Test-only linearization probes. Production leaves the pointer null (a single predictable branch).
++enum { UfsProbeAfterCheck = 1, UfsProbeAfterDoorbell = 2, UfsProbeSubmitted = 3, UfsProbeAfterRelease = 4 };
++static void (*gUfsAuthorityProbe)(int) = nullptr;
++static inline void ufsWriteAuthoritySetProbe (void (*probe)(int)) { gUfsAuthorityProbe = probe; }
++static void ufsAuthorityProbe (int point) { if (gUfsAuthorityProbe) gUfsAuthorityProbe (point); }
++
++static bool ufsWriteGuidNonzero (const uint8_t *guid)
++{
++  uint8_t value = 0;
++  for (unsigned i = 0; i < 16; ++i) value |= guid[i];
++  return value != 0;
++}
++
++static bool ufsWriteRangeFitsRead10 (uint64_t first, uint64_t blocks)
++{
++  return blocks && first <= UINT32_MAX && blocks - 1 <= UINT32_MAX - first;
++}
++
++static bool ufsWriteRangesOverlap (uint64_t first, uint64_t blocks, uint64_t otherFirst, uint64_t otherBlocks)
++{
++  return blocks && otherBlocks && first < otherFirst + otherBlocks && otherFirst < first + blocks;
++}
++
++static bool ufsWriteWindow (const UfsWriteAuthority &authority, UfsWriteRole role, uint64_t *first, uint64_t *blocks)
++{
++  switch (role) {
++    case UfsWriteRole::Data:
++      *first = authority.dataFirst; *blocks = authority.dataBlocks; return true;
++    case UfsWriteRole::Export:
++      *first = authority.exportFirst; *blocks = authority.exportBlocks; return true;
++    case UfsWriteRole::Log:
++    case UfsWriteRole::Panic:
++      *first = authority.logFirst; *blocks = authority.logBlocks; return true;
++    default:
++      *first = *blocks = 0;
++      return false;
++  }
++}
++
++static bool ufsWriteAuthorityBaseValid (const UfsWriteAuthority &authority)
++{
++  if (authority.state != UfsWriteState::Ready || authority.lun != 0 || !authority.capacityBlocks ||
++      authority.capacityBlocks > uint64_t (UINT32_MAX) + 1 ||
++      authority.partitionFirst < 2 || authority.partitionLast < authority.partitionFirst ||
++      authority.partitionLast >= authority.capacityBlocks ||
++      authority.protectedFloor < authority.partitionFirst ||
++      authority.protectedFloor > authority.partitionLast + 1 ||
++      authority.backupHeaderLba != authority.capacityBlocks - 1 ||
++      authority.backupEntriesLba <= authority.partitionLast ||
++      authority.backupEntriesLba >= authority.backupHeaderLba ||
++      !ufsWriteRangeFitsRead10 (authority.partitionFirst, authority.partitionLast - authority.partitionFirst + 1) ||
++      authority.primaryEntriesCrc != authority.backupEntriesCrc ||
++      !ufsWriteGuidNonzero (authority.diskGuid) ||
++      !ufsWriteGuidNonzero (authority.partitionGuid) ||
++      memcmp (authority.typeGuid, kUfsDarwinTypeGuid, 16)) {
++    return false;
++  }
++
++  const uint64_t first[3] = { authority.dataFirst, authority.exportFirst, authority.logFirst };
++  const uint64_t blocks[3] = { authority.dataBlocks, authority.exportBlocks, authority.logBlocks };
++  for (unsigned index = 0; index < 3; ++index) {
++    if (!blocks[index]) continue;
++    if (first[index] < authority.protectedFloor || !ufsWriteRangeFitsRead10 (first[index], blocks[index]) ||
++        first[index] > authority.partitionLast ||
++        blocks[index] > authority.partitionLast - first[index] + 1) {
++      return false;
++    }
++    for (unsigned prior = 0; prior < index; ++prior) {
++      if (ufsWriteRangesOverlap (first[index], blocks[index], first[prior], blocks[prior])) return false;
++    }
++  }
++  return true;
++}
++
++static void ufsWriteAuthorityClearRoles (UfsWriteAuthority *authority)
++{
++  authority->dataFirst = authority->dataBlocks = 0;
++  authority->exportFirst = authority->exportBlocks = 0;
++  authority->logFirst = authority->logBlocks = 0;
++}
++
++// Reset to Sealed and bump the epoch. I/O still in flight is preserved so Establish stays refused
++// until every submitted transfer has completed. Callers must not hold the lock.
++static void ufsWriteAuthorityReset (UfsWriteState state = UfsWriteState::Sealed)
++{
++  ufsWriteAuthorityAcquire ();
++  const uint32_t epoch = gUfsWriteAuthority.epoch + 1;
++  const uint64_t inflight = gUfsWriteAuthority.inflight;
++  const uint32_t denialReason = gUfsWriteAuthority.denialReason;
++  gUfsWriteAuthority = {};
++  gUfsWriteAuthority.state = state;
++  gUfsWriteAuthority.epoch = epoch;
++  gUfsWriteAuthority.inflight = inflight;
++  gUfsWriteAuthority.denialReason = denialReason;
++  ufsWriteAuthorityRelease ();
++}
++
++// Begin a withdrawal. Roles are cleared at once so no new write can pass the check. When I/O is
++// still in flight the state is Revoking until the last completion observes the withdrawal; the
++// transition to Revoked/Failed then also happens under the lock in the completion path.
++static void ufsWriteAuthorityRevoke (bool failed)
++{
++  ufsWriteAuthorityAcquire ();
++  if (failed) ++gUfsWriteAuthority.transportFailures;
++  gUfsWriteAuthority.revokeFailure = failed ? 1 : 0;
++  ufsWriteAuthorityClearRoles (&gUfsWriteAuthority);
++  ++gUfsWriteAuthority.epoch;
++  if (gUfsWriteAuthority.inflight) {
++    gUfsWriteAuthority.state = UfsWriteState::Revoking;
++  } else {
++    gUfsWriteAuthority.state = failed ? UfsWriteState::Failed : UfsWriteState::Revoked;
++  }
++  ufsWriteAuthorityRelease ();
++}
++
++static bool ufsWriteAuthorityEstablish (
++  uint64_t capacityBlocks,
++  uint64_t partitionFirst, uint64_t partitionLast,
++  uint64_t protectedFloor,
++  uint64_t backupHeaderLba, uint64_t backupEntriesLba,
++  uint32_t primaryHeaderCrc, uint32_t primaryEntriesCrc,
++  uint32_t backupHeaderCrc, uint32_t backupEntriesCrc,
++  uint32_t matchedEntry,
++  const uint8_t *diskGuid, const uint8_t *typeGuid, const uint8_t *partitionGuid)
++{
++  ufsWriteAuthorityAcquire ();
++  bool ok = false;
++  if (gUfsWriteAuthority.state != UfsWriteState::Sealed || gUfsWriteAuthority.inflight || !capacityBlocks ||
++      capacityBlocks > uint64_t (UINT32_MAX) + 1 || !diskGuid || !typeGuid || !partitionGuid ||
++      partitionFirst < 2 || partitionLast < partitionFirst || partitionLast >= capacityBlocks ||
++      protectedFloor < partitionFirst || protectedFloor > partitionLast + 1 ||
++      backupHeaderLba != capacityBlocks - 1 || backupEntriesLba <= partitionLast ||
++      backupEntriesLba >= backupHeaderLba ||
++      primaryEntriesCrc != backupEntriesCrc ||
++      !ufsWriteGuidNonzero (diskGuid) || !ufsWriteGuidNonzero (partitionGuid) ||
++      memcmp (typeGuid, kUfsDarwinTypeGuid, 16)) {
++    gUfsWriteAuthority.denialReason = 1;
++  } else {
++    UfsWriteAuthority next = {};
++    next.state = UfsWriteState::Ready;
++    next.capacityBlocks = capacityBlocks;
++    next.partitionFirst = partitionFirst;
++    next.partitionLast = partitionLast;
++    next.protectedFloor = protectedFloor;
++    next.backupHeaderLba = backupHeaderLba;
++    next.backupEntriesLba = backupEntriesLba;
++    next.primaryHeaderCrc = primaryHeaderCrc;
++    next.primaryEntriesCrc = primaryEntriesCrc;
++    next.backupHeaderCrc = backupHeaderCrc;
++    next.backupEntriesCrc = backupEntriesCrc;
++    next.matchedEntry = matchedEntry;
++    memcpy (next.diskGuid, diskGuid, 16);
++    memcpy (next.typeGuid, typeGuid, 16);
++    memcpy (next.partitionGuid, partitionGuid, 16);
++    if (!ufsWriteAuthorityBaseValid (next)) {
++      gUfsWriteAuthority.denialReason = 1;
++    } else {
++      next.epoch = gUfsWriteAuthority.epoch + 1;
++      gUfsWriteAuthority = next;
++      ok = true;
++    }
++  }
++  ufsWriteAuthorityRelease ();
++  return ok;
++}
++
++// Locked core: the caller holds the authority lock. Registers one role window if it fits the
++// verified base and does not overlap an already registered role.
++static bool ufsWriteAuthorityRegisterLocked (UfsWriteRole role, uint64_t first, uint64_t blocks)
++{
++  bool ok = false;
++  if (!ufsWriteAuthorityBaseValid (gUfsWriteAuthority) || role == UfsWriteRole::None || role == UfsWriteRole::Panic ||
++      !blocks || first < gUfsWriteAuthority.protectedFloor || !ufsWriteRangeFitsRead10 (first, blocks) ||
++      first > gUfsWriteAuthority.partitionLast ||
++      blocks > gUfsWriteAuthority.partitionLast - first + 1) {
++    ++gUfsWriteAuthority.deniedWrites;
++    gUfsWriteAuthority.denialReason = 2;
++  } else {
++    uint64_t oldFirst, oldBlocks;
++    if (!ufsWriteWindow (gUfsWriteAuthority, role, &oldFirst, &oldBlocks) || oldBlocks) {
++      ++gUfsWriteAuthority.deniedWrites;
++      gUfsWriteAuthority.denialReason = 3;
++    } else {
++      const UfsWriteRole roles[3] = { UfsWriteRole::Data, UfsWriteRole::Export, UfsWriteRole::Log };
++      bool overlap = false;
++      for (UfsWriteRole other : roles) {
++        uint64_t otherFirst, otherBlocks;
++        ufsWriteWindow (gUfsWriteAuthority, other, &otherFirst, &otherBlocks);
++        if (other != role && ufsWriteRangesOverlap (first, blocks, otherFirst, otherBlocks)) { overlap = true; break; }
++      }
++      if (overlap) {
++        ++gUfsWriteAuthority.deniedWrites;
++        gUfsWriteAuthority.denialReason = 4;
++      } else {
++        if (role == UfsWriteRole::Data) {
++          gUfsWriteAuthority.dataFirst = first;
++          gUfsWriteAuthority.dataBlocks = blocks;
++        } else if (role == UfsWriteRole::Export) {
++          gUfsWriteAuthority.exportFirst = first;
++          gUfsWriteAuthority.exportBlocks = blocks;
++        } else {
++          gUfsWriteAuthority.logFirst = first;
++          gUfsWriteAuthority.logBlocks = blocks;
++        }
++        ok = ufsWriteAuthorityBaseValid (gUfsWriteAuthority);
++      }
++    }
++  }
++  return ok;
++}
++
++static bool ufsWriteAuthorityRegister (UfsWriteRole role, uint64_t first, uint64_t blocks)
++{
++  ufsWriteAuthorityAcquire ();
++  const bool ok = ufsWriteAuthorityRegisterLocked (role, first, blocks);
++  ufsWriteAuthorityRelease ();
++  return ok;
++}
++
++// Register two role windows as one atomic step. The caller must not hold the lock. If either
++// registration fails, the whole object is restored so a partial registration is never published.
++// This removes the unguarded read-modify-write rollback that a caller would otherwise have to do.
++static bool ufsWriteAuthorityRegisterPair (UfsWriteRole roleA, uint64_t firstA, uint64_t blocksA,
++                                           UfsWriteRole roleB, uint64_t firstB, uint64_t blocksB)
++{
++  ufsWriteAuthorityAcquire ();
++  const UfsWriteAuthority before = gUfsWriteAuthority;
++  bool ok = ufsWriteAuthorityRegisterLocked (roleA, firstA, blocksA) &&
++            ufsWriteAuthorityRegisterLocked (roleB, firstB, blocksB);
++  if (!ok) gUfsWriteAuthority = before;
++  ufsWriteAuthorityRelease ();
++  return ok;
++}
++
++// Locked core: the caller holds the authority lock. Requires Ready and a non-empty role window.
++static bool ufsWriteAuthorityRoleWindowLocked (UfsWriteRole role, uint64_t *first, uint64_t *blocks)
++{
++  if (!ufsWriteAuthorityBaseValid (gUfsWriteAuthority) || !ufsWriteWindow (gUfsWriteAuthority, role, first, blocks) ||
++      !*blocks) {
++    ++gUfsWriteAuthority.deniedWrites;
++    gUfsWriteAuthority.denialReason = 5;
++    return false;
++  }
++  return true;
++}
++
++static bool ufsWriteAuthorityRoleWindow (UfsWriteRole role, uint64_t *first, uint64_t *blocks)
++{
++  ufsWriteAuthorityAcquire ();
++  const bool ok = ufsWriteAuthorityRoleWindowLocked (role, first, blocks);
++  ufsWriteAuthorityRelease ();
++  return ok;
++}
++
++// Locked core: the caller holds the authority lock. This is the "may this WRITE be submitted?"
++// decision and it is taken under the same lock that protects a withdrawal.
++static bool ufsWriteAuthorityAllowsLocked (UfsWriteRole role, uint8_t lun, uint64_t lba, uint32_t blocks)
++{
++  if (!ufsWriteAuthorityBaseValid (gUfsWriteAuthority) || lun != 0 || !blocks) {
++    ++gUfsWriteAuthority.deniedWrites;
++    gUfsWriteAuthority.denialReason = 6;
++    return false;
++  }
++  uint64_t first, granted;
++  if (!ufsWriteAuthorityRoleWindowLocked (role, &first, &granted)) return false;
++  if (lba < first || blocks > granted || lba - first >= granted || blocks > granted - (lba - first)) {
++    ++gUfsWriteAuthority.deniedWrites;
++    gUfsWriteAuthority.denialReason = 7;
++    return false;
++  }
++  ++gUfsWriteAuthority.allowedWrites;
++  return true;
++}
++
++static inline bool ufsWriteAuthorityAllows (UfsWriteRole role, uint8_t lun, uint64_t lba, uint32_t blocks)
++{
++  ufsWriteAuthorityAcquire ();
++  const bool ok = ufsWriteAuthorityAllowsLocked (role, lun, lba, blocks);
++  ufsWriteAuthorityRelease ();
++  return ok;
++}
++
++// Register a submission whose doorbell is about to ring. Caller holds the lock. Called after
++// ufsWriteAuthorityAllowsLocked succeeded and before hostIssue.
++static void ufsWriteAuthorityEnterInflightLocked (void)
++{
++  ++gUfsWriteAuthority.inflight;
++}
++
++// Undo an in-flight registration whose command was never submitted (hostIssue failed before the
++// doorbell). Caller holds the lock.
++static void ufsWriteAuthorityExitInflightLocked (void)
++{
++  if (!gUfsWriteAuthority.inflight) return;
++  --gUfsWriteAuthority.inflight;
++  if (!gUfsWriteAuthority.inflight && gUfsWriteAuthority.state == UfsWriteState::Revoking) {
++    gUfsWriteAuthority.state = gUfsWriteAuthority.revokeFailure ? UfsWriteState::Failed : UfsWriteState::Revoked;
++  }
++}
++
++// Observe the completion of a submitted command. Takes the lock.
++static void ufsWriteAuthorityExitInflight (void)
++{
++  ufsWriteAuthorityAcquire ();
++  ufsWriteAuthorityExitInflightLocked ();
++  ufsWriteAuthorityRelease ();
++}
++
++static inline uint64_t ufsWriteAuthorityInflight (void)
++{
++  ufsWriteAuthorityAcquire ();
++  const uint64_t inflight = gUfsWriteAuthority.inflight;
++  ufsWriteAuthorityRelease ();
++  return inflight;
++}
++
++// A consistent copy for callers that must compare a live GPT against the authority baseline without
++// holding the lock across I/O.
++static UfsWriteAuthority ufsWriteAuthoritySnapshot (void)
++{
++  ufsWriteAuthorityAcquire ();
++  const UfsWriteAuthority copy = gUfsWriteAuthority;
++  ufsWriteAuthorityRelease ();
++  return copy;
++}
++
++static uint32_t ufsWriteAuthorityEpoch (void)
++{
++  return __atomic_load_n (&gUfsWriteAuthority.epoch, __ATOMIC_ACQUIRE);
++}
++
++// Single-field acquire read of the state. Used by the narrow native handoff that only needs to
++// observe "is the authority still Ready?"; it deliberately does not take the lock so it is safe to
++// call from contexts that must not block. A caller that needs a self-consistent multi-field view
++// must use ufsWriteAuthoritySnapshot.
++static UfsWriteState ufsWriteAuthorityState (void)
++{
++  return static_cast<UfsWriteState> (
++    __atomic_load_n (reinterpret_cast<const uint32_t *> (&gUfsWriteAuthority.state), __ATOMIC_ACQUIRE));
++}
++
++// Record a refusal that happens outside the state-machine helpers (role not permitted at all).
++static void ufsWriteAuthorityNoteDenied (uint32_t reason)
++{
++  ufsWriteAuthorityAcquire ();
++  ++gUfsWriteAuthority.deniedWrites;
++  gUfsWriteAuthority.denialReason = reason;
++  ufsWriteAuthorityRelease ();
++}
+diff --git a/tests/RootCommandsConcurrency.cpp b/tests/RootCommandsConcurrency.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/RootCommandsConcurrency.cpp
+@@ -0,0 +1,373 @@
++// SPDX-License-Identifier: BSD-2-Clause-Patent
++// Deterministic concurrency checks of the production UFS write authority and the WRITE submit
++// window. Real threads; interleavings are forced at the production linearization points through the
++// authority probe, never by random stress. Every WRITE doorbell, its role/window, the revocation and
++// the in-flight count are recorded.
++#include "RootCommandsBridge.cpp"
++#include <array>
++#include <atomic>
++#include <chrono>
++#include <condition_variable>
++#include <mutex>
++#include <thread>
++#include <vector>
++#include <algorithm>
++
++// ---- Fixture ----------------------------------------------------------------------------------------------------
++static constexpr uint64_t kPhys = 0x8cb5e9000ULL;
++static std::mutex gIoMutex;
++static std::mutex gSlotMutex;
++static std::array<uint32_t, 64> gRegisters;
++static std::array<uint8_t, kDmaBytes> gDevice;
++static std::atomic<uint64_t> gNow{ 0 };
++static std::atomic<uint64_t> gSeq{ 0 };
++static std::atomic<uint64_t> gDoorbells{ 0 };
++static std::atomic<uint64_t> gWriteDoorbells{ 0 };
++static std::atomic<uint64_t> gSyncDoorbells{ 0 };
++static std::atomic<uint64_t> gDoorbellSeq{ 0 };
++static std::atomic<uint64_t> gRevokeSeq{ 0 };
++static std::atomic<uint64_t> gCompleteSeq{ 0 };
++static std::atomic<uint64_t> gBadWindow{ 0 };      // WRITE doorbell whose LBA left every expected window
++static std::atomic<bool> gAsync{ false };           // true: the doorbell does not complete the command
++static std::array<int, kRegionSlots> gReleased;     // per slot: a clean happened since the last doorbell
++static std::vector<int> gUsedSlots;
++
++static uint64_t nextSeq () { return gSeq.fetch_add (1, std::memory_order_acq_rel) + 1; }
++
++// The slot a DMA buffer address belongs to, from its offset in the DMA region.
++static int slotForOffset (uint64_t off)
++{
++  for (unsigned s = 0; s < kRegionSlots; ++s) {
++    if (off >= ufsSlotUtrdOffset (s) && off < ufsSlotUtrdOffset (s) + 32) return int (s);
++    if (off >= ufsSlotUcdOffset (s) && off < ufsSlotUcdOffset (s) + kUcdStride) return int (s);
++    if (off >= ufsSlotDataOffset (s) && off < ufsSlotDataOffset (s) + kDataMax) return int (s);
++  }
++  return -1;
++}
++
++static void completeSlotLocked (int slot)
++{
++  uint8_t *utrd = gDevice.data () + ufsSlotUtrdOffset (slot);
++  uint8_t *cmd = gDevice.data () + ufsSlotUcdOffset (slot);
++  uint8_t *rsp = cmd + kRspOffset;
++  *reinterpret_cast<uint32_t *> (utrd + 8) = 0;            // OCS success
++  std::fill (rsp, rsp + 512, 0);
++  memcpy (rsp, cmd, 32);
++  rsp[0] = static_cast<uint8_t> (cmd[0] + 0x20);
++  rsp[1] = 0;
++  if (cmd[0] == 1) putBe32 (rsp + 12, 0);
++  gCompleteSeq.store (nextSeq (), std::memory_order_relaxed);
++}
++
++static uint64_t io (unsigned op, uint64_t address, uint64_t value, void *bytes)
++{
++  if (op == 0) { std::lock_guard<std::mutex> lock (gIoMutex); return gRegisters.at (address / 4); }
++  if (op == 1) {
++    if (address == 0x20) { gRegisters[0x20 / 4] &= ~uint32_t (value); return 0; }
++    if (address == 0x58) {
++      std::lock_guard<std::mutex> lock (gIoMutex);
++      assert (value && !(value & (value - 1)));
++      const unsigned entry = unsigned (__builtin_ctz (uint32_t (value)));
++      assert (entry % 2 == 0 && entry / 2 < kRegionSlots);
++      const int slot = int (entry / 2);
++      assert (gReleased[slot] > 0); gReleased[slot]--;
++      gUsedSlots.push_back (slot);
++      gDoorbells.fetch_add (1, std::memory_order_relaxed);
++      gDoorbellSeq.store (nextSeq (), std::memory_order_relaxed);
++      const uint8_t *cmd = gDevice.data () + ufsSlotUcdOffset (slot);
++      if (cmd[0] == 1 && cmd[16] == 0x2a) {
++        const uint64_t lba = uint64_t (cmd[18]) << 24 | uint64_t (cmd[19]) << 16 | uint64_t (cmd[20]) << 8 | cmd[21];
++        const uint32_t blocks = uint32_t (cmd[23]) << 8 | cmd[24];
++        gWriteDoorbells.fetch_add (1, std::memory_order_relaxed);
++        const bool inData = lba >= 210 && lba + blocks <= 230;
++        const bool inLog = lba >= 400 && lba + blocks <= 416;
++        if (!inData && !inLog) gBadWindow.fetch_add (1, std::memory_order_relaxed);
++      } else if (cmd[0] == 1 && cmd[16] == 0x35) {
++        gSyncDoorbells.fetch_add (1, std::memory_order_relaxed);
++      }
++      gRegisters[0x58 / 4] = 0;
++      if (!gAsync.load ()) completeSlotLocked (slot);
++      return 0;
++    }
++    gRegisters.at (address / 4) = uint32_t (value);
++    return 0;
++  }
++  if (op == 2 || op == 3) {
++    std::lock_guard<std::mutex> lock (gIoMutex);
++    auto at = gDevice.data () + (address - kPhys);
++    if (op == 2) {
++      memcpy (at, bytes, value);
++      const int slot = slotForOffset (address - kPhys);
++      if (slot >= 0) gReleased[slot]++;
++    } else {
++      memcpy (bytes, at, value);
++    }
++    return 0;
++  }
++  if (op == 4) return gNow.load ();
++  if (op == 5) return 0;      // delays never advance the clock: a test forces expiry itself
++  return 0;
++}
++
++// ---- Authority lock (real mutex) and the deterministic probe gate ------------------------------------------------
++static std::mutex gAuthorityMutex;
++static bool authorityTry (void *) { return gAuthorityMutex.try_lock (); }
++static void authorityLock (void *) { gAuthorityMutex.lock (); }
++static void authorityUnlock (void *) { gAuthorityMutex.unlock (); }
++
++static std::mutex gGateMutex;
++static std::condition_variable gGateCond;
++static int gGatePoint = -1;
++static bool gGateHolding = false, gGateOpen = false;
++
++static void probe (int point)
++{
++  std::unique_lock<std::mutex> lock (gGateMutex);
++  if (gGatePoint == point) {
++    gGateHolding = true;
++    gGateCond.notify_all ();
++    gGateCond.wait (lock, [] { return gGateOpen; });
++    gGatePoint = -1;
++  }
++}
++static void armGate (int point)
++{
++  std::unique_lock<std::mutex> lock (gGateMutex);
++  gGatePoint = point; gGateHolding = false; gGateOpen = false;
++}
++static void awaitGateHolding ()
++{
++  std::unique_lock<std::mutex> lock (gGateMutex);
++  gGateCond.wait (lock, [] { return gGateHolding; });
++}
++static void openGate ()
++{
++  std::unique_lock<std::mutex> lock (gGateMutex);
++  gGateOpen = true;
++  gGateCond.notify_all ();
++}
++
++// ---- Common setup ----------------------------------------------------------------------------------------------
++static void resetFixture ()
++{
++  {
++    std::lock_guard<std::mutex> lock (gIoMutex);
++    gRegisters.fill (0); gDevice.fill (0);
++    gRegisters[0x34 / 4] = 1; gRegisters[0x30 / 4] = 15; gRegisters[0x60 / 4] = 1;
++    gReleased.fill (0);
++    gUsedSlots.clear ();
++  }
++  gNow.store (0); gDoorbells.store (0); gWriteDoorbells.store (0); gSyncDoorbells.store (0);
++  gDoorbellSeq.store (0); gRevokeSeq.store (0); gCompleteSeq.store (0); gBadWindow.store (0);
++  gAsync.store (false);
++  ufs_test_reset (io, kPhys);
++  hostSlotsInit (kRegionSlots, reinterpret_cast<IOLock *> (&gSlotMutex));
++}
++
++static bool ready () { return ufs_test_establish (1024, 100, 900, 200, 1023, 1022) != 0; }
++static void revokeAuthority (bool failed) { hostWriteWindowsRevoke (failed); gRevokeSeq.store (nextSeq (), std::memory_order_relaxed); }
++static UfsWriteState state () { return ufsWriteAuthoritySnapshot ().state; }
++static uint64_t inflight () { return ufsWriteAuthorityInflight (); }
++static void completeAllSlots ()
++{
++  std::lock_guard<std::mutex> lock (gIoMutex);
++  for (int s = 0; s < int (kRegionSlots); ++s) completeSlotLocked (s);
++}
++static void pass (const char *name) { std::printf ("PASS: %s\n", name); }
++
++int main ()
++{
++  UfsAuthorityLockOps ops = { &authorityTry, &authorityLock, &authorityUnlock, nullptr };
++  ufsWriteAuthoritySetLock (&ops);
++  ufsWriteAuthoritySetProbe (&probe);
++
++  std::array<uint8_t, 4096> block; std::fill (block.begin (), block.end (), 0x5a);
++
++  // 1. Deny by default, and no doorbell while Sealed.
++  resetFixture ();
++  assert (state () == UfsWriteState::Sealed);
++  assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, block.data ()) == kIOReturnNotPrivileged);
++  assert (gDoorbells.load () == 0 && gWriteDoorbells.load () == 0);
++  pass ("Sealed authority denies the WRITE and rings no doorbell");
++
++  // 2. Revoke before the check: the next WRITE is denied with no doorbell.
++  resetFixture (); assert (ready () && ufs_test_store_open (210, 20) == 1);
++  assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, block.data ()) == 0);
++  revokeAuthority (false);
++  assert (state () == UfsWriteState::Revoked);
++  const uint64_t beforeDoorbells = gWriteDoorbells.load ();
++  assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, block.data ()) == kIOReturnNotPrivileged);
++  assert (gWriteDoorbells.load () == beforeDoorbells);
++  pass ("withdrawn authority denies the next WRITE and rings no doorbell");
++
++  // 3. Revoke after the check, before the doorbell: the withdrawal cannot overtake an in-progress
++  //    submit, and after it linearizes no new doorbell is rung.
++  resetFixture (); assert (ready () && ufs_test_store_open (210, 20) == 1);
++  armGate (UfsProbeAfterCheck);
++  std::thread writer ([&] { assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, block.data ()) == 0); });
++  awaitGateHolding ();                              // the writer passed the check and holds the lock
++  std::atomic<bool> revokerDone{ false };
++  std::thread revoker ([&] { revokeAuthority (false); revokerDone.store (true, std::memory_order_release); });
++  std::this_thread::sleep_for (std::chrono::milliseconds (30));   // the revoker must now be blocked on the lock
++  assert (!revokerDone.load (std::memory_order_acquire));          // not linearized: blocked on the authority lock
++  assert (gWriteDoorbells.load () == 0);            // the gate precedes hostIssue: no doorbell has rung yet
++  openGate ();
++  writer.join (); revoker.join ();
++  assert (revokerDone.load ());
++  assert (gDoorbellSeq.load () < gRevokeSeq.load ());             // the doorbell linearized before the withdrawal
++  assert (gWriteDoorbells.load () == 1);
++  assert (state () == UfsWriteState::Revoked);
++  assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, block.data ()) == kIOReturnNotPrivileged);
++  assert (gWriteDoorbells.load () == 1);
++  pass ("check -> doorbell is atomic with the withdrawal; no doorbell after revoke");
++
++  // 4. Revoke while a submitted WRITE is still in flight: Revoking until the completion is observed.
++  resetFixture (); assert (ready () && ufs_test_store_open (210, 20) == 1);
++  gAsync.store (true);
++  armGate (UfsProbeAfterRelease);
++  std::thread inflightWriter ([&] { assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, block.data ()) == 0); });
++  awaitGateHolding ();                              // doorbell rung, lock released, no completion yet
++  assert (inflight () == 1);
++  revokeAuthority (false);
++  assert (state () == UfsWriteState::Revoking);
++  assert (inflight () == 1);
++  assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, block.data ()) == kIOReturnNotPrivileged);
++  assert (gWriteDoorbells.load () == 1);
++  openGate ();                                      // let the writer observe completion
++  completeAllSlots ();
++  inflightWriter.join ();
++  assert (inflight () == 0);
++  assert (state () == UfsWriteState::Revoked);
++  pass ("in-flight WRITE keeps the authority Revoking; the completion finishes the withdrawal");
++
++  // 5. Several in-flight WRITEs: the withdrawal completes only after the last one.
++  resetFixture (); assert (ready () && ufs_test_store_open (210, 20) == 1);
++  gAsync.store (true);
++  const uint64_t targetLbas[3] = { 210, 220, 228 };
++  std::vector<std::thread> writers;
++  for (int i = 0; i < 3; ++i)
++    writers.emplace_back ([&, i] { assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, targetLbas[i], 1, block.data ()) == 0); });
++  for (int waited = 0; waited < 5000 && inflight () < 3; ++waited) std::this_thread::sleep_for (std::chrono::milliseconds (1));
++  assert (inflight () == 3);
++  revokeAuthority (false);
++  assert (state () == UfsWriteState::Revoking);
++  assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 215, 1, block.data ()) == kIOReturnNotPrivileged);
++  completeAllSlots ();
++  for (auto &t : writers) t.join ();
++  assert (inflight () == 0);
++  assert (state () == UfsWriteState::Revoked);
++  pass ("three in-flight WRITEs hold Revoking until the last completion");
++
++  // 6. Data and Log writers at once: both keep their own windows and share the one authority.
++  resetFixture (); assert (ready () && ufs_test_store_open (210, 20) == 1);
++  assert (ufs_test_log_open (300, 10, 400, 16) == 1);
++  std::thread dataWriter ([&] { for (int i = 0; i < 200; ++i) assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210 + (i % 20), 1, block.data ()) == 0); });
++  std::thread logWriter ([&] { for (int i = 0; i < 200; ++i) assert (ufs_test_write (uint32_t (UfsWriteRole::Log), 0, 400 + (i % 16), 1, block.data ()) == 0); });
++  dataWriter.join (); logWriter.join ();
++  assert (inflight () == 0 && gBadWindow.load () == 0 && gWriteDoorbells.load () == 400);
++  pass ("Data and Log writers run concurrently inside their own windows with no overlap");
++
++  // 7. Sync and Data writers at once.
++  resetFixture (); assert (ready () && ufs_test_store_open (210, 20) == 1);
++  std::thread syncWriter ([&] { for (int i = 0; i < 100; ++i) assert (ufs_test_sync (uint32_t (UfsWriteRole::Data)) == 0); });
++  std::thread dataWriter2 ([&] { for (int i = 0; i < 100; ++i) assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210 + (i % 20), 1, block.data ()) == 0); });
++  syncWriter.join (); dataWriter2.join ();
++  assert (inflight () == 0 && gSyncDoorbells.load () == 100 && gWriteDoorbells.load () == 100);
++  pass ("SYNCHRONIZE CACHE and WRITE share the authority and both complete");
++
++  // 8. Timeout: a submitted WRITE that never completes is failed closed and latches Failed.
++  resetFixture (); assert (ready () && ufs_test_store_open (210, 20) == 1);
++  gAsync.store (true);
++  armGate (UfsProbeAfterRelease);
++  std::thread timeoutWriter ([&] { ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, block.data ()); });
++  awaitGateHolding ();
++  assert (inflight () == 1);
++  gNow.store (1ULL << 62);                          // force the wait to expire (deadline was computed earlier)
++  openGate ();
++  timeoutWriter.join ();
++  assert (state () == UfsWriteState::Failed);
++  assert (inflight () == 0);
++  // The latched authority denies at its own gate...
++  assert (!ufsWriteAuthorityAllows (UfsWriteRole::Data, 0, 210, 1));
++  const uint64_t afterTimeout = gWriteDoorbells.load ();
++  // ...and the timed-out transport also poisons the controller, so a follow-up is refused at the
++  // readiness guard before the authority check. Either way it is denied and rings no doorbell.
++  assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, block.data ()) != kIOReturnSuccess);
++  assert (gWriteDoorbells.load () == afterTimeout);
++  completeAllSlots ();                              // the un-cancellable DMA arrives late
++  assert (gWriteDoorbells.load () == afterTimeout); // a late completion is not a new submission
++  pass ("a timed-out WRITE fails closed and revokes; a late completion is not a new submission");
++
++  // 9. Epoch monotonicity and re-authorization after a clean Reset + Establish.
++  resetFixture (); assert (ready () && ufs_test_store_open (210, 20) == 1);
++  const uint32_t epochReady = ufsWriteAuthoritySnapshot ().epoch;
++  revokeAuthority (false);
++  const uint32_t epochRevoked = ufsWriteAuthoritySnapshot ().epoch;
++  assert (epochRevoked > epochReady);
++  ufsWriteAuthorityReset ();
++  assert (state () == UfsWriteState::Sealed);
++  assert (ready ());
++  const uint32_t epochReestablished = ufsWriteAuthoritySnapshot ().epoch;
++  assert (epochReestablished > epochRevoked);
++  assert (ufs_test_store_open (210, 20) == 1);
++  assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, block.data ()) == 0);
++  assert (inflight () == 0);
++  pass ("epoch increases across revoke and re-establish; the re-authorized window writes again");
++
++  // 10. Establish is refused while I/O is still in flight (no reuse of a region under a pending DMA).
++  resetFixture (); assert (ready () && ufs_test_store_open (210, 20) == 1);
++  gAsync.store (true);
++  armGate (UfsProbeAfterRelease);
++  std::thread pendingWriter ([&] { assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, block.data ()) == 0); });
++  awaitGateHolding ();
++  assert (inflight () == 1);
++  revokeAuthority (false);
++  assert (state () == UfsWriteState::Revoking);
++  ufsWriteAuthorityReset ();                         // a re-verification attempts to republish
++  assert (state () == UfsWriteState::Sealed);
++  assert (inflight () == 1);
++  assert (!ufsWriteAuthorityEstablish (1024, 100, 900, 200, 1023, 1022,
++                                      0x11112222, 0x22223333, 0xaaaabbbb, 0x22223333, 0,
++                                      kUfsDarwinTypeGuid, kUfsDarwinTypeGuid, kUfsDarwinTypeGuid));
++  pass ("Establish is refused while an I/O is still in flight");
++  openGate ();
++  completeAllSlots ();
++  pendingWriter.join ();
++  assert (inflight () == 0);
++
++  // 11. A paired Export+Log open publishes both windows as one atomic step and rolls the whole
++  //     object back when either window is invalid; a rejected open must not leak the accepted half.
++  resetFixture (); assert (ready () && ufs_test_store_open (210, 20) == 1);
++  assert (ufs_test_log_open (300, 10, 305, 10) == 0);                 // Log overlaps Export -> refused as a unit
++  assert (!ufsWriteAuthorityAllows (UfsWriteRole::Export, 0, 300, 1)); // the accepted half was rolled back
++  assert (!ufsWriteAuthorityAllows (UfsWriteRole::Log, 0, 305, 1));
++  assert (ufs_test_log_open (300, 10, 400, 16) == 1);                 // a disjoint pair still opens
++  assert (ufsWriteAuthorityAllows (UfsWriteRole::Export, 0, 300, 1));
++  assert (ufsWriteAuthorityAllows (UfsWriteRole::Log, 0, 400, 1));
++  assert (gWriteDoorbells.load () == 0 && inflight () == 0);
++  pass ("a failed Export+Log open rolls back as one unit and leaks no half-registered window");
++
++  // 12. Concurrent (re)initialization and withdrawal. Openers publish windows and write inside them
++  //     while a revoker withdraws in a loop. Every WRITE that reaches a doorbell must stay inside the
++  //     published Data window, and the object must always parse as a valid state with no I/O left.
++  resetFixture (); assert (ready ());
++  std::atomic<bool> stop{ false };
++  std::thread opener ([&] {
++    for (int i = 0; i < 4000 && !stop.load (); ++i) {
++      ufsWriteAuthorityReset ();
++      ufs_test_establish (1024, 100, 900, 200, 1023, 1022);
++      if (ufs_test_store_open (210, 20)) ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210 + (i % 20), 1, block.data ());
++      hostWriteWindowsRevoke (false);
++    }
++  });
++  std::thread revoker2 ([&] { for (int i = 0; i < 4000 && !stop.load (); ++i) revokeAuthority ((i & 1) != 0); });
++  opener.join (); revoker2.join (); stop.store (true);
++  assert (inflight () == 0);
++  // Deny-by-default holds at rest: a WRITE is only ever allowed while the state is exactly Ready.
++  if (state () != UfsWriteState::Ready) assert (!ufsWriteAuthorityAllows (UfsWriteRole::Data, 0, 210, 1));
++  pass ("concurrent initialization and withdrawal never submits an out-of-window WRITE and leaves no I/O in flight");
++
++  assert (gBadWindow.load () == 0);
++  std::puts ("PASS: unified UFS write authority -- check/doorbell linearization, single shared state, revoke before/after submit, in-flight gating, timeout fail-closed, epoch and re-authorization");
++  return 0;
++}
+diff --git a/tests/UfsWriteAuthority.cpp b/tests/UfsWriteAuthority.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/UfsWriteAuthority.cpp
+@@ -0,0 +1,120 @@
++// SPDX-License-Identifier: BSD-2-Clause-Patent
++#include <cassert>
++#include <cstdint>
++#include <cstdio>
++#include <cstring>
++#include "../UfsWriteAuthority.h"
++
++static const uint8_t diskGuid[16] = {
++  0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe,
++  0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef
++};
++static const uint8_t partitionGuid[16] = {
++  0x20, 0x42, 0x64, 0x86, 0xa8, 0xca, 0xec, 0x0e,
++  0x11, 0x33, 0x55, 0x77, 0x99, 0xbb, 0xdd, 0xff
++};
++static const uint8_t wrongType[16] = {
++  0x00, 0x3d, 0xc6, 0x0f, 0x83, 0x84, 0x72, 0x47,
++  0x8e, 0x79, 0x3d, 0x69, 0xd8, 0x47, 0x7d, 0xe4
++};
++
++static bool establish(bool valid = true)
++{
++  ufsWriteAuthorityReset();
++  const uint64_t backup = valid ? 999999 : 999998;
++  const uint32_t backupEntriesCrc = valid ? 0x22223333 : 0x33334444;
++  return ufsWriteAuthorityEstablish(1000000, 100, 900000, 200, backup, 999996,
++                                    0x11112222, 0x22223333, 0xaaaabbbb, backupEntriesCrc, 7,
++                                    diskGuid, kUfsDarwinTypeGuid, partitionGuid);
++}
++
++static bool registerRoles()
++{
++  return ufsWriteAuthorityRegister(UfsWriteRole::Data, 300, 100) &&
++         ufsWriteAuthorityRegister(UfsWriteRole::Export, 800, 100) &&
++         ufsWriteAuthorityRegister(UfsWriteRole::Log, 900, 100);
++}
++
++static void pass(const char *name) { std::printf("PASS: %s\n", name); }
++
++int main()
++{
++  assert(gUfsWriteAuthority.state == UfsWriteState::Sealed);
++  assert(!ufsWriteAuthorityAllows(UfsWriteRole::Data, 0, 300, 1));
++  pass("deny by default before root verification");
++
++  assert(establish());
++  assert(gUfsWriteAuthority.state == UfsWriteState::Ready);
++  assert(!ufsWriteAuthorityAllows(UfsWriteRole::Data, 0, 300, 1));
++  pass("verified base grants no role by default");
++
++  assert(registerRoles());
++  assert(ufsWriteAuthorityAllows(UfsWriteRole::Data, 0, 300, 1));
++  assert(ufsWriteAuthorityAllows(UfsWriteRole::Data, 0, 399, 1));
++  assert(ufsWriteAuthorityAllows(UfsWriteRole::Export, 0, 800, 100));
++  assert(ufsWriteAuthorityAllows(UfsWriteRole::Log, 0, 900, 100));
++  assert(ufsWriteAuthorityAllows(UfsWriteRole::Panic, 0, 950, 50));
++  pass("role windows accept exact boundaries; panic shares log range");
++
++  const uint64_t allowed = gUfsWriteAuthority.allowedWrites;
++  assert(!ufsWriteAuthorityAllows(UfsWriteRole::Data, 0, 299, 1));
++  assert(!ufsWriteAuthorityAllows(UfsWriteRole::Data, 0, 398, 3));
++  assert(!ufsWriteAuthorityAllows(UfsWriteRole::Data, 0, 400, 1));
++  assert(!ufsWriteAuthorityAllows(UfsWriteRole::Export, 0, 700, 1));
++  assert(!ufsWriteAuthorityAllows(UfsWriteRole::Log, 0, 950, 51));
++  pass("wrong partizione, boundary overrun and cross-role access rejected");
++  assert(gUfsWriteAuthority.allowedWrites == allowed);
++
++  assert(!ufsWriteAuthorityAllows(UfsWriteRole::Data, 0, 300, 0));
++  assert(!ufsWriteAuthorityAllows(UfsWriteRole::Data, 0, UINT32_MAX, 2));
++  assert(!ufsWriteAuthorityAllows(UfsWriteRole::None, 0, 300, 1));
++  pass("zero, overflow and no-role requests rejected");
++
++  const uint64_t denied = gUfsWriteAuthority.deniedWrites;
++  assert(!ufsWriteAuthorityAllows(UfsWriteRole::Data, 1, 300, 1));
++  assert(gUfsWriteAuthority.deniedWrites > denied);
++  pass("non-LUN-0 request rejected");
++
++  assert(!ufsWriteAuthorityRegister(UfsWriteRole::Data, 500, 1));
++  assert(!ufsWriteAuthorityRegister(UfsWriteRole::Log, 899, 2));
++  assert(!ufsWriteAuthorityRegister(UfsWriteRole::Export, 901, 1));
++  assert(!ufsWriteAuthorityRegister(UfsWriteRole::Panic, 950, 1));
++  pass("duplicate, overlap, first-past-partition and unassigned panic roles rejected");
++
++  assert(!establish(false));
++  assert(gUfsWriteAuthority.state == UfsWriteState::Sealed);
++  pass("backup header not at UFS last LBA rejected");
++
++  ufsWriteAuthorityReset();
++  assert(!ufsWriteAuthorityEstablish(1000000, 100, 900000, 200, 999999, 999996,
++                                     0x11112222, 0x22223333, 0xaaaabbbb, 0x22223333, 7,
++                                     diskGuid, wrongType, partitionGuid));
++  pass("type GUID contract mismatch rejected");
++
++  ufsWriteAuthorityReset();
++  uint8_t zeroGuid[16] = {};
++  assert(!ufsWriteAuthorityEstablish(1000000, 100, 900000, 200, 999999, 999996,
++                                     0x11112222, 0x22223333, 0xaaaabbbb, 0x22223333, 7,
++                                     diskGuid, kUfsDarwinTypeGuid, zeroGuid));
++  pass("zero partition identity rejected");
++
++  ufsWriteAuthorityReset();
++  assert(!ufsWriteAuthorityEstablish(1000000, 100, 1000000, 200, 999999, 999996,
++                                     0x11112222, 0x22223333, 0xaaaabbbb, 0x22223333, 7,
++                                     diskGuid, kUfsDarwinTypeGuid, partitionGuid));
++  pass("partition outside UFS capacity rejected");
++
++  assert(establish() && ufsWriteAuthorityRegister(UfsWriteRole::Data, 300, 100));
++  ufsWriteAuthorityRevoke(false);
++  assert(gUfsWriteAuthority.state == UfsWriteState::Revoked);
++  assert(!ufsWriteAuthorityAllows(UfsWriteRole::Data, 0, 300, 1));
++  assert(!ufsWriteAuthorityRegister(UfsWriteRole::Log, 900, 100));
++  pass("revocation clears windows and forbids re-registration");
++
++  ufsWriteAuthorityRevoke(true);
++  assert(gUfsWriteAuthority.state == UfsWriteState::Failed);
++  assert(gUfsWriteAuthority.transportFailures == 1);
++  pass("transport failure remains latched");
++
++  std::puts("PASS: deny-by-default UFS write authority, Darwin identity, GPT/capacity baseline, role isolation, bounds and integer overflow");
++}

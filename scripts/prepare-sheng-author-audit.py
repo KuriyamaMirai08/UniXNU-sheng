@@ -187,6 +187,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--unixnu", required=True, type=Path)
     parser.add_argument("--evidence", required=True, type=Path)
+    parser.add_argument("--stage0c1f-patched-ramblock", action="store_true")
     args = parser.parse_args()
     root = args.unixnu.resolve()
     if subprocess.check_output(["git", "-C", root, "rev-parse", "HEAD"], text=True).strip() != FRAMEWORK:
@@ -202,7 +203,10 @@ def main():
         current = path.read_bytes()
         # The reference builder's real-archive CLI patch is applied immediately
         # before these guards and is separately retained in framework-diff.log.
-        if current != original and name != "scripts/build-fileset-release-reference.py":
+        if name == "drivers/RamBlock/NativeRamBlock.cpp" and args.stage0c1f_patched_ramblock:
+            if sha(current) != "3594cf762cf0914583157f7c1ccbf510eda70c188082d20524d87f4d769956ac":
+                raise ValueError("Stage 0C-1F RamBlock identity changed")
+        elif current != original and name != "scripts/build-fileset-release-reference.py":
             raise ValueError("Unreviewed source modification: " + name)
         if name == "scripts/build-fileset-release-reference.py" and sha(current) != "28abed8c005825a8b22a729239f1e330b385271c4bb4289f9008b0b8c7289b47":
             raise ValueError("Reference builder differs from the exact real-archive CLI patch")

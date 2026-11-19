@@ -60,7 +60,8 @@ def run_original_regression_check(source, record, policy):
     namespace['check_prelink_regressions'](record, policy)
 
 
-def verify_bindings(image_bytes, raw, native_data, roots, early, document, bindings):
+def verify_bindings(image_bytes, raw, native_data, roots, early, document, bindings, *,
+                    native_data_placement='contiguous'):
     """Decode actual relocated slots independently of the matcher's claims."""
     from kc_image import Image
     from fileset_emit import dependency_closure, rebase_collection
@@ -68,7 +69,9 @@ def verify_bindings(image_bytes, raw, native_data, roots, early, document, bindi
     stock, native, output = Image(raw), Image(native_data), Image(image_bytes)
     closure = dependency_closure(stock, roots)
     rebased, slide, _ = rebase_collection(stock, native.base, closure, early, set(roots))
-    layout = Layout(rebased, native, closure)
+    placement_options = ({} if native_data_placement == 'contiguous'
+                         else {'native_data_placement': native_data_placement})
+    layout = Layout(rebased, native, closure, **placement_options)
     names = {}
     for address, symbols in native.symbols().items():
         for name in symbols:

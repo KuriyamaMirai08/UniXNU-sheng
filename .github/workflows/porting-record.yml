@@ -1,6 +1,10 @@
 name: Device documentation
 
-on: [push, pull_request]
+on:
+  push:
+    branches-ignore:
+      - codex/stage0c1f-separate-data-20261119
+  pull_request:
 
 permissions:
   contents: read

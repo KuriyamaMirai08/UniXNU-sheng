@@ -1,0 +1,408 @@
+--- a/emit_prelink.py
++++ b/emit_prelink.py
+@@ -319,6 +319,10 @@
+     parser.add_argument('--fileset-reference', type=Path, help='symbol-bearing comparison kernel for fileset matching')
+     parser.add_argument('--allow-missing', action='store_true',
+                         help='MH_FILESET only: emit an experimental image with incomplete mappings')
++    from fileset_layout import NATIVE_DATA_PLACEMENTS
++    parser.add_argument('--native-data-placement', choices=NATIVE_DATA_PLACEMENTS,
++                        default='contiguous',
++                        help='experimental fileset placement; after-retained preserves all retained DATA VAs')
+     args = parser.parse_args()
+     if args.output.exists():
+         raise SystemExit('Refuse to overwrite an existing candidate')
+@@ -368,15 +372,18 @@
+         # a stale address. Data references still have no such fallback.
+         stub_symbol = '_unixnu_fileset_unmapped' if args.allow_missing else None
+         image, report = emit_images(original_data, native_data, pairing, args.root,
+-                                    stub_symbol=stub_symbol, early_security_init=initializers or None)
++                                    stub_symbol=stub_symbol, early_security_init=initializers or None,
++                                    native_data_placement=args.native_data_placement)
+         report.update(kernelcache=str(args.prelinked.resolve()), native=str(args.kernel.resolve()),
+                       map=str(map_path.resolve()))
+         # Filesets use the native link address so early XNU can find their root.
+         # The old static-prelink --slide option is not applied to this format.
+         write_candidate(image, report, args.output, args.output.with_suffix('.json'), args.allow_missing)
+         return
+-    if args.fileset_map or args.fileset_reference or args.allow_missing:
+-        parser.error('--fileset-map, --fileset-reference and --allow-missing require an MH_FILESET input')
++    if (args.fileset_map or args.fileset_reference or args.allow_missing
++            or args.native_data_placement != 'contiguous'):
++        parser.error('--fileset-map, --fileset-reference, --allow-missing and '
++                     '--native-data-placement=after-retained require an MH_FILESET input')
+     image, report = emit(native_data, original_data, args.root, args.slide, initializers)
+     args.output.parent.mkdir(parents=True, exist_ok=True)
+     args.output.write_bytes(image)
+--- a/fileset_emit.py
++++ b/fileset_emit.py
+@@ -685,7 +685,8 @@
+     return expected
+ 
+ 
+-def emit_images(raw, native_data, payload, roots, stub_symbol=None, early_security_init=None):
++def emit_images(raw, native_data, payload, roots, stub_symbol=None, early_security_init=None,
++                native_data_placement='contiguous'):
+     inputs = validate_map(raw, native_data, payload)
+     from fileset_match import MATCHER_VERSION, matcher_signature
+     from fileset_names import expected_signature
+@@ -705,7 +706,8 @@
+         cache, native.base, closure, early_security_init, set(roots))
+     pairs = {(address + collection_slide) & MASK64: target for address, target in pairs.items()}
+     from fileset_segmented import SegmentedEmit
+-    emit = SegmentedEmit(cache, native, pairs, closure)
++    emit = SegmentedEmit(cache, native, pairs, closure,
++                         native_data_placement=native_data_placement)
+     emit.site_pairs = reviewed_sites(inputs, native, collection_slide)
+     emit.stub, emit.stubbed = None, defaultdict(Counter)
+     emit.old_starts = set(emit.old.function_starts())
+@@ -775,6 +777,8 @@
+ 
+ 
+ def main():
++    from fileset_layout import NATIVE_DATA_PLACEMENTS
++
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('kernelcache')
+     parser.add_argument('native')
+@@ -787,6 +791,7 @@
+                         help='native function that receives calls to unmapped original kernel functions')
+     parser.add_argument('--early-security-init', action='append', default=[], metavar='BUNDLE=ORIGINAL_VA',
+                         help='original registration routine OSKext runs after this component starts')
++    parser.add_argument('--native-data-placement', choices=NATIVE_DATA_PLACEMENTS, default='contiguous')
+     args = parser.parse_args()
+     early = {}
+     for item in args.early_security_init:
+@@ -794,7 +799,8 @@
+         early[identifier] = int(address, 0)
+     payload = json.loads(Path(args.map).read_text())
+     image, report = emit_images(Path(args.kernelcache).read_bytes(), Path(args.native).read_bytes(),
+-                                payload, args.root, args.unmapped_stub, early)
++                                payload, args.root, args.unmapped_stub, early,
++                                native_data_placement=args.native_data_placement)
+     report.update(kernelcache=str(Path(args.kernelcache).resolve()), native=str(Path(args.native).resolve()),
+                   map=str(Path(args.map).resolve()))
+     write_candidate(image, report, args.output, args.report or Path(args.output).with_suffix('.json'),
+--- a/fileset_layout.py
++++ b/fileset_layout.py
+@@ -8,6 +8,8 @@
+ 
+ PAGE = 0x4000
+ MASK64 = (1 << 64) - 1
++NATIVE_DATA_PLACEMENTS = ('contiguous', 'after-retained', 'separate-native-data')
++NATIVE_DATA_ROOT = '__NATIVE_DATA'
+ 
+ 
+ def align(value, alignment=PAGE):
+@@ -71,18 +73,34 @@
+ 
+ class Layout:
+     """Fit native segments around retained kexts, preserving their relative addresses."""
+-    def __init__(self, cache, native, closure):
++    def __init__(self, cache, native, closure, native_data_placement='contiguous'):
+         from kc_image import Image
++        if native_data_placement not in NATIVE_DATA_PLACEMENTS:
++            raise ValueError(f'Unknown native DATA placement: {native_data_placement}')
+         self.cache, self.native = cache, native
++        self.image_class = Image
++        self.closure = closure
++        self.native_data_placement = native_data_placement
+         self.roots = {s['name']: dict(s) for s in cache.segments}
++        self.root_protections = {
++            segment['name']: struct.unpack_from('<II', cache.data, segment['command_offset'] + 56)
++            for segment in cache.segments
++        }
+         self.occupied = []
+         self.retained_code = []
++        self.retained_segments = []
++        self.retained_protections = []
+         for name, (_, offset) in cache.entries.items():
+             if name == 'com.apple.kernel' or closure is not None and name not in closure:
+                 continue
+             for segment in Image(cache.data, offset).segments:
+                 if segment['size'] and segment['name'] != '__LINKEDIT':
+                     self.occupied.append((segment['va'], segment['va'] + segment['size']))
++                    self.retained_segments.append((name, segment['name'], segment['va'],
++                                                   segment['va'] + segment['size']))
++                    self.retained_protections.append((
++                        name, segment['name'],
++                        *struct.unpack_from('<II', cache.data, segment['command_offset'] + 56)))
+                 if segment['name'] == '__TEXT_EXEC' and segment['filesize']:
+                     self.retained_code.append((segment['va'], segment['va'] + segment['filesize'], name))
+         self.placements = {}
+@@ -104,11 +122,69 @@
+         # The old kernel boot segment and prelink XML are replaceable, provided
+         # no retained kext uses them. Move XML into its own mapping below.
+         if code_end > self.roots['__DATA']['va']:
+-            raise ValueError('Native code would collide with collection data')
++            if native_data_placement == 'contiguous':
++                raise ValueError('Native code would collide with collection data')
+         self.roots.pop('__TEXT_BOOT_EXEC', None)
+         code['size'] = code['filesize'] = code_end - code['va']
+-        self.reserve('__DATA', self.roots['__DATA']['va'])
++        data_root = self.roots['__DATA']
++        old_data_start = data_root['va']
++        old_data_end = old_data_start + data_root['size']
++        retained_data = [(name, segment, begin, end) for name, segment, begin, end
++                         in self.retained_segments
++                         if data_root['va'] < end and begin < old_data_end]
++        if native_data_placement == 'contiguous':
++            self.reserve('__DATA', data_root['va'])
++        elif native_data_placement == 'separate-native-data':
++            if NATIVE_DATA_ROOT in self.roots:
++                raise ValueError('Collection already has a native DATA parent')
++            if (data_root['fileoff'] != old_data_start - cache.base
++                    or data_root['filesize'] != data_root['size']
++                    or struct.unpack_from('<I', cache.data, data_root['command_offset'] + 64)[0]):
++                raise ValueError('Expected linear sectionless root DATA')
++            data_start = max(old_data_start, code_end)
++            if data_start >= old_data_end:
++                raise ValueError('No room for retained collection DATA')
++            data_root.update(va=data_start, size=old_data_end - data_start,
++                             fileoff=data_start - cache.base, filesize=old_data_end - data_start)
++        else:
++            blocked = [(name, segment, begin, end) for name, segment, begin, end
++                       in retained_data if begin < code_end]
++            if blocked:
++                name, segment, begin, end = blocked[0]
++                raise ValueError(f'Retained {name}:{segment} begins before expanded __DATA: '
++                                 f'{begin:#x} < {code_end:#x}')
++            native_data = self.segment('__DATA')
++            native_data_start = align(max([code_end] + [end for _, _, _, end in retained_data]))
++            native_data_end = native_data_start + native_data['size']
++            data_root_end = max(old_data_end, native_data_end)
++            data_root.update(va=code_end, size=data_root_end - code_end,
++                             fileoff=code_end - cache.base,
++                             filesize=data_root_end - code_end)
++            self.reserve('__DATA', native_data_start)
++            self.cursor = max(self.cursor, align(data_root_end - cache.base))
++            self.expanded_data = {
++                'start': code_end,
++                'end': data_root_end,
++                'native_start': native_data_start,
++                'native_end': native_data_end,
++                'old_start': old_data_start,
++                'old_end': old_data_end,
++                'retained': retained_data,
++            }
+         link = self.roots['__LINKEDIT']
++        if native_data_placement == 'after-retained':
++            old_link = dict(link)
++            tail = cache.base + self.cursor
++            link.update(va=tail, size=old_link['size'],
++                        fileoff=self.cursor, filesize=old_link['filesize'])
++            self.root_linkedit_move = {
++                'old_va': old_link['va'],
++                'old_fileoff': old_link['fileoff'],
++                'new_va': tail,
++                'new_fileoff': self.cursor,
++                'bytes': old_link['filesize'],
++            }
++            self.cursor = align(self.cursor + old_link['filesize'])
+         for name in ('__LINKINFO', '__LINKEDIT'):
+             self.reserve(name, self.allocate(self.segment(name)['size']))
+         link['size'] = link['filesize'] = self.cursor - link['fileoff']
+@@ -128,6 +204,17 @@
+             self.reserve(name, address)
+             self.roots[name] = dict(segment, va=address, fileoff=address-cache.base,
+                                     filesize=segment['size'])
++        if native_data_placement == 'separate-native-data':
++            # Keep the original root LINKEDIT and retained DATA at their file
++            # positions. XNU maps the native member's DATA by its own command.
++            segment = self.segment('__DATA')
++            address = self.allocate(segment['size'])
++            self.reserve('__DATA', address)
++            self.roots[NATIVE_DATA_ROOT] = dict(segment, name=NATIVE_DATA_ROOT,
++                                               va=address, fileoff=address - cache.base,
++                                               filesize=segment['size'])
++            self.root_protections[NATIVE_DATA_ROOT] = struct.unpack_from(
++                '<II', native.data, segment['command_offset'] + 56)
+         # Zero-sized markers have distinct semantics even when their old
+         # addresses alias a real segment. Relocate them by section ordinal.
+         for segment in native.segments:
+@@ -136,6 +223,9 @@
+             if segment['size']:
+                 raise ValueError(f'Unclassified native segment {segment["name"]}')
+             address = self.end('__DATA') if segment['name'] == '__PRELINK_DATA' else self.end('__KLD')
++            if (native_data_placement == 'separate-native-data'
++                    and segment['name'] == '__PRELINK_DATA'):
++                address = data_root['va']
+             self.reserve(segment['name'], address)
+         self.size = self.cursor
+         self.validate()
+@@ -194,12 +284,109 @@
+         segment = matches[0]
+         return self.placements[segment['name']] - self.cache.base + old_offset - segment['fileoff']
+ 
++    def validate_separate_data(self):
++        data = self.roots['__DATA']
++        parent = self.roots[NATIVE_DATA_ROOT]
++        start, end = data['va'], data['va'] + data['size']
++        old = next(s for s in self.cache.segments if s['name'] == '__DATA')
++        if (start != max(old['va'], self.end('__KLD')) or end != old['va'] + old['size']
++                or not start < end or start % PAGE or end % PAGE):
++            raise ValueError('Invalid retained root DATA bounds')
++        marker = self.segment('__PRELINK_DATA')
++        if (marker['size'] or marker['filesize'] or self.placements['__PRELINK_DATA'] != start):
++            raise ValueError('PRELINK_DATA marker must select the entire retained DATA mapping')
++        native = self.segment('__DATA')
++        native_start = self.placements['__DATA']
++        if (parent['va'] != native_start or parent['size'] != native['size']
++                or not native['size'] or native['size'] % PAGE or native_start < end
++                or native['filesize'] > native['size']):
++            raise ValueError('Invalid separate native DATA backing')
++        for mapping in (data, parent):
++            if (mapping['fileoff'] != mapping['va'] - self.cache.base
++                    or mapping['fileoff'] < 0 or mapping['filesize'] != mapping['size']
++                    or mapping['fileoff'] + mapping['filesize'] > self.size
++                    or self.root_protections[mapping['name']] != (3, 3)):
++                raise ValueError('Expected bounded linear RW-NX DATA backing')
++        for identity, protection in zip(self.retained_segments, self.retained_protections, strict=True):
++            owner, name, begin, limit = identity
++            if old['va'] < limit and begin < end:
++                if not (start <= begin < limit <= end and protection == (owner, name, 3, 3)):
++                    raise ValueError(f'Retained {owner}:{name} is outside RW-NX PRELINK_DATA')
++        link = self.roots['__LINKEDIT']
++        stock_link = next(s for s in self.cache.segments if s['name'] == '__LINKEDIT')
++        if (link['va'], link['fileoff']) != (stock_link['va'], stock_link['fileoff']):
++            raise ValueError('Original root LINKEDIT location changed')
++
+     def validate(self):
++        if self.native_data_placement == 'separate-native-data':
++            self.validate_separate_data()
++        if self.native_data_placement == 'after-retained':
++            data_root = self.roots['__DATA']
++            data_start = data_root['va']
++            data_end = data_start + data_root['size']
++            if data_start < 0 or data_end > MASK64:
++                raise ValueError('Expanded root __DATA address range overflows')
++            native_start = self.placements['__DATA']
++            native_end = self.end('__DATA')
++            if data_start != self.end('__KLD'):
++                raise ValueError('Expanded root __DATA must begin at native code end')
++            if not data_start <= native_start < native_end <= data_end:
++                raise ValueError('Native __DATA is outside expanded root __DATA')
++            retained = self.expanded_data['retained']
++            outside = [(name, segment, begin, end) for name, segment, begin, end in retained
++                       if not (data_start <= begin and end <= data_end)]
++            if outside:
++                name, segment, begin, end = outside[0]
++                raise ValueError(f'Retained {name}:{segment} is outside expanded root __DATA')
++            if any(native_start < end and begin < native_end
++                   for _, _, begin, end in retained):
++                raise ValueError('Native __DATA overlaps retained DATA')
++            if (self.placements['__PRELINK_DATA'] != native_end):
++                raise ValueError('__PRELINK_DATA marker does not follow native __DATA')
++            if data_root['fileoff'] != data_start - self.cache.base:
++                raise ValueError('Expanded root __DATA file offset is inconsistent')
++            if data_root['filesize'] != data_root['size']:
++                raise ValueError('Expanded root __DATA file size is inconsistent')
++            if data_root['fileoff'] < 0 or data_root['fileoff'] + data_root['filesize'] > self.size:
++                raise ValueError('Expanded root __DATA file range is out of bounds')
++            link = self.roots['__LINKEDIT']
++            if link['va'] != data_end:
++                raise ValueError('Root __LINKEDIT does not follow expanded __DATA')
++            if link['fileoff'] != link['va'] - self.cache.base:
++                raise ValueError('Root __LINKEDIT file offset is inconsistent')
++            if link['va'] + link['size'] > MASK64:
++                raise ValueError('Root __LINKEDIT address range overflows')
++            if link['fileoff'] < 0 or link['fileoff'] + link['filesize'] > self.size:
++                raise ValueError('Root __LINKEDIT file range is out of bounds')
++            cache_data_segment = next(
++                segment for segment in self.cache.segments if segment['name'] == '__DATA')
++            if self.root_protections['__DATA'] != struct.unpack_from(
++                    '<II', self.cache.data, cache_data_segment['command_offset'] + 56):
++                raise ValueError('Expanded root __DATA changed page protections')
++            current_retained_segments = []
++            current_retained = []
++            for name, (_, offset) in self.cache.entries.items():
++                if name == 'com.apple.kernel' or self.closure is not None and name not in self.closure:
++                    continue
++                for segment in self.image_class(self.cache.data, offset).segments:
++                    if segment['size'] and segment['name'] != '__LINKEDIT':
++                        current_retained_segments.append((
++                            name, segment['name'], segment['va'],
++                            segment['va'] + segment['size']))
++                        current_retained.append((
++                            name, segment['name'],
++                            *struct.unpack_from('<II', self.cache.data,
++                                                segment['command_offset'] + 56)))
++            if (current_retained_segments != self.retained_segments
++                    or current_retained != self.retained_protections):
++                raise ValueError('Retained segment identity or permissions changed')
+         placed = []
+         for segment in self.native.segments:
+             if not segment['size']:
+                 continue
+             begin, end = self.placements[segment['name']], self.end(segment['name'])
++            if begin < 0 or not begin <= end <= MASK64:
++                raise ValueError(f'Native {segment["name"]} address range overflows')
+             if begin % PAGE:
+                 raise ValueError('Unaligned native segment')
+             if any(begin < e and b < end for b, e in self.occupied + placed):
+@@ -208,6 +395,8 @@
+                 raise ValueError(f'Native {segment["name"]} is outside collection mappings')
+             placed.append((begin, end))
+         ordered = sorted((s['va'], s['va'] + s['size']) for s in self.roots.values() if s['size'])
++        if any(begin < 0 or end > MASK64 for begin, end in ordered):
++            raise ValueError('Root mapping address range overflows')
+         if any(a[1] > b[0] for a, b in zip(ordered, ordered[1:])):
+             raise ValueError('Root mappings overlap')
+         if self.end('__LASTDATA_CONST') > min(b for b, e in self.occupied
+--- a/fileset_segmented.py
++++ b/fileset_segmented.py
+@@ -7,13 +7,21 @@
+ from fileset_emit import (Emit, ChainReader, decode, chain_word, PAGE, MASK64,
+                           LC_SEGMENT_64, LC_SYMTAB, LC_DYLD_CHAINED_FIXUPS,
+                           LC_FILESET_ENTRY, LC_UNIXTHREAD, MH_DYLIB_IN_CACHE)
+-from fileset_layout import Layout, relocate_native, relocate_original_stubs, encode_uleb, align
++from fileset_layout import (Layout, NATIVE_DATA_PLACEMENTS, relocate_native,
++                            relocate_original_stubs, encode_uleb, align)
+ from kc_image import Image, scan, signed
+ from fileset_emit import inline_data_ranges, inside
+ 
+ 
+ class SegmentedEmit(Emit):
+     site_pairs = {}
++
++    def __init__(self, cache, native, pairs, closure=None,
++                 native_data_placement='contiguous'):
++        if native_data_placement not in NATIVE_DATA_PLACEMENTS:
++            raise ValueError(f'Unknown native DATA placement: {native_data_placement}')
++        super().__init__(cache, native, pairs, closure)
++        self.native_data_placement = native_data_placement
+ 
+     def rebind(self, target, site):
+         if not self.mapped(target):
+@@ -32,10 +40,21 @@
+         return self.layout.translate(native)
+ 
+     def place_kernel(self):
+-        self.layout = Layout(self.cache, self.native, self.closure)
++        self.layout = Layout(self.cache, self.native, self.closure,
++                             native_data_placement=self.native_data_placement)
+         self.report['segment_layout'] = self.layout.describe()
++        self.report['native_data_placement'] = self.native_data_placement
+         self.fileoff = self.layout.placements['__TEXT'] - self.cache.base
+         self.data.extend(bytes(self.layout.size - len(self.data)))
++        moved_link = getattr(self.layout, 'root_linkedit_move', None)
++        if moved_link is not None:
++            source = moved_link['old_fileoff']
++            size = moved_link['bytes']
++            target = moved_link['new_fileoff']
++            if len(self.data) < target + size:
++                raise ValueError('Moved root __LINKEDIT exceeds output mapping')
++            self.data[target:target + size] = self.cache.data[source:source + size]
++            self.report['root_linkedit_bytes_moved'] = size
+         for segment in self.native.segments:
+             if not segment['size']:
+                 continue
+@@ -363,8 +382,7 @@
+         for name, segment in self.layout.roots.items():
+             if name in original_names:
+                 continue
+-            source = self.layout.segment(name)
+-            maxprot, initprot = struct.unpack_from('<II', self.native.data, source['command_offset']+56)
++            maxprot, initprot = struct.unpack_from('<II', self.native.data, segment['command_offset']+56)
+             rebuilt.append(struct.pack('<II16sQQQQIIII', LC_SEGMENT_64, 72, name.encode().ljust(16,b'\0'),
+                                        segment['va'], segment['size'], segment['fileoff'], segment['filesize'],
+                                        maxprot, initprot, 0, 0))

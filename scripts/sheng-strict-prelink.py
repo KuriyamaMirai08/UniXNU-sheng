@@ -25,6 +25,62 @@ TREE = Path(__file__).resolve().parents[1]
 SCRIPTS = Path(__file__).resolve().parent
 MASK = (1 << 64) - 1
 
+SEPARATE_NATIVE_DATA_ENGINE = {
+    "emit_prelink.py": "777659bfbbba319bcb045c921350d05cb4ed3501e036f1ee6f10c452f09ce06f",
+    "fileset_emit.py": "203b69cc392fb4411ff208982f665d865a96b67927bf6eff0b0e45c79d4e824c",
+    "fileset_layout.py": "6a536308bf50a62977d880732ff89edf245b4d6cdadbf51fedb9c221fc5492ae",
+    "fileset_segmented.py": "4e60b0c86679165174fec443ce507179dc0fcd342fc5243969cb0019cf2460b9",
+}
+
+
+def engine_contract(contract, placement):
+    if placement == "contiguous":
+        return contract
+    require(placement == "separate-native-data", "Unknown native DATA placement")
+    require(SEPARATE_NATIVE_DATA_ENGINE.keys() <= contract["engine"].keys(), "Unknown experimental engine files")
+    return dict(contract, engine={**contract["engine"], **SEPARATE_NATIVE_DATA_ENGINE})
+
+
+def verify_retained_output(rebased, output, closure, layout):
+    from kc_image import Image
+
+    def segments(container, identifier):
+        member = Image(container.data, container.entries[identifier][1])
+        return sorted((segment["name"], segment["va"], segment["size"], segment["fileoff"], segment["filesize"],
+                       struct.unpack_from("<II", member.data, segment["command_offset"] + 56))
+                      for segment in member.segments if segment["size"] and segment["name"] != "__LINKEDIT")
+
+    identifiers = (set(rebased.entries) & set(closure)) - {"com.apple.kernel"}
+    require(set(output.entries) - {"com.apple.kernel"} == identifiers, "Retained closure changed")
+    for identifier in sorted(identifiers):
+        require(segments(rebased, identifier) == segments(output, identifier),
+                "Retained output segment changed: " + identifier)
+    layout.validate()
+    separate_data = layout.native_data_placement == "separate-native-data"
+    root_names = ("__DATA", "__LINKEDIT", "__NATIVE_DATA") if separate_data else ("__DATA", "__LINKEDIT")
+    for name in root_names:
+        actual = next(segment for segment in output.segments if segment["name"] == name)
+        expected = layout.roots[name]
+        require(all(actual[field] == expected[field] for field in ("va", "size", "fileoff", "filesize")),
+                "Output root does not match verified layout: " + name)
+        protections = layout.root_protections[name]
+        require(struct.unpack_from("<II", output.data, actual["command_offset"] + 56) == protections,
+                "Output root page protections changed: " + name)
+    native = Image(output.data, output.entries["com.apple.kernel"][1])
+    data = next(segment for segment in native.segments if segment["name"] == "__DATA")
+    require(data["va"] == layout.placements["__DATA"] and data["va"] + data["size"] == layout.end("__DATA"),
+            "Output native DATA does not match verified layout")
+    if separate_data:
+        marker = next(segment for segment in native.segments if segment["name"] == "__PRELINK_DATA")
+        require((marker["va"], marker["size"], marker["filesize"]) ==
+                (layout.roots["__DATA"]["va"], 0, 0), "Output PRELINK_DATA marker changed")
+        original_data = layout.segment("__DATA")
+        parent = layout.roots["__NATIVE_DATA"]
+        require(data["fileoff"] == parent["fileoff"] and data["filesize"] == original_data["filesize"]
+                and struct.unpack_from("<II", native.data, data["command_offset"] + 56) == (3, 3),
+                "Output native DATA backing or protections changed")
+    return len(identifiers)
+
 
 def sha(data):
     return hashlib.sha256(data).hexdigest()
@@ -122,16 +178,19 @@ def main():
     parser.add_argument("--slide", required=True)
     parser.add_argument("--root", required=True, action="append")
     parser.add_argument("--early-security-init", action="append", default=[])
+    parser.add_argument("--native-data-placement", choices=("contiguous", "separate-native-data"), default="contiguous")
     args = parser.parse_args()
     require(not args.output.exists(), "Refuse to overwrite a candidate")
     attempt = Path(tempfile.mkdtemp(prefix=".sheng-evidence-", dir=args.output.parent))
     receipt = dict(started_at=datetime.now(timezone.utc).isoformat(), status="validating",
-                   candidate_written=False, device_operations=False, author_engine_unchanged=True)
+                   candidate_written=False, device_operations=False,
+                   native_data_placement=args.native_data_placement,
+                   author_engine_unchanged=args.native_data_placement == "contiguous")
     try:
         contract = json.loads((SCRIPTS / "clean-prelink-contract.json").read_text())
         current = json.loads((SCRIPTS / "sheng-candidate-prelink-contract.json").read_text())
         kit = TREE / "kits/XnuPrelink"
-        check_kit(kit, contract)
+        check_kit(kit, engine_contract(contract, args.native_data_placement))
         read_pinned(SCRIPTS / "m4_prelink_evidence.py", contract["interface_guard_sha256"], "Historical interface guard")
         fixture = read_pinned(SCRIPTS / "clean-prelink-symbols.json", contract["reviewed_fixture_sha256"], "Historical real bindings")
         document = json.loads(fixture)
@@ -200,17 +259,26 @@ def main():
         print("Qualified historical implementations and real candidate interfaces; matching new inputs", flush=True)
         pairing = match_images(raw, new_data, reference_data=reference_data)
         atomic_write(args.output.with_suffix(".map.json"), (json.dumps(pairing, indent=2) + "\n").encode())
-        image, report = emit_images(raw, new_data, pairing, args.root, early_security_init=early)
+        placement_options = ({"native_data_placement": args.native_data_placement}
+                             if args.native_data_placement != "contiguous" else {})
+        image, report = emit_images(raw, new_data, pairing, args.root, early_security_init=early,
+                                    **placement_options)
+        if placement_options:
+            require(report["statistics"].get("native_data_placement") == args.native_data_placement,
+                    "Emitter used a different native DATA placement")
         report.update(kernelcache=str(args.prelinked.resolve()), native=str(args.kernel.resolve()),
                       map=str(args.output.with_suffix(".map.json").resolve()))
         require(not report["stubbed"] and not report["missing"], "Strict native pairing remains incomplete; see retained evidence")
         require(not report["statistics"].get("unproven_kernel_page_references", 0), "Unproven kernel page references remain")
         bindings = contract["bindings"] + current["new_bindings"]
-        receipt["independent_slots"] = verify_bindings(image, raw, new_data, args.root, early, document, bindings)
+        receipt["independent_slots"] = verify_bindings(image, raw, new_data, args.root, early, document, bindings,
+                                                      **placement_options)
         output = Image(image)
         require(output.kind == 12 and "com.apple.kernel" in output.entries, "Expected a complete native fileset")
         rebased, slide, _ = rebase_collection(Image(raw), native.base, closure, early, set(args.root))
-        layout = Layout(rebased, native, closure)
+        layout = Layout(rebased, native, closure, **placement_options)
+        if placement_options:
+            receipt["retained_entries_verified"] = verify_retained_output(rebased, output, closure, layout)
         target = (int(current["normal_pal_selector"], 16) + slide) & MASK
         branch = [row for row in report["native_original_branches"] if row["symbol"] == "_sheng_image4_normal_pal"]
         require(len(branch) == 1 and int(branch[0]["target"], 16) == target, "Image4 PAL branch target mismatch")
