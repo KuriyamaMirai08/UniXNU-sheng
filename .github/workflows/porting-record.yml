@@ -6,6 +6,7 @@ on:
       - codex/stage0c1f-separate-data-20261119
       - codex/stage0c1f-separate-data-r2-20261119
       - codex/stage0c1f-separate-data-r3-20261119
+      - codex/stage0c1f-separate-data-r4-20261120
   pull_request:
 
 permissions:

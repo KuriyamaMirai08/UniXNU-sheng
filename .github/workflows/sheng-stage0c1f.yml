@@ -2,7 +2,7 @@ name: Sheng Stage 0C-1F separate DATA strict prelink
 on:
   push:
     branches:
-      - codex/stage0c1f-separate-data-r3-20261119
+      - codex/stage0c1f-separate-data-r4-20261120
 permissions:
   contents: read
   actions: read
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   strict-prelink:
-    if: github.event_name == 'push' && github.event.created && github.ref == 'refs/heads/codex/stage0c1f-separate-data-r3-20261119'
+    if: github.event_name == 'push' && github.event.created && github.ref == 'refs/heads/codex/stage0c1f-separate-data-r4-20261120'
     runs-on: macos-26
     timeout-minutes: 350
     env:
@@ -28,7 +28,7 @@ jobs:
           test "$(uname -m)" = arm64
           test -d "$DEVELOPER_DIR"
           test "$(sw_vers -buildVersion)" = 25G332
-          brew install dtc cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw zstd z3 zlib-ng-compat
+          brew install dtc cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw zstd zlib-ng-compat
           python3 -B scripts/repro/install-stage0c1f-tools.py \
             "$RUNNER_TEMP/stage0c1f-bottles" "$RUNNER_TEMP/stage0c1f-supply/fixed-bottles.json"
           python3 -m venv "$RUNNER_TEMP/stage0c1f-python"

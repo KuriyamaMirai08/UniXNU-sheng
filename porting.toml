@@ -21,6 +21,12 @@ next_action = ["Compare the effective status output whenever a profile, source o
 
 [[area.evidence]]
 kind = "host"
+reference = "https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/44532524718/attempts/6"
+command = "scripts/repro/install-stage0c1f-tools.py"
+result = "The Stage 0C-1F tool setup poured LLVM and LLD 23.1.4. Clang failed before compilation because the runner's Z3 5.4.1 lacked libz3.5.3.dylib. The installer now pins the ARM64 Tahoe Z3 5.3.3 bottle and verifies the installed dylib path before starting Clang. Hosted execution and strict prelink remain pending."
+
+[[area.evidence]]
+kind = "host"
 reference = "reports/image4-size-optimization.md"
 command = "Existing Image4 host fixture, exact updated source, -O2"
 revision = "1d0abd9fda19619997428dee020ccf609b473f12"
