@@ -128,6 +128,9 @@ def main():
         save("last-stage.json", dict(stage=name, exit_code=result.returncode,
                                      log_sha256=digest(log), log_bytes=log.stat().st_size,
                                      diagnostic_lines=len(lines)))
+        if result.returncode and name == "optional-provider-link-checks":
+            # The fixture handles reviewed consumer source and synthetic peers only.
+            print(log.read_text(encoding="utf-8", errors="replace")[-6000:], flush=True)
         require(result.returncode == 0, "Failed build stage: " + name)
 
     def git(root, *arguments):
@@ -208,7 +211,7 @@ def main():
                                                "e3ca14afe6c14b0745385da7399c4380a90be2237ad331bf64156dde29ddcc73")
     os.environ.update(UNIXNU_ROOT=str(framework), UNIXNU_DEVICE=str(device), UNIXNU_UEFI=str(uefi))
     for path in ("board.toml", "scripts/sheng-strict-prelink.py", "scripts/clean_prelink_recovery.py",
-                 "scripts/prepare-sheng-author-audit.py"):
+                 "scripts/prepare-sheng-author-audit.py", "scripts/check-sheng-optional-providers.py"):
         shutil.copyfile(SOURCE / path, device / path)
     patch("shengufs", assets / "shenguFs.patch", device / "drivers/ShengUfs")
     patch("ramblock", assets / "ramblock.patch", framework / "drivers/RamBlock")
@@ -239,6 +242,11 @@ def main():
     step("reference-builder-regressions", [sys.executable, "scripts/test-fileset-reference.py", "-v"], framework)
     step("reference-regressions", [sys.executable, "scripts/test-author-audit-reference.py",
                                   "--builder", framework / "scripts/build-fileset-release-reference.py"], device)
+    optional_result = private / "optional-link"
+    step("optional-provider-link-checks", [sys.executable, "scripts/check-sheng-optional-providers.py",
+                                          "--tree", framework, "--output", optional_result], device)
+    optional_receipt = json.loads((optional_result / "RESULT.json").read_bytes())
+    save("optional-provider-check.json", optional_receipt)
     config = root / "build.toml"
     config.write_text("[build]\n")
     common = ["-D", device, "--os", "27", "--out", root / "out", "--config", config, "--uefi", uefi, "-j", "3"]
@@ -269,8 +277,9 @@ def main():
     require(not any(path.is_file() and (path.suffix in (".o", ".a", ".cpo") or path.name == "kernel.macho")
                     for path in tree.rglob("*")), "Precompiled objects exist before kernel build")
     require(not (tree / NATIVE).exists() and not (tree / REFERENCE).exists(), "Stale linked kernel")
-    step("optional-provider-link-checks", [sys.executable, "scripts/check-sheng-optional-providers.py",
-                                          "--tree", tree, "--output", private / "optional-link"], device)
+    for path, key in (("drivers/Adreno740/NativeAdrenoPublish.cpp", "actual_gpu_consumer_sha256"),
+                      ("drivers/RamBlock/NativeRamBlock.cpp", "actual_ram_consumer_sha256")):
+        exact(tree / path, optional_receipt[key])
     output = work / "kernel/kernel.macho"
     def collect_diagnostics():
         objects = {}

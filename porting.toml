@@ -33,6 +33,12 @@ result = "The macos-26 runner selected Homebrew 7.0.11, which refused the verifi
 
 [[area.evidence]]
 kind = "host"
+reference = "https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/44661604600"
+command = "scripts/check-sheng-optional-providers.py"
+result = "The pinned hosted toolchain and assembled source checks passed. The optional-provider fixture failed before the kernel build, and the receipt only retained the log digest. The fixture selects explicit SDKs and XNU ARM64 PIE link mode, reports case-specific diagnostics and runs before firmware downloads. The assembled consumers must match the tested bytes."
+
+[[area.evidence]]
+kind = "host"
 reference = "reports/image4-size-optimization.md"
 command = "Existing Image4 host fixture, exact updated source, -O2"
 revision = "1d0abd9fda19619997428dee020ccf609b473f12"

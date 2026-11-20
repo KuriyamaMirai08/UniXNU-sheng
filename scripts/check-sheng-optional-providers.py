@@ -71,18 +71,22 @@ int main() {
     path.write_text(source)
     runs = []
 
-    def run(argv, accepted=(0,)):
+    def run(label, argv):
         result = subprocess.run(list(map(str, argv)), capture_output=True, text=True)
-        runs.append(dict(argv=list(map(str, argv)), returncode=result.returncode, stdout=result.stdout, stderr=result.stderr))
+        command = subprocess.list2cmdline(list(map(str, argv)))
+        runs.append(dict(case=label, argv=list(map(str, argv)), returncode=result.returncode,
+                         stdout=result.stdout, stderr=result.stderr))
         (output / "commands.json").write_text(json.dumps(runs, indent=2) + "\n")
-        require(result.returncode in accepted, "Optional-provider check failed: " + result.stderr[-2000:])
+        require(result.returncode == 0,
+                f"{label} exited {result.returncode}: {command}\n{result.stderr[-2000:]}")
         return result
 
     for present in (0, 1):
-        exe = output / ("present" if present else "absent")
-        run(["xcrun", "clang++", "-O2", "-Wno-pointer-bool-conversion",
+        mode = "present" if present else "absent"
+        exe = output / mode
+        run("host compile " + mode, ["xcrun", "--sdk", "macosx", "clang++", "-O2", "-Wno-pointer-bool-conversion",
              "-DSHENG_HAS_PAGER_CLOSE=" + str(present), "-DSHENG_HAS_PAYLOAD_RELEASE=" + str(present), path, "-o", exe])
-        run([exe])
+        run("host run " + mode, [exe])
     sdk = subprocess.check_output(["xcrun", "--sdk", "iphoneos", "--show-sdk-path"], text=True).strip()
     # Undeclared weak imports are refused by Apple's authenticated kernel link.
     # The audited absent consumer emits neither an import nor a fake definition.
@@ -101,16 +105,18 @@ extern "C" void entry() {
     peer = 'extern "C" volatile unsigned provider_calls;\nvolatile unsigned provider_calls;\nextern "C" void optional_provider(void) {provider_calls=provider_calls+1;}\n'
     (output / "consumer.cpp").write_text(consumer)
     (output / "peer.cpp").write_text(peer)
-    flags = ["xcrun", "clang++", "-target", "arm64e-apple-ios27.0", "-isysroot", sdk,
+    flags = ["xcrun", "--sdk", "iphoneos", "clang++", "-target", "arm64e-apple-ios27.0", "-isysroot", sdk,
              "-mkernel", "-ffreestanding", "-fno-stack-protector", "-O2"]
-    run([*flags, "-c", output / "peer.cpp", "-o", output / "peer.o"])
+    # Match the ARM64 XNU kernel link mode, including PIE and chained fixups.
+    link = [*flags, "-nostdlib", "-Wl,-pie,-static,-kernel,-add_split_seg_info,-e,_entry"]
+    run("arm64e compile provider", [*flags, "-c", output / "peer.cpp", "-o", output / "peer.o"])
     linked = []
     for mode, enabled in (("absent", 0), ("present", 1)):
         obj = output / (mode + ".o")
-        run([*flags, "-DSHENG_HAS_PAGER_CLOSE=" + str(enabled), "-c", output / "consumer.cpp", "-o", obj])
+        run("arm64e compile " + mode,
+            [*flags, "-DSHENG_HAS_PAGER_CLOSE=" + str(enabled), "-c", output / "consumer.cpp", "-o", obj])
         exe = output / (mode + ".macho")
-        run([*flags, "-static", "-nostdlib", "-Wl,-kernel,-add_split_seg_info,-e,_entry", obj,
-             *([output / "peer.o"] if enabled else []), "-o", exe])
+        run("arm64e link " + mode, [*link, obj, *([output / "peer.o"] if enabled else []), "-o", exe])
         image = Image(exe.read_bytes())
         image.fixups()
         symbols = {name for names in image.symbols().values() for name in names}
@@ -119,12 +125,13 @@ extern "C" void entry() {
                            imports_and_binds_refused_by_unchanged_parser=True, provider_defined=bool(enabled)))
     # Negative: a supposedly enabled capability with no provider must fail,
     # preserving the real-link gate instead of falling back to a placeholder.
-    result = subprocess.run([*flags, "-static", "-nostdlib", "-Wl,-kernel,-add_split_seg_info,-e,_entry",
-                             str(output / "present.o"), "-o", str(output / "missing.macho")], capture_output=True, text=True)
-    runs.append(dict(argv=["negative missing real provider"], returncode=result.returncode,
+    argv = [*link, str(output / "present.o"), "-o", str(output / "missing.macho")]
+    result = subprocess.run(argv, capture_output=True, text=True)
+    runs.append(dict(case="arm64e link missing provider", argv=argv, returncode=result.returncode,
                      stdout=result.stdout, stderr=result.stderr))
-    require(result.returncode != 0 and "optional_provider" in result.stderr, "Missing provider was not refused")
     (output / "commands.json").write_text(json.dumps(runs, indent=2) + "\n")
+    require(result.returncode != 0 and "optional_provider" in result.stderr,
+            f"Missing provider check returned {result.returncode}\n{result.stderr[-2000:]}")
     result = dict(actual_gpu_consumer_sha256=hashlib.sha256(gpu.read_bytes()).hexdigest(),
                   actual_ram_consumer_sha256=hashlib.sha256(ram.read_bytes()).hexdigest(),
                   actual_statement_blocks_exercised=True, absent_and_present_host_cases_passed=True,
