@@ -36,6 +36,7 @@ ARCHIVES = {
 }
 NATIVE = "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf"
 REFERENCE = "build/xnu/fileset-reference/mach.release.bcm2837.unstripped.noctf"
+REGRESSION_POLICY = "scripts/policies/ipados-27.0.1-24A446/prelink-regression.json"
 
 
 def digest(path):
@@ -194,6 +195,11 @@ def main():
     device, framework, uefi = root / "device", root / "UniXNU", root / "uefi-sheng"
     identities["commits"] = dict(device=DEVICE, framework=FRAMEWORK, uefi=UEFI,
                                  experiment=git(SOURCE, "rev-parse", "HEAD"))
+    identities["framework_regression_policy_sha256"] = exact(
+        framework / REGRESSION_POLICY, contract["regression_policy_sha256"])
+    for name, field in (("m4_prelink_evidence.py", "interface_guard_sha256"),
+                        ("clean-prelink-symbols.json", "reviewed_fixture_sha256")):
+        exact(device / "scripts" / name, contract[field])
     require(git(device / "drivers/ShengUfs", "rev-parse", "HEAD") == "b11de87c234cf4b8f80a8160fb15e6f37a8e5d0c",
             "Unexpected ShengUfs revision")
     require(git(framework / "drivers/RamBlock", "rev-parse", "HEAD") == "737f6dae119ef11990e77dc06bcead945098865e",
@@ -256,15 +262,17 @@ def main():
     step("assemble-tree", [*cli, "tree", *common])
     work = root / "out/sheng/ipados-27.0.1-24A446/sheng_ipados27"
     tree = work / "tree"
+    require(tree.is_dir(), "Assembled tree is absent at the selected profile path")
+    exact(tree / REGRESSION_POLICY, contract["regression_policy_sha256"])
+    for relative in ("scripts/sheng-strict-prelink.py", "scripts/clean_prelink_recovery.py"):
+        exact(tree / relative, digest(SOURCE / relative))
     require(not any(path.is_file() and (path.suffix in (".o", ".a", ".cpo") or path.name == "kernel.macho")
                     for path in tree.rglob("*")), "Precompiled objects exist before kernel build")
     require(not (tree / NATIVE).exists() and not (tree / REFERENCE).exists(), "Stale linked kernel")
     step("optional-provider-link-checks", [sys.executable, "scripts/check-sheng-optional-providers.py",
                                           "--tree", tree, "--output", private / "optional-link"], device)
     output = work / "kernel/kernel.macho"
-    try:
-        step("kernel-and-strict-prelink", [*cli, "build", "kernel", *common])
-    finally:
+    def collect_diagnostics():
         objects = {}
         for name in ("NativeUfs.late.o", "NativeRamBlock.late.o", "BootLog.o"):
             path = tree / "build/sheng-source-storage" / name
@@ -280,12 +288,26 @@ def main():
             if diagnostic["status"] == "refused":
                 save("strict-failure-stage.json", dict(status=diagnostic["status"], error_type=diagnostic.get("error_type"),
                      message=diagnostic.get("error"), placement=diagnostic["native_data_placement"]))
+        # The wrapper retains its report in its own evidence directory when
+        # emission is refused before the framework can promote a report.
+        if not failed.is_file() and len(receipts) == 1:
+            failed = receipts[0].with_name("kernel-report.json")
         if failed.is_file():
             record = json.loads(failed.read_bytes())
             stats = record["statistics"]
             save("strict-refused.json", dict(missing=record["missing"], stubbed=record["stubbed"],
                  unproven_page_references=stats.get("unproven_kernel_page_references", 0),
                  segment_layout=stats.get("segment_layout")))
+        return objects
+    try:
+        step("kernel-and-strict-prelink", [*cli, "build", "kernel", *common])
+    except Exception:
+        try:
+            collect_diagnostics()
+        except (OSError, ValueError, KeyError, struct.error) as error:
+            save("diagnostic-error.json", dict(error_type=type(error).__name__))
+        raise
+    objects = collect_diagnostics()
     require(len(objects) == 3, "Missing production object evidence")
     native = macho_info(tree / NATIVE)
     report = json.loads(output.with_suffix(".json").read_bytes())

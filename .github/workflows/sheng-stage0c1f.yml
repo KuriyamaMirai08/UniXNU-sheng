@@ -2,7 +2,7 @@ name: Sheng Stage 0C-1F separate DATA strict prelink
 on:
   push:
     branches:
-      - codex/stage0c1f-separate-data-r4-20261120
+      - codex/stage0c1f-separate-data-r5-20261120
 permissions:
   contents: read
   actions: read
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   strict-prelink:
-    if: github.event_name == 'push' && github.event.created && github.ref == 'refs/heads/codex/stage0c1f-separate-data-r4-20261120'
+    if: github.event_name == 'push' && github.event.created && github.ref == 'refs/heads/codex/stage0c1f-separate-data-r5-20261120'
     runs-on: macos-26
     timeout-minutes: 350
     env:
@@ -21,14 +21,29 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Prepare ARM64 build tools
+      - name: Select the reviewed Homebrew installer
         shell: bash
         run: |
           set -euo pipefail
           test "$(uname -m)" = arm64
           test -d "$DEVELOPER_DIR"
           test "$(sw_vers -buildVersion)" = 25G332
-          brew install dtc cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw zstd zlib-ng-compat
+          brew_repo="$(/opt/homebrew/bin/brew --repository)"
+          brew_commit=c3286d37c37f71b186a7e6647092bf2b56d1d690
+          if [[ "$(git -C "$brew_repo" rev-parse HEAD)" != "$brew_commit" ]]; then
+            if ! git -C "$brew_repo" cat-file -e "$brew_commit^{commit}" 2>/dev/null; then
+              git -C "$brew_repo" fetch --no-tags --depth=1 https://github.com/Homebrew/brew.git refs/tags/7.0.14
+              test "$(git -C "$brew_repo" rev-parse FETCH_HEAD)" = "$brew_commit"
+            fi
+            git -C "$brew_repo" checkout --detach "$brew_commit"
+          fi
+          test "$(git -C "$brew_repo" rev-parse HEAD)" = "$brew_commit"
+          /opt/homebrew/bin/brew --version
+      - name: Prepare ARM64 build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          /opt/homebrew/bin/brew install dtc cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw zstd zlib-ng-compat
           python3 -B scripts/repro/install-stage0c1f-tools.py \
             "$RUNNER_TEMP/stage0c1f-bottles" "$RUNNER_TEMP/stage0c1f-supply/fixed-bottles.json"
           python3 -m venv "$RUNNER_TEMP/stage0c1f-python"
@@ -36,12 +51,28 @@ jobs:
           printf '%s\n' "$RUNNER_TEMP/stage0c1f-python/bin" "$HOME/.cargo/bin" \
             /opt/homebrew/opt/llvm/bin /opt/homebrew/opt/lld/bin /opt/homebrew/opt/bison/bin >> "$GITHUB_PATH"
           rustup toolchain install 1.98.0 --profile minimal --component rust-src
+          "$RUNNER_TEMP/stage0c1f-python/bin/python" -c 'from cryptography.hazmat.primitives import hashes; print(hashes.SHA256().name)'
+          sdk_path="$(xcrun --sdk iphoneos --show-sdk-path)"
+          printf '%s\n' 'int stage0c1f_toolchain_probe(void) { return 0; }' | \
+            xcrun --sdk iphoneos clang -target arm64e-apple-ios26.5 -isysroot "$sdk_path" \
+              -Werror -x c -c - -o "$RUNNER_TEMP/stage0c1f-toolchain-probe.o"
+          /opt/homebrew/opt/llvm/bin/llvm-nm "$RUNNER_TEMP/stage0c1f-toolchain-probe.o"
       - name: Download the pinned historical comparison archive
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run download 43729102858 --repo KuriyamaMirai08/UniXNU-sheng \
-            --name layout-inputs-43715522445-43729102858 --dir "$RUNNER_TEMP/stage0c1f-input"
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            download_dir="$RUNNER_TEMP/stage0c1f-input-attempt-$attempt"
+            if gh run download 43729102858 --repo KuriyamaMirai08/UniXNU-sheng \
+                --name layout-inputs-43715522445-43729102858 --dir "$download_dir" &&
+                test -s "$download_dir/layout-inputs.tar.gz"; then
+              mv "$download_dir" "$RUNNER_TEMP/stage0c1f-input"
+              exit 0
+            fi
+            if [[ "$attempt" != 3 ]]; then sleep "$((attempt * 5))"; fi
+          done
+          exit 1
       - name: Build and strictly prelink the complete patched kernel
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -60,6 +91,7 @@ jobs:
             ${{ runner.temp }}/stage0c1f-evidence/toolchain.json
             ${{ runner.temp }}/stage0c1f-evidence/inputs.json
             ${{ runner.temp }}/stage0c1f-evidence/last-stage.json
+            ${{ runner.temp }}/stage0c1f-evidence/diagnostic-error.json
             ${{ runner.temp }}/stage0c1f-evidence/native.json
             ${{ runner.temp }}/stage0c1f-evidence/objects.json
             ${{ runner.temp }}/stage0c1f-evidence/strict-refused.json
