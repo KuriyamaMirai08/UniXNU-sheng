@@ -39,6 +39,12 @@ result = "The pinned hosted toolchain and assembled source checks passed. The op
 
 [[area.evidence]]
 kind = "host"
+reference = "https://github.com/KuriyamaMirai08/UniXNU-sheng/actions/runs/44663600593"
+command = "scripts/prepare-sheng-author-audit.py --stage0c1f-patched-ramblock"
+result = "The preparation step repeated the payload-release guards already supplied by the Stage 0C-1F RamBlock patch. The host absent-provider fixture exposed the repeated closing directive. Preparation now verifies and preserves the exact patched RamBlock bytes. The upstream RamBlock path still applies the original guard transform."
+
+[[area.evidence]]
+kind = "host"
 reference = "reports/image4-size-optimization.md"
 command = "Existing Image4 host fixture, exact updated source, -O2"
 revision = "1d0abd9fda19619997428dee020ccf609b473f12"

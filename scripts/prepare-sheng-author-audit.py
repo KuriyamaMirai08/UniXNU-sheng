@@ -203,14 +203,17 @@ def main():
         current = path.read_bytes()
         # The reference builder's real-archive CLI patch is applied immediately
         # before these guards and is separately retained in framework-diff.log.
-        if name == "drivers/RamBlock/NativeRamBlock.cpp" and args.stage0c1f_patched_ramblock:
+        prepared_ramblock = name == "drivers/RamBlock/NativeRamBlock.cpp" and args.stage0c1f_patched_ramblock
+        if prepared_ramblock:
             if sha(current) != "3594cf762cf0914583157f7c1ccbf510eda70c188082d20524d87f4d769956ac":
                 raise ValueError("Stage 0C-1F RamBlock identity changed")
         elif current != original and name != "scripts/build-fileset-release-reference.py":
             raise ValueError("Unreviewed source modification: " + name)
         if name == "scripts/build-fileset-release-reference.py" and sha(current) != "28abed8c005825a8b22a729239f1e330b385271c4bb4289f9008b0b8c7289b47":
             raise ValueError("Reference builder differs from the exact real-archive CLI patch")
-        updated = transform(name, current.decode()).encode()
+        # The identity-checked Stage 0C-1F patch already guards the declaration
+        # and release call. Reapplying the upstream transform nests both guards.
+        updated = current if prepared_ramblock else transform(name, current.decode()).encode()
         patch = ''.join(difflib.unified_diff(current.decode().splitlines(True), updated.decode().splitlines(True),
                                             fromfile="a/" + name, tofile="b/" + name))
         (args.evidence / (path.stem + ".optional.patch")).write_text(patch, encoding="utf-8", newline="\n")
