@@ -34,8 +34,8 @@ jobs:
       EXPECTED_FINALIZER_SHA256: 8c77e632e4b8bf60bb0fb49cb21959fc95553588af11a3781b58f509b9737882
       EXPECTED_NEGATIVE_TEST_SHA256: 1e8f43fe84cb15e04b1c186808b7db06b74b79ba314f739917d5b3487907b57e
       EXPECTED_STAGE2E_ASSET_0: e3cde9571528cb648aa69411061f612e69bbac7478b3820e69bfdbcb4eb10db1
-      EXPECTED_STAGE2E_ASSET_1: 6fe7fc6a8365cc14f178c456e5639820ad4c6c84e17d0f2f090dad7db1dbe0f8
-      EXPECTED_STAGE2E_ASSET_2: 9064612b48e4dc0ebc9984c60d2690313bdb0617c824e433d8e94f64ea15d229
+      EXPECTED_STAGE2E_ASSET_1: c5e86672404c1271288fd843d001ba3e05bb675af52a58f949210538f9142984
+      EXPECTED_STAGE2E_ASSET_2: d465b69cc3597b91915ea628ae9561b3b946819553637d3fe3e370a56e101a86
       EXPECTED_STAGE2E_ASSET_3: 98a092ce9705089e090368c9501ab81fb51723be00cf5327b2be294a6f3e9cb1
       EXPECTED_STAGE2E_ASSET_4: 6ba11b590a83654eb86ce00d08f2420faa940fa55885671cae419cfba5547620
     steps:
@@ -150,9 +150,15 @@ jobs:
             "$RUNNER_TEMP/stage0c1f-bottles" "$RUNNER_TEMP/stage0c1f-supply/fixed-bottles.json"
           python3 -m venv "$RUNNER_TEMP/stage0c1f-python"
           "$RUNNER_TEMP/stage0c1f-python/bin/pip" install --only-binary=:all: --no-deps cryptography==50.0.2 cffi==2.1.1 pycparser==3.12
-          printf '%s\n' "$RUNNER_TEMP/stage0c1f-python/bin" "$HOME/.cargo/bin" \
+          rustup_bin="$(/opt/homebrew/bin/brew --prefix rustup)/bin/rustup"
+          "$rustup_bin" toolchain install 1.98.0 --profile minimal --component rust-src
+          rustc_bin="$("$rustup_bin" which --toolchain 1.98.0 rustc)"
+          rust_bin="$(dirname "$rustc_bin")"
+          test -x "$rust_bin/cargo"
+          test "$("$rustc_bin" --version)" = 'rustc 1.98.0 (88d9e12ae 2026-08-18)'
+          printf '%s\n' "$RUNNER_TEMP/stage0c1f-python/bin" "$rust_bin" \
             /opt/homebrew/opt/llvm/bin /opt/homebrew/opt/lld/bin /opt/homebrew/opt/bison/bin >> "$GITHUB_PATH"
-          rustup toolchain install 1.98.0 --profile minimal --component rust-src
+          export STAGE2E_RUSTC="$rustc_bin"
           "$RUNNER_TEMP/stage0c1f-python/bin/python" -c 'from cryptography.hazmat.primitives import hashes; print(hashes.SHA256().name)'
           sdk_path="$(xcrun --sdk iphoneos --show-sdk-path)"
           printf '%s\n' 'int stage0c1f_toolchain_probe(void) { return 0; }' | \
@@ -168,16 +174,22 @@ jobs:
                       "spirv-headers": "1.4.363.0", "bison": "3.8.2", "pkgconf": "3.0.11",
                       "rustup": "1.29.3", "blacktop/tap/ipsw": "3.1.749",
                       "zstd": "1.5.7_1", "zlib-ng-compat": "2.3.3_1"}
+          # These preinstalled tool triplets belong to the two reviewed images.
+          if os.environ["ImageVersion"] == "20261102.0473.1":
+              versions.update(cmake="4.4.5", pkgconf="3.0.10", rustup="1.29.2")
           actual = {name: Path(subprocess.check_output([brew, "--prefix", name], text=True).strip()).resolve().name
                     for name in versions}
           pip = {name: importlib.metadata.version(name) for name in ("cryptography", "cffi", "pycparser")}
-          rust = subprocess.check_output([str(Path.home() / ".cargo/bin/rustc"), "+1.98.0", "--version"], text=True).strip()
+          rust = subprocess.check_output([os.environ["STAGE2E_RUSTC"], "--version"], text=True).strip()
           receipt = dict(runner_image=os.environ["ImageVersion"], python=sys.version.split()[0],
                          brew_versions=actual, pip_versions=pip, rust=rust)
           Path(os.environ["RUNNER_TEMP"], "stage0c2a-r-dependencies.json").write_text(json.dumps(receipt) + "\n")
           if (actual != versions or pip != {"cryptography": "50.0.2", "cffi": "2.1.1", "pycparser": "3.12"}
               or sys.version_info[:2] != (3, 15) or rust != "rustc 1.98.0 (88d9e12ae 2026-08-18)"):
-              raise SystemExit("historically observed dependency versions disagree")
+              mismatch = {name: {"expected": wanted, "actual": actual[name]}
+                          for name, wanted in versions.items() if actual[name] != wanted}
+              print(json.dumps({"package_version_mismatches": mismatch, "python": receipt["python"], "pip": pip, "rust": rust}))
+              raise SystemExit("reviewed dependency versions disagree")
           PY
           test "$(shasum -a 256 "$RUNNER_TEMP/stage0c1f-supply/fixed-bottles.json" | cut -d ' ' -f 1)" = a7f49031382dd91638ca4dd8fe93af5d305621666be262ec35efb127114ae8b2
       - name: Download the pinned historical comparison archive
@@ -284,5 +296,6 @@ jobs:
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-audit-runtime.json
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2e-verdict.json
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2e-inputs.json
+            ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-dependencies.json
           if-no-files-found: error
           retention-days: 14

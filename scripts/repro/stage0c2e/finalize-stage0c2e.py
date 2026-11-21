@@ -49,10 +49,11 @@ def main():
         (args.publish / name).write_text(json.dumps(value, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
     for name in ("stage0c2a-r-workflow-identity.json", "toolchain.json", "last-stage.json",
-                 "objects.json", "strict-result.json", "stage0c2a-r-capture.json",
+                 "objects.json", "strict-result.json", "stage0c2a-r-capture.json", "stage0c2a-r-dependencies.json",
                  "stage0c2a-r-parser-tests.json", "stage0c2a-r-audit-runtime.json"):
         try:
-            doc = read_json((args.temp if "workflow-identity" in name else base) / name)
+            at_root = name in ("stage0c2a-r-workflow-identity.json", "stage0c2a-r-dependencies.json")
+            doc = read_json((args.temp if at_root else base) / name)
             if name == "objects.json":
                 object_identity(doc)
             else:
@@ -76,6 +77,7 @@ def main():
     strict = records.get("strict-result.json", {})
     tools = records.get("toolchain.json", {})
     runtime = records.get("stage0c2a-r-audit-runtime.json", {})
+    dependencies = records.get("stage0c2a-r-dependencies.json", {})
     tests = records.get(RULES["TESTS"], {})
     candidate = capture.get("candidate", {})
     positives = (
@@ -84,6 +86,8 @@ def main():
         ("TOOLCHAIN", tools.get("runner_image") in PIN["runner_images"] and
          (tools.get("apple_ld_sha256"), tools.get("compiler_sha256"), tools.get("macos_build"), tools.get("sdk")) ==
          (RULES["LD"], RULES["CLANG"], "25G332", "26.5")),
+        ("RUST_TOOLCHAIN", dependencies.get("runner_image") == tools.get("runner_image") and
+         dependencies.get("rust") == tools.get("rust") == "rustc 1.98.0 (88d9e12ae 2026-08-18)"),
         ("NEW_IDENTITY", bool(candidate) and candidate.get("sha256") != RULES["CANDIDATE"] and
          capture.get("sample_kind") == "new-candidate"),
         ("STRICT_AND_MAP", strict.get("candidate_sha256") == candidate.get("sha256") and

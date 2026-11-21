@@ -163,7 +163,7 @@ def main():
     toolchain = dict(xcode=version("xcodebuild", "-version"), clang=version(str(compiler), "--version"),
                      sdk=version("xcrun", "--sdk", "iphoneos", "--show-sdk-version"),
                      linker=version("xcrun", "ld", "-version_details"),
-                     rust=version("rustc", "+1.98.0", "--version"), macos=version("sw_vers", "-productVersion"),
+                     rust=version("rustc", "--version"), macos=version("sw_vers", "-productVersion"),
                      macos_build=version("sw_vers", "-buildVersion"), runner_image=os.environ.get("ImageVersion"),
                      llvm=version("/opt/homebrew/opt/llvm/bin/llvm-objcopy", "--version"),
                      lld=version("/opt/homebrew/opt/lld/bin/ld64.lld", "--version"),
