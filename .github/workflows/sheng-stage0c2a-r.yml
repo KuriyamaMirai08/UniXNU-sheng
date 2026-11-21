@@ -30,11 +30,11 @@ jobs:
       EXPECTED_WORKFLOW_SHA256: ${{ inputs.expected_workflow_sha256 }}
       STAGE0C2E_BASELINE: ${{ github.workspace }}/_stage0c1f_source
       EXPECTED_CAPTURE_HELPER_SHA256: 536f4ac7d39fe37f618133001bc3bfc5ad69ea3d698861e8a469d933c2a89112
-      EXPECTED_PARSER_BUILDER_SHA256: 8a6580bf450568abe76e67c43cbe1caf454d16f16ffb8bd21c395d2a17c8d377
+      EXPECTED_PARSER_BUILDER_SHA256: 2abb1d6c048c52ce28d3e0250a0c7df82a3715859ffd334f8ccbf5912365058e
       EXPECTED_FINALIZER_SHA256: 8c77e632e4b8bf60bb0fb49cb21959fc95553588af11a3781b58f509b9737882
       EXPECTED_NEGATIVE_TEST_SHA256: 1e8f43fe84cb15e04b1c186808b7db06b74b79ba314f739917d5b3487907b57e
       EXPECTED_STAGE2E_ASSET_0: e3cde9571528cb648aa69411061f612e69bbac7478b3820e69bfdbcb4eb10db1
-      EXPECTED_STAGE2E_ASSET_1: 3ed170e9b8c9edca7d23b2871b128277ca8bbbdde856e2d9f1fb1ce0ed05e484
+      EXPECTED_STAGE2E_ASSET_1: 3cdeb2c2c3b88acac8c7f01a6b475c65bdce176d92d378148c7c7557084f4382
       EXPECTED_STAGE2E_ASSET_2: 203ca4772927001f07877c0e716a9436c8f42c871ce3679effbfe21d39f70153
       EXPECTED_STAGE2E_ASSET_3: 98a092ce9705089e090368c9501ab81fb51723be00cf5327b2be294a6f3e9cb1
       EXPECTED_STAGE2E_ASSET_4: 751505eec5fa1b0b98688fb3b448cb0e6a813083e56fbdea8b30a45d63ab1b24
@@ -140,6 +140,61 @@ jobs:
           test "$(xcrun --sdk iphoneos --show-sdk-version)" = 26.5
           test "$(shasum -a 256 "$(xcrun --sdk iphoneos --find clang)" | cut -d ' ' -f 1)" = d2e4bf622758eee1bf7267c060497fb2c41e098d37b0fca8be73898dc7e14eda
           test "$(shasum -a 256 "$(xcrun --find ld)" | cut -d ' ' -f 1)" = e412b9f2af31b1567a9eabc28f553a8f1cf34127e2107cb39c2694cf147571a4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: UniXNU/DarwinBoot
+          ref: 5243c68ec332a227fe3680cd5da6d5a0e127035c
+          path: _stage0c2e_parser_source
+          persist-credentials: false
+      - name: Compile and verify the fixed macOS parser before kernel build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, platform, subprocess
+          from pathlib import Path
+
+          def version(*cmd):
+              return subprocess.check_output(cmd, text=True).strip()
+
+          def digest(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+          checkout = Path("_stage0c2e_parser_source")
+          revision = version("git", "-C", str(checkout), "rev-parse", "HEAD")
+          if revision != "5243c68ec332a227fe3680cd5da6d5a0e127035c" or version("git", "-C", str(checkout), "status", "--porcelain"):
+              raise SystemExit("unexpected DarwinBoot checkout")
+          compiler = Path(version("xcrun", "--sdk", "macosx", "--find", "clang"))
+          sdk = Path(version("xcrun", "--sdk", "macosx", "--show-sdk-path")).resolve()
+          developer = Path(os.environ["DEVELOPER_DIR"]).resolve()
+          platform_sdk = developer / "Platforms/MacOSX.platform/Developer/SDKs"
+          if not sdk.is_relative_to(platform_sdk) or not (sdk / "SDKSettings.json").is_file():
+              raise SystemExit("unexpected macOS SDK from the fixed Xcode")
+          clang_hash = digest(compiler)
+          if clang_hash != "d2e4bf622758eee1bf7267c060497fb2c41e098d37b0fca8be73898dc7e14eda":
+              raise SystemExit("host parser compiler identity mismatch")
+          parser = temp / "darwinboot-parser"
+          generated = temp / "darwinboot-parser.generated.c"
+          source = checkout / "DarwinBootPkg/Driver/DarwinBoot.c"
+          subprocess.run(["python3", "-B", "scripts/build-darwinboot-parser.py", "--source", str(source),
+                          "--compiler", str(compiler), "--sdk-root", str(sdk), "--output", str(parser),
+                          "--generated-source", str(generated)], check=True)
+          generated_hash = digest(generated)
+          if generated_hash != "68556301872a04446b74359361870439c99ee8e78a920b9daa8cd513bb8796db":
+              raise SystemExit("generated parser source identity mismatch")
+          result = subprocess.run([str(parser)], input=b"", capture_output=True)
+          if result.returncode != 2 or result.stdout or result.stderr != b"DarwinBoot parser REJECT status=2\n":
+              raise SystemExit("parser did not reject the empty preflight input")
+          runtime = dict(generated_parser_sha256=generated_hash, compiler_sha256=clang_hash,
+                         parser_sha256=digest(parser), host_machine=platform.machine())
+          (temp / "stage0c2a-r-audit-runtime.json").write_text(json.dumps(runtime) + "\n")
+          sdk_identity = dict(name=sdk.name, version=version("xcrun", "--sdk", "macosx", "--show-sdk-version"),
+                              settings_sha256=digest(sdk / "SDKSettings.json"),
+                              inttypes_header_sha256=digest(sdk / "usr/include/inttypes.h"),
+                              darwinboot_commit=revision, empty_input_rejected=True)
+          (temp / "stage0c2e-parser-sdk.json").write_text(json.dumps(sdk_identity) + "\n")
+          PY
       - name: Prepare ARM64 build tools
         working-directory: _stage0c1f_source
         shell: bash
@@ -227,7 +282,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib, json, os, platform, subprocess
+          import hashlib, json, os, subprocess
           from pathlib import Path
           root = Path.cwd()
           temp = Path(os.environ["RUNNER_TEMP"])
@@ -237,7 +292,6 @@ jobs:
           framework = temp / "stage0c1f-private/UniXNU"
           source = framework / "drivers/DarwinBoot/DarwinBootPkg/Driver/DarwinBoot.c"
           parser = temp / "darwinboot-parser"
-          generated = temp / "darwinboot-parser.generated.c"
           capture = evidence / "stage0c2a-r-capture.json"
           negative = evidence / "stage0c2a-r-parser-tests.json"
           evidence.mkdir(parents=True, exist_ok=True)
@@ -245,21 +299,9 @@ jobs:
               raise SystemExit("strict-prelink output or fixed DarwinBoot source is missing")
           if subprocess.check_output(["git", "-C", str(framework / "drivers/DarwinBoot"), "rev-parse", "HEAD"], text=True).strip() != "5243c68ec332a227fe3680cd5da6d5a0e127035c":
               raise SystemExit("DarwinBoot checkout identity mismatch")
-          compiler = Path(subprocess.check_output(["xcrun", "--sdk", "macosx", "--find", "clang"], text=True).strip())
-          subprocess.run(["python3", str(root / "scripts/build-darwinboot-parser.py"), "--source", str(source),
-                          "--compiler", str(compiler), "--output", str(parser),
-                          "--generated-source", str(generated)], check=True)
-          def digest(path):
-              return hashlib.sha256(path.read_bytes()).hexdigest()
-
-          generated_hash = digest(generated)
-          if generated_hash != "68556301872a04446b74359361870439c99ee8e78a920b9daa8cd513bb8796db":
-              raise SystemExit("generated parser source identity mismatch")
-          runtime = dict(generated_parser_sha256=generated_hash, compiler_sha256=digest(compiler),
-                         parser_sha256=digest(parser), host_machine=platform.machine())
-          (evidence / "stage0c2a-r-audit-runtime.json").write_text(json.dumps(runtime) + "\n")
-          if runtime["compiler_sha256"] != "d2e4bf622758eee1bf7267c060497fb2c41e098d37b0fca8be73898dc7e14eda":
-              raise SystemExit("host parser compiler identity mismatch")
+          runtime = json.loads((temp / "stage0c2a-r-audit-runtime.json").read_text())
+          if hashlib.sha256(parser.read_bytes()).hexdigest() != runtime["parser_sha256"]:
+              raise SystemExit("preflight parser changed after the kernel build")
           audit_result = subprocess.run(["python3", "-B", str(root / "scripts/audit-stage0c2a-r.py"),
                           "--candidate", str(candidate), "--map", str(map_file), "--parser", str(parser),
                           "--parser-source", str(source), "--output", str(capture)])
@@ -294,6 +336,7 @@ jobs:
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-capture.json
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-parser-tests.json
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-audit-runtime.json
+            ${{ runner.temp }}/stage0c2a-r-publish/stage0c2e-parser-sdk.json
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2e-verdict.json
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2e-inputs.json
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-dependencies.json

@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import runpy
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -10,6 +11,18 @@ RULES = runpy.run_path(str(ROOT / "scripts/finalize-stage0c2a-r.py"))
 PIN = json.loads(Path(__file__).with_name("stage0c2e-inputs.json").read_bytes())
 OBJECTS = ("NativeUfs.late.o", "NativeRamBlock.late.o", "BootLog.o")
 OBJECT_TYPES = {"bytes", "sha256", "magic", "cpu", "subtype", "filetype"}
+PARSER_SDK = "stage0c2e-parser-sdk.json"
+RUNTIME = "stage0c2a-r-audit-runtime.json"
+
+
+def parser_sdk_identity(row):
+    require(set(row) == {"name", "version", "settings_sha256", "inttypes_header_sha256", "darwinboot_commit",
+                         "empty_input_rejected"}, "PARSER_SDK_FIELDS")
+    require(re.fullmatch(r"MacOSX(?:[0-9.]+)?\.sdk", row["name"]) and re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,2}", row["version"]),
+            "PARSER_SDK_VERSION")
+    require(all(RULES["HEX64"].fullmatch(row[name]) for name in ("settings_sha256", "inttypes_header_sha256"))
+            and row["darwinboot_commit"] == "5243c68ec332a227fe3680cd5da6d5a0e127035c"
+            and row["empty_input_rejected"] is True, "PARSER_SDK_IDENTITY")
 
 
 def read_json(path):
@@ -50,12 +63,14 @@ def main():
 
     for name in ("stage0c2a-r-workflow-identity.json", "toolchain.json", "last-stage.json",
                  "objects.json", "strict-result.json", "stage0c2a-r-capture.json", "stage0c2a-r-dependencies.json",
-                 "stage0c2a-r-parser-tests.json", "stage0c2a-r-audit-runtime.json"):
+                 "stage0c2a-r-parser-tests.json", RUNTIME, PARSER_SDK):
         try:
-            at_root = name in ("stage0c2a-r-workflow-identity.json", "stage0c2a-r-dependencies.json")
+            at_root = name in ("stage0c2a-r-workflow-identity.json", "stage0c2a-r-dependencies.json", RUNTIME, PARSER_SDK)
             doc = read_json((args.temp if at_root else base) / name)
             if name == "objects.json":
                 object_identity(doc)
+            elif name == PARSER_SDK:
+                parser_sdk_identity(doc)
             else:
                 if name == "strict-result.json":
                     require(doc.pop("candidate_track", None) == "stage0c2e", "CANDIDATE_TRACK")
@@ -77,7 +92,7 @@ def main():
     capture = records.get(RULES["CAPTURE"], {})
     strict = records.get("strict-result.json", {})
     tools = records.get("toolchain.json", {})
-    runtime = records.get("stage0c2a-r-audit-runtime.json", {})
+    runtime = records.get(RUNTIME, {})
     dependencies = records.get("stage0c2a-r-dependencies.json", {})
     tests = records.get(RULES["TESTS"], {})
     candidate = capture.get("candidate", {})
@@ -99,6 +114,7 @@ def main():
          capture.get("parser_source_sha256") == RULES["PARSER_SOURCE"] and
          runtime.get("generated_parser_sha256") == RULES["GENERATED_C"] and
          runtime.get("compiler_sha256") == RULES["CLANG"] and
+         PARSER_SDK in records and
          runtime.get("parser_sha256") == capture.get("parser_executable_sha256")),
         ("STRUCTURE", RULES["segment_evidence"](capture) and len(capture.get("fileset_entries") or []) == 49),
         ("NEGATIVES", bool(tests) and tests.get("positive_parser_exit_code") == 0 and

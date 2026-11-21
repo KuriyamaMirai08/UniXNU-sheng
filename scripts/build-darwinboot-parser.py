@@ -68,6 +68,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--compiler", required=True)
+    parser.add_argument("--sdk-root", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--generated-source", type=Path, required=True)
     args = parser.parse_args()
@@ -82,7 +83,13 @@ def main():
     args.generated_source.parent.mkdir(parents=True, exist_ok=True)
     args.generated_source.write_text(SHIM + constants + source[start:end] + MAIN, encoding="utf-8", newline="\n")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run([args.compiler, "-std=c11", "-Wall", "-Wextra", "-Werror",
+    sdk = []
+    if args.sdk_root is not None:
+        root = args.sdk_root.resolve()
+        if not (root / "usr/include/inttypes.h").is_file():
+            raise SystemExit("macOS SDK lacks usr/include/inttypes.h")
+        sdk = ["-isysroot", str(root)]
+    subprocess.run([args.compiler, *sdk, "-std=c11", "-Wall", "-Wextra", "-Werror",
                     str(args.generated_source), "-o", str(args.output)], check=True)
 
 
