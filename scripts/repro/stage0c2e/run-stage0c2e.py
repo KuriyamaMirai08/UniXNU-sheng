@@ -38,6 +38,8 @@ ARCHIVES = {
 NATIVE = "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf"
 REFERENCE = "build/xnu/fileset-reference/mach.release.bcm2837.unstripped.noctf"
 REGRESSION_POLICY = "scripts/policies/ipados-27.0.1-24A446/prelink-regression.json"
+STORAGE_BUILDER = "scripts/build-sheng-source-storage.py"
+AUTHOR_PREP = "scripts/prepare-sheng-author-audit.py"
 
 
 def digest(path):
@@ -54,6 +56,19 @@ def exact(path, expected):
     actual = digest(path)
     require(actual == expected, f"Identity mismatch for {path.name}: {actual} != {expected}")
     return actual
+
+
+def compiler_failures(log):
+    """Return fixed component names and source line numbers without private diagnostics."""
+    pattern = re.compile(rb"(?:^|[/\\])((?:NativeUfs|NativeRamBlock)\.cpp|BootLog\.c|"
+                         rb"RootCommands\.h|UfsWriteAuthority\.h):(\d+):\d+: (?:fatal )?error:")
+    result = set()
+    with log.open("rb") as stream:
+        for line in stream:
+            match = pattern.search(line)
+            if match:
+                result.add((match[1].decode("ascii"), int(match[2])))
+    return sorted(result)[:16]
 
 
 def extract_baseline(archive, destination, contract):
@@ -125,13 +140,16 @@ def main():
             result = subprocess.run(list(map(str, argv)), cwd=cwd, stdout=stream, stderr=subprocess.STDOUT)
         log = private / (name + ".log")
         with log.open("rb") as stream:
-            lines = list(line for line in stream if b"error:" in line or b"Traceback" in line)
+            lines = sum(b"error:" in line or b"Traceback" in line for line in stream)
         save("last-stage.json", dict(stage=name, exit_code=result.returncode,
                                      log_sha256=digest(log), log_bytes=log.stat().st_size,
-                                     diagnostic_lines=len(lines)))
+                                     diagnostic_lines=lines))
         if result.returncode and name == "optional-provider-link-checks":
             # The fixture handles reviewed consumer source and synthetic peers only.
             print(log.read_text(encoding="utf-8", errors="replace")[-6000:], flush=True)
+        if result.returncode and name == "kernel-and-strict-prelink":
+            for component, line in compiler_failures(log):
+                print(f"Stage 0C-2E compiler error location: {component}:{line}", flush=True)
         require(result.returncode == 0, "Failed build stage: " + name)
 
     def git(root, *arguments):
@@ -228,6 +246,11 @@ def main():
     save("inputs.json", identities)
     stage2e = json.loads((ASSETS / "stage0c2e-inputs.json").read_bytes())
     exact(SOURCE / "scripts/repro/run-stage0c1f.py", stage2e["baseline_runner_sha256"])
+    expected_builder = stage2e["storage_builder"]
+    storage_builder = {
+        "upstream_sha256": exact(framework / STORAGE_BUILDER, expected_builder["upstream_sha256"]),
+        "transform_sha256": exact(device / AUTHOR_PREP, expected_builder["transform_sha256"]),
+    }
     for component, directory in (("shengufs", device / "drivers/ShengUfs"), ("bootlog", device)):
         patch_name = component + ".patch"
         patch_file = ASSETS / patch_name
@@ -256,6 +279,9 @@ def main():
     patch("reference-builder", device / "patches/build/sheng-reference-archive.patch", framework)
     step("optional-providers", [sys.executable, "scripts/prepare-sheng-author-audit.py", "--unixnu", framework,
                                 "--evidence", private, "--stage0c1f-patched-ramblock"], device)
+    storage_builder["prepared_sha256"] = exact(framework / STORAGE_BUILDER, expected_builder["prepared_sha256"])
+    identities["stage0c2e_storage_builder"] = storage_builder
+    save("inputs.json", identities)
     step("engine-regressions", [sys.executable, "-B", "-m", "unittest", "test_fileset_emit",
                                 "test_fileset_layout", "test_fileset_match", "test_fileset_shape"], kit)
     step("reference-builder-regressions", [sys.executable, "scripts/test-fileset-reference.py", "-v"], framework)
@@ -294,7 +320,7 @@ def main():
     for relative, wanted in stage2e["sources"].items():
         resolved = "kits/sheng/BootLog.c" if relative == "package/BootLog.c" else relative
         exact(tree / resolved, wanted)
-    exact(tree / "scripts/build-sheng-source-storage.py", stage2e["storage_builder_sha256"])
+    exact(tree / STORAGE_BUILDER, storage_builder["prepared_sha256"])
     for relative in ("scripts/sheng-strict-prelink.py", "scripts/clean_prelink_recovery.py"):
         exact(tree / relative, digest(SOURCE / relative))
     require(not any(path.is_file() and (path.suffix in (".o", ".a", ".cpo") or path.name == "kernel.macho")

@@ -68,7 +68,8 @@ def main():
     try:
         observed = read_json(base / "inputs.json")
         require(observed["archive_sha256"] == PIN["archive_sha256"] and observed["stage0c2e_patches"] == PIN["patches"]
-                and observed["stage0c2e_sources"] == PIN["sources"], "SOURCE_PINS")
+                and observed["stage0c2e_sources"] == PIN["sources"]
+                and observed["stage0c2e_storage_builder"] == PIN["storage_builder"], "SOURCE_PINS")
         save("stage0c2e-inputs.json", PIN)
     except (OSError, ValueError, KeyError, TypeError):
         issue.append("SOURCE_PINS")

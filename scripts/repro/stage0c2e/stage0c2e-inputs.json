@@ -10,7 +10,11 @@
     "package/BootLog.c": "44a03e3b88a0e96dfd541ed7e628948ddf0598934da0a94d8ad0731312053914"
   },
   "baseline_runner_sha256": "1ee58ab79dd904ee86ac5e5d4a5adeb916a339ff2b1049d97d1ca4139324b842",
-  "storage_builder_sha256": "a5ecbe9e69f120e2670fffbf65623cfb4eb62c03c96f45c53b86d4fd41d3c585",
+  "storage_builder": {
+    "upstream_sha256": "a5ecbe9e69f120e2670fffbf65623cfb4eb62c03c96f45c53b86d4fd41d3c585",
+    "transform_sha256": "fffb0f50d6615aa25f175bdfca72f08c97b8c09247a40d1c905bfc50503e3d05",
+    "prepared_sha256": "e53667543259349fb8507f850fa0f643857f5f4a0118c794a13123650a581bec"
+  },
   "archive_sha256": "f9328464d2f664a2b526a0d91bd3f35659cdfd9e2f26a5fa7696cf5f40c442ba",
   "runner_images": [
     "20261102.0473.1",
