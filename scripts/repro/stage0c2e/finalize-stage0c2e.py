@@ -136,6 +136,8 @@ def main():
                 "CENSUS_IDENTITY")
         require(bool(census["census"]["relative_write_page_ranges"]["static_if_possible_text_patch"])
                 and bool(census["census"]["relative_callback_entry_page_ranges"]), "CENSUS_EMPTY")
+        marker = census["panic_marker"]
+        require(marker["resolved"] is True and marker["reference"] in ("direct", "fixup"), "PANIC_MARKER")
         save("stage0c2c-build-inputs.json", inputs)
         save("stage0c2c-census.json", census)
     except (OSError, ValueError, KeyError, TypeError):

@@ -214,6 +214,7 @@ def main():
         parser.add_argument("--capture", type=Path, required=True)
         parser.add_argument("--kit", type=Path, required=True)
         parser.add_argument("--output", type=Path, required=True)
+        parser.add_argument("--require-panic-marker", action="store_true")
         args = parser.parse_args()
         require(sha(args.kit.read_bytes()) == KIT_SHA, "unexpected image parser")
         capture = json.loads(args.capture.read_bytes())
@@ -222,13 +223,32 @@ def main():
                 "candidate bytes disagree with capture identity")
         require(capture["parser_result"] == "ACCEPT" and capture["segment_audit"] == "PASS",
                 "candidate capture did not pass")
-        Image = runpy.run_path(str(args.kit))["Image"]
+        decoder = runpy.run_path(str(args.kit))
+        Image = decoder["Image"]
         census = collect(Image, data, include_ranges=True)
         require(census["root_base_va"] == capture["root"]["base_va"], "capture base disagrees with image")
         doc = dict(candidate_sha256=sha(data), candidate_bytes=len(data), decoder_sha256=KIT_SHA, census=census,
                    range_unit="byte offset and length relative to kernel load base",
                    boot_physical_base="NOT_OBSERVED", dynamic_write_set="NOT_OBSERVED",
                    callback_execution_closure="NOT_PROVEN", runtime_wx="NOT_OBSERVED")
+        if args.require_panic_marker:
+            image = Image(data)
+            kernel = Image(data, image.entries["com.apple.kernel"][1])
+            symbols = kernel.symbols()
+            marker, = [va for va, names in symbols.items() if "_boot_log_panic_flush" in names]
+            hook, = [va for va, names in symbols.items() if "_PE_panic_hook" in names]
+            starts = kernel.function_starts()
+            require(hook in starts, "panic hook is not a known function start")
+            end = next((va for va in starts if va > hook), None)
+            require(end is not None and 0 < end - hook <= 4096, "panic hook function boundary")
+            calls, references, _ = decoder["scan"](image.read(hook, end - hook), hook)
+            fixups = cache_fixups(image)
+            direct = any(target == marker for _, target, _ in calls)
+            got = any(kind == "ldst" and fixups.get(va, (None,))[0] == marker for _, va, kind in references)
+            require(direct or got, "final panic hook lacks a concrete BootLog marker reference")
+            word, = struct.unpack("<I", image.read(hook, 4))
+            doc["panic_marker"] = dict(resolved=True, reference="direct" if direct else "fixup",
+                                       hook_first_instruction=LANDING_PADS.get(word, "other"))
         with args.output.open("x", encoding="utf-8", newline="\n") as output:
             output.write(json.dumps(doc, indent=2) + "\n")
         print("PASS identity-bound static mutation census")

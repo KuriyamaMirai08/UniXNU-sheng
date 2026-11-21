@@ -34,7 +34,7 @@ jobs:
       EXPECTED_FINALIZER_SHA256: 8c77e632e4b8bf60bb0fb49cb21959fc95553588af11a3781b58f509b9737882
       EXPECTED_NEGATIVE_TEST_SHA256: 1e8f43fe84cb15e04b1c186808b7db06b74b79ba314f739917d5b3487907b57e
       EXPECTED_STAGE2E_ASSET_0: e3cde9571528cb648aa69411061f612e69bbac7478b3820e69bfdbcb4eb10db1
-      EXPECTED_STAGE2E_ASSET_1: e032402deded890648c36d14a0e8d1ff8cc98442678e11428954ed54c7045b39
+      EXPECTED_STAGE2E_ASSET_1: 8ae44a6ab80394ab6153c286d21cb30036c7ac0cd5fca713c5cdfb0192caffcd
       EXPECTED_STAGE2E_ASSET_2: b1734e878f54aa48a7b243de064c52063a46cff0e0a9931afa3e225db7d62462
       EXPECTED_STAGE2E_ASSET_3: 98a092ce9705089e090368c9501ab81fb51723be00cf5327b2be294a6f3e9cb1
       EXPECTED_STAGE2E_ASSET_4: 751505eec5fa1b0b98688fb3b448cb0e6a813083e56fbdea8b30a45d63ab1b24
@@ -103,7 +103,7 @@ jobs:
               "scripts/repro/stage0c2e/shengufs.patch": os.environ["EXPECTED_STAGE2E_ASSET_3"],
               "scripts/repro/stage0c2e/stage0c2e-inputs.json": os.environ["EXPECTED_STAGE2E_ASSET_4"],
           }
-          stage2c_assets = {'scripts/repro/stage0c2e/sheng-stage0c2c-panic-marker.patch': 'f9bd58a3880e17242a3f2aaa94a599eba2728ae3a8b98450af9da03e72bac17f', 'scripts/repro/stage0c2e/sheng-stage0c2c-static-if-preimage.patch': '97f09ef79474a92eaa733e35314a63d054c055a1d5475f0f380ab0b9748650d4', 'scripts/repro/stage0c2e/audit-stage0c2c.py': '90bf93f2d003f7b69345eb63ea7a9db36cfa538a9d6fede2e40d9b52c22e6101', 'scripts/repro/stage0c2e/kc_image.py': '2a2561308b27ace4e21dd4e45924bdeca937ee13047b7c6fd5ce580018f68747', 'scripts/repro/stage0c2e/stage0c2c-inputs.json': 'b90293b4efe750ca4935f5f27faf1019073ab6b2a761a0df04457a8a7c26eb97'}
+          stage2c_assets = {'scripts/repro/stage0c2e/sheng-stage0c2c-panic-marker.patch': 'd024f877fa4985b3526ab621ca755935d138801594745ef247da0cc58958beb0', 'scripts/repro/stage0c2e/sheng-stage0c2c-static-if-preimage.patch': '97f09ef79474a92eaa733e35314a63d054c055a1d5475f0f380ab0b9748650d4', 'scripts/repro/stage0c2e/audit-stage0c2c.py': 'd499b776a416b48c4f6e80047a62a7180a841328cda9f8153a61821c1d8bd1dd', 'scripts/repro/stage0c2e/kc_image.py': '2a2561308b27ace4e21dd4e45924bdeca937ee13047b7c6fd5ce580018f68747', 'scripts/repro/stage0c2e/stage0c2c-inputs.json': 'ebcbb313b09eac16d9a832fb95a85867402c32466af6a141b451fff2222e79cc'}
           for name, wanted in (expected | stage2e_assets | stage2c_assets).items():
               actual = hashlib.sha256((root / name).read_bytes()).hexdigest()
               if actual != wanted:
@@ -315,7 +315,7 @@ jobs:
           assets = root / "scripts/repro/stage0c2e"
           subprocess.run(["python3", "-B", str(assets / "audit-stage0c2c.py"), "--candidate", str(candidate),
                           "--capture", str(capture), "--kit", str(assets / "kc_image.py"),
-                          "--output", str(evidence / "stage0c2c-census.json")], check=True)
+                          "--output", str(evidence / "stage0c2c-census.json"), "--require-panic-marker"], check=True)
           PY
       - name: Validate evidence and decide job result
         if: always() && steps.identity.outcome == 'success'
