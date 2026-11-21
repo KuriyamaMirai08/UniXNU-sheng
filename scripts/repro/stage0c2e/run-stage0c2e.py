@@ -71,6 +71,40 @@ def compiler_failures(log):
     return sorted(result)[:16]
 
 
+def classify_build_failure(paths):
+    """Emit only reviewed classifications and fixed source names from private logs."""
+    sources = rb"(?:static_if\.c|hwtrace\.c|start\.s|NativeUfs\.cpp|NativeRamBlock\.cpp|BootLog\.c)"
+    location = re.compile(rb"(?:^|[/\\])(" + sources + rb"):(\d+):\d+: (?:fatal )?error:")
+    patterns = {
+        "PATCH_DOES_NOT_APPLY": (b"patch does not apply", b"patch failed:"),
+        "UNDECLARED_IDENTIFIER": (b"use of undeclared identifier", b"unknown type name"),
+        "MISSING_HEADER": (b"file not found",),
+        "UNDEFINED_SYMBOL": (b"undefined symbols", b"symbol(s) not found", b"undefined symbol:"),
+        "BOOTLOG_MARKER_REFERENCE": (b"_boot_log_panic_flush",),
+        "LINK_FAILURE": (b"linker command failed", b"ld: error:"),
+        "BUILD_RECIPE_FAILURE": (b"make:", b"ninja: build stopped"),
+        "STRICT_PRELINK_REFUSED": (b"strict prelink refused", b"unproven kernel page"),
+        "COMPILER_ERROR": (b"error:",),
+        "COMMAND_FAILURE": (b" failed (", b"calledprocesserror"),
+        "RUNTIME_EXCEPTION": (b"traceback", b"assertionerror", b"valueerror"),
+    }
+    for log in paths:
+        if not log.is_file() or log.is_symlink():
+            continue
+        categories = set()
+        locations = set()
+        with log.open("rb") as stream:
+            for line in stream:
+                lower = line.lower()
+                categories.update(code for code, needles in patterns.items() if any(word in lower for word in needles))
+                match = location.search(line)
+                if match:
+                    locations.add((match[1].decode("ascii"), int(match[2])))
+        if categories or locations:
+            print("2C private log", log.name, "classification", ",".join(sorted(categories)),
+                  "sources", ",".join(f"{name}:{line}" for name, line in sorted(locations)[:16]), flush=True)
+
+
 def extract_baseline(archive, destination, contract):
     archive_hash = digest(archive)
     require(archive_hash in ARCHIVES, "Historical archive identity changed")
@@ -374,6 +408,10 @@ def main():
     try:
         step("kernel-and-strict-prelink", [*cli, "build", "kernel", *common])
     except Exception:
+        stage_logs = [path for path in sorted((work / "logs").glob("*.log"))
+                      if re.fullmatch(r"(?:kernel(?:-bootstrap)?|storage-headers|"
+                                      r"(?:archive-\d{2}|component)-[A-Za-z0-9_-]{1,80})\.log", path.name)]
+        classify_build_failure([private / "kernel-and-strict-prelink.log", *stage_logs])
         try:
             collect_diagnostics()
         except (OSError, ValueError, KeyError, struct.error) as error:
