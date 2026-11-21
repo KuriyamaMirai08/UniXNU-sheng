@@ -1,0 +1,275 @@
+name: Sheng Stage 0C-2A-R candidate parser capture
+on:
+  workflow_dispatch:
+    inputs:
+      expected_workflow_sha256:
+        description: SHA-256 of this workflow file, verified from the reviewed commit before dispatch
+        required: true
+        type: string
+      expected_audit_commit:
+        description: Full SHA of the reviewed audit checkout
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: sheng-stage0c2a-r
+  cancel-in-progress: false
+jobs:
+  candidate-parser-capture:
+    runs-on: macos-26
+    timeout-minutes: 360
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      FIXED_SOURCE_COMMIT: bcbce475de0ca2dbb55cfb870e5be5b51b92b727
+      FIXED_SOURCE_TREE: 39e7c5a8233a0fa83463f414afde4244487a2ae7
+      EXPECTED_AUDIT_COMMIT: ${{ inputs.expected_audit_commit }}
+      EXPECTED_WORKFLOW_SHA256: ${{ inputs.expected_workflow_sha256 }}
+      EXPECTED_CAPTURE_HELPER_SHA256: 536f4ac7d39fe37f618133001bc3bfc5ad69ea3d698861e8a469d933c2a89112
+      EXPECTED_PARSER_BUILDER_SHA256: 8a6580bf450568abe76e67c43cbe1caf454d16f16ffb8bd21c395d2a17c8d377
+      EXPECTED_FINALIZER_SHA256: 8c77e632e4b8bf60bb0fb49cb21959fc95553588af11a3781b58f509b9737882
+      EXPECTED_NEGATIVE_TEST_SHA256: 1e8f43fe84cb15e04b1c186808b7db06b74b79ba314f739917d5b3487907b57e
+    steps:
+      - name: Refuse attempts after the first dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
+            echo 'Stage 0C-2A-R requires attempt 1' >&2
+            exit 1
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: bcbce475de0ca2dbb55cfb870e5be5b51b92b727
+          path: _stage0c1f_source
+          persist-credentials: false
+      - name: Verify fixed source tree and audit tool identities
+        id: identity
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          test -d "$DEVELOPER_DIR"
+          test "$(sw_vers -buildVersion)" = 25G332
+          test "$ImageVersion" = 20261117.0516.1
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          [[ "$EXPECTED_AUDIT_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$EXPECTED_AUDIT_COMMIT" = "$GITHUB_SHA"
+          test "$EXPECTED_AUDIT_COMMIT" = "$WORKFLOW_SHA"
+          test "$EXPECTED_AUDIT_COMMIT" = "$(git rev-parse HEAD)"
+          test "$WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/sheng-stage0c2a-r.yml@$GITHUB_REF"
+          source_dir="$GITHUB_WORKSPACE/_stage0c1f_source"
+          test "$(git -C "$source_dir" rev-parse HEAD)" = "$FIXED_SOURCE_COMMIT"
+          test "$(git -C "$source_dir" rev-parse 'HEAD^{tree}')" = "$FIXED_SOURCE_TREE"
+          test -z "$(git -C "$source_dir" status --porcelain)"
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path.cwd()
+          workflow = root / ".github/workflows/sheng-stage0c2a-r.yml"
+          workflow_hash = hashlib.sha256(workflow.read_bytes()).hexdigest()
+          if workflow_hash != os.environ["EXPECTED_WORKFLOW_SHA256"]:
+              raise SystemExit(f"workflow identity mismatch: {workflow_hash}")
+          expected = {
+              "scripts/audit-stage0c2a-r.py": os.environ["EXPECTED_CAPTURE_HELPER_SHA256"],
+              "scripts/build-darwinboot-parser.py": os.environ["EXPECTED_PARSER_BUILDER_SHA256"],
+              "scripts/finalize-stage0c2a-r.py": os.environ["EXPECTED_FINALIZER_SHA256"],
+              "scripts/test-stage0c2a-r.py": os.environ["EXPECTED_NEGATIVE_TEST_SHA256"],
+          }
+          for name, wanted in expected.items():
+              actual = hashlib.sha256((root / name).read_bytes()).hexdigest()
+              if actual != wanted:
+                  raise SystemExit(f"tool identity mismatch for {name}: {actual}")
+          identity = {"workflow_ref": os.environ["WORKFLOW_REF"],
+                      "workflow_sha": os.environ["WORKFLOW_SHA"],
+                      "workflow_sha256": hashlib.sha256(workflow.read_bytes()).hexdigest(),
+                      "fixed_source_commit": os.environ["FIXED_SOURCE_COMMIT"],
+                      "fixed_source_tree": os.environ["FIXED_SOURCE_TREE"],
+                      "audit_tool_hashes": expected,
+                      "run_id": os.environ["GITHUB_RUN_ID"], "attempt": os.environ["GITHUB_RUN_ATTEMPT"]}
+          Path(os.environ["RUNNER_TEMP"], "stage0c2a-r-workflow-identity.json").write_text(
+              json.dumps(identity, indent=2) + "\n")
+          PY
+      - name: Select the reviewed Homebrew installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          test -d "$DEVELOPER_DIR"
+          test "$(sw_vers -buildVersion)" = 25G332
+          test -n "$EXPECTED_WORKFLOW_SHA256"
+          brew_repo="$(/opt/homebrew/bin/brew --repository)"
+          brew_commit=c3286d37c37f71b186a7e6647092bf2b56d1d690
+          if [[ "$(git -C "$brew_repo" rev-parse HEAD)" != "$brew_commit" ]]; then
+            if ! git -C "$brew_repo" cat-file -e "$brew_commit^{commit}" 2>/dev/null; then
+              git -C "$brew_repo" fetch --no-tags --depth=1 https://github.com/Homebrew/brew.git refs/tags/7.0.14
+              test "$(git -C "$brew_repo" rev-parse FETCH_HEAD)" = "$brew_commit"
+            fi
+            git -C "$brew_repo" checkout --detach "$brew_commit"
+          fi
+          test "$(git -C "$brew_repo" rev-parse HEAD)" = "$brew_commit"
+          /opt/homebrew/bin/brew --version
+          test "$(xcodebuild -version | tr '\n' ' ')" = "Xcode 26.6 Build version 17F113 "
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = 26.5
+          test "$(shasum -a 256 "$(xcrun --sdk iphoneos --find clang)" | cut -d ' ' -f 1)" = d2e4bf622758eee1bf7267c060497fb2c41e098d37b0fca8be73898dc7e14eda
+          test "$(shasum -a 256 "$(xcrun --find ld)" | cut -d ' ' -f 1)" = e412b9f2af31b1567a9eabc28f553a8f1cf34127e2107cb39c2694cf147571a4
+      - name: Prepare ARM64 build tools
+        working-directory: _stage0c1f_source
+        shell: bash
+        run: |
+          set -euo pipefail
+          /opt/homebrew/bin/brew install dtc cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw zstd zlib-ng-compat
+          python3 -B scripts/repro/install-stage0c1f-tools.py \
+            "$RUNNER_TEMP/stage0c1f-bottles" "$RUNNER_TEMP/stage0c1f-supply/fixed-bottles.json"
+          python3 -m venv "$RUNNER_TEMP/stage0c1f-python"
+          "$RUNNER_TEMP/stage0c1f-python/bin/pip" install --only-binary=:all: --no-deps cryptography==50.0.2 cffi==2.1.1 pycparser==3.12
+          printf '%s\n' "$RUNNER_TEMP/stage0c1f-python/bin" "$HOME/.cargo/bin" \
+            /opt/homebrew/opt/llvm/bin /opt/homebrew/opt/lld/bin /opt/homebrew/opt/bison/bin >> "$GITHUB_PATH"
+          rustup toolchain install 1.98.0 --profile minimal --component rust-src
+          "$RUNNER_TEMP/stage0c1f-python/bin/python" -c 'from cryptography.hazmat.primitives import hashes; print(hashes.SHA256().name)'
+          sdk_path="$(xcrun --sdk iphoneos --show-sdk-path)"
+          printf '%s\n' 'int stage0c1f_toolchain_probe(void) { return 0; }' | \
+            xcrun --sdk iphoneos clang -target arm64e-apple-ios26.5 -isysroot "$sdk_path" \
+              -Werror -x c -c - -o "$RUNNER_TEMP/stage0c1f-toolchain-probe.o"
+          /opt/homebrew/opt/llvm/bin/llvm-nm "$RUNNER_TEMP/stage0c1f-toolchain-probe.o"
+          "$RUNNER_TEMP/stage0c1f-python/bin/python" - <<'PY'
+          import importlib.metadata, json, os, subprocess, sys
+          from pathlib import Path
+          brew = "/opt/homebrew/bin/brew"
+          versions = {"dtc": "1.8.1", "cmake": "4.5.0", "mtools": "4.0.50", "ninja": "1.13.2",
+                      "glslang": "16.6.0", "shaderc": "2026.4", "spirv-tools": "1.4.363.0",
+                      "spirv-headers": "1.4.363.0", "bison": "3.8.2", "pkgconf": "3.0.11",
+                      "rustup": "1.29.3", "blacktop/tap/ipsw": "3.1.749",
+                      "zstd": "1.5.7_1", "zlib-ng-compat": "2.3.3_1"}
+          actual = {name: Path(subprocess.check_output([brew, "--prefix", name], text=True).strip()).resolve().name
+                    for name in versions}
+          pip = {name: importlib.metadata.version(name) for name in ("cryptography", "cffi", "pycparser")}
+          rust = subprocess.check_output([str(Path.home() / ".cargo/bin/rustc"), "+1.98.0", "--version"], text=True).strip()
+          receipt = dict(runner_image=os.environ["ImageVersion"], python=sys.version.split()[0],
+                         brew_versions=actual, pip_versions=pip, rust=rust)
+          Path(os.environ["RUNNER_TEMP"], "stage0c2a-r-dependencies.json").write_text(json.dumps(receipt) + "\n")
+          if (actual != versions or pip != {"cryptography": "50.0.2", "cffi": "2.1.1", "pycparser": "3.12"}
+              or sys.version_info[:2] != (3, 15) or rust != "rustc 1.98.0 (88d9e12ae 2026-08-18)"):
+              raise SystemExit("historically observed dependency versions disagree")
+          PY
+          test "$(shasum -a 256 "$RUNNER_TEMP/stage0c1f-supply/fixed-bottles.json" | cut -d ' ' -f 1)" = a7f49031382dd91638ca4dd8fe93af5d305621666be262ec35efb127114ae8b2
+      - name: Download the pinned historical comparison archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            download_dir="$RUNNER_TEMP/stage0c1f-input-attempt-$attempt"
+            if gh run download 43729102858 --repo KuriyamaMirai08/UniXNU-sheng \
+                --name layout-inputs-43715522445-43729102858 --dir "$download_dir" &&
+                test -s "$download_dir/layout-inputs.tar.gz"; then
+              mv "$download_dir" "$RUNNER_TEMP/stage0c1f-input"
+              exit 0
+            fi
+            if [[ "$attempt" != 3 ]]; then sleep "$((attempt * 5))"; fi
+          done
+          exit 1
+      - name: Build and strictly prelink the complete patched kernel
+        id: build
+        working-directory: _stage0c1f_source
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(shasum -a 256 "$RUNNER_TEMP/stage0c1f-input/layout-inputs.tar.gz" | cut -d ' ' -f 1)" = f9328464d2f664a2b526a0d91bd3f35659cdfd9e2f26a5fa7696cf5f40c442ba
+          python3 -B scripts/repro/run-stage0c1f.py \
+            --baseline-archive "$RUNNER_TEMP/stage0c1f-input/layout-inputs.tar.gz" \
+            --scratch "$RUNNER_TEMP/stage0c1f-private" \
+            --public-evidence "$RUNNER_TEMP/stage0c1f-evidence"
+      - name: Parse candidate and capture reviewed structural evidence
+        id: capture
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, platform, subprocess
+          from pathlib import Path
+          root = Path.cwd()
+          temp = Path(os.environ["RUNNER_TEMP"])
+          evidence = temp / "stage0c1f-evidence"
+          candidate = temp / "stage0c1f-private/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/kernel/kernel.macho"
+          map_file = candidate.with_suffix(".map.json")
+          framework = temp / "stage0c1f-private/UniXNU"
+          source = framework / "drivers/DarwinBoot/DarwinBootPkg/Driver/DarwinBoot.c"
+          parser = temp / "darwinboot-parser"
+          generated = temp / "darwinboot-parser.generated.c"
+          capture = evidence / "stage0c2a-r-capture.json"
+          negative = evidence / "stage0c2a-r-parser-tests.json"
+          evidence.mkdir(parents=True, exist_ok=True)
+          if not candidate.is_file() or not source.is_file():
+              raise SystemExit("strict-prelink output or fixed DarwinBoot source is missing")
+          if subprocess.check_output(["git", "-C", str(framework / "drivers/DarwinBoot"), "rev-parse", "HEAD"], text=True).strip() != "5243c68ec332a227fe3680cd5da6d5a0e127035c":
+              raise SystemExit("DarwinBoot checkout identity mismatch")
+          compiler = Path(subprocess.check_output(["xcrun", "--sdk", "macosx", "--find", "clang"], text=True).strip())
+          subprocess.run(["python3", str(root / "scripts/build-darwinboot-parser.py"), "--source", str(source),
+                          "--compiler", str(compiler), "--output", str(parser),
+                          "--generated-source", str(generated)], check=True)
+          def digest(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          generated_hash = digest(generated)
+          if generated_hash != "68556301872a04446b74359361870439c99ee8e78a920b9daa8cd513bb8796db":
+              raise SystemExit("generated parser source identity mismatch")
+          runtime = dict(generated_parser_sha256=generated_hash, compiler_sha256=digest(compiler),
+                         parser_sha256=digest(parser), host_machine=platform.machine())
+          (evidence / "stage0c2a-r-audit-runtime.json").write_text(json.dumps(runtime) + "\n")
+          if runtime["compiler_sha256"] != "d2e4bf622758eee1bf7267c060497fb2c41e098d37b0fca8be73898dc7e14eda":
+              raise SystemExit("host parser compiler identity mismatch")
+          audit_result = subprocess.run(["python3", "-B", str(root / "scripts/audit-stage0c2a-r.py"),
+                          "--candidate", str(candidate), "--map", str(map_file), "--parser", str(parser),
+                          "--parser-source", str(source), "--output", str(capture)])
+          capture_doc = json.loads(capture.read_text())
+          if capture_doc["parser_result"] == "ACCEPT":
+              subprocess.run(["python3", "-B", str(root / "scripts/test-stage0c2a-r.py"), "--sample", str(candidate),
+                              "--parser", str(parser), "--output", str(negative)], check=True)
+          if audit_result.returncode:
+              raise SystemExit("candidate parser or independent segment audit rejected the candidate")
+          PY
+      - name: Validate evidence and decide job result
+        if: always() && steps.identity.outcome == 'success'
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          CAPTURE_OUTCOME: ${{ steps.capture.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B scripts/finalize-stage0c2a-r.py --temp "$RUNNER_TEMP" --publish "$RUNNER_TEMP/stage0c2a-r-publish" \
+            --build-outcome "$BUILD_OUTCOME" --capture-outcome "$CAPTURE_OUTCOME"
+      - name: Upload reviewed JSON evidence only
+        if: always() && steps.identity.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sheng-stage0c2a-r-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-workflow-identity.json
+            ${{ runner.temp }}/stage0c2a-r-publish/fixed-bottles.json
+            ${{ runner.temp }}/stage0c2a-r-publish/toolchain.json
+            ${{ runner.temp }}/stage0c2a-r-publish/inputs.json
+            ${{ runner.temp }}/stage0c2a-r-publish/last-stage.json
+            ${{ runner.temp }}/stage0c2a-r-publish/optional-provider-check.json
+            ${{ runner.temp }}/stage0c2a-r-publish/native.json
+            ${{ runner.temp }}/stage0c2a-r-publish/objects.json
+            ${{ runner.temp }}/stage0c2a-r-publish/strict-result.json
+            ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-capture.json
+            ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-parser-tests.json
+            ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-audit-runtime.json
+            ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-dependencies.json
+            ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-verdict.json
+          if-no-files-found: error
+          retention-days: 14
