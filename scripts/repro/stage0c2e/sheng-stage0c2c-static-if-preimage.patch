@@ -1,0 +1,31 @@
+diff --git a/osfmk/arm64/static_if.c b/osfmk/arm64/static_if.c
+index 22be6f2..bab8923 100644
+--- a/osfmk/arm64/static_if.c
++++ b/osfmk/arm64/static_if.c
+@@ -48,6 +48,14 @@ arm64_insn_b(int32_t delta)
+ 	return 0x14000000u | ((delta >> 2) & 0x03ffffff);
+ }
+ 
++__attribute__((always_inline))
++static bool
++arm64_static_if_valid_preimage(uint32_t old, int32_t delta)
++{
++	return delta % 4 == 0 && delta >= -(1 << 27) && delta < (1 << 27) &&
++	       (old == arm64_insn_nop() || old == arm64_insn_b(delta));
++}
++
+ MARK_AS_FIXUP_TEXT void
+ ml_static_if_entry_patch(static_if_entry_t sie, int branch)
+ {
+@@ -62,6 +70,11 @@ ml_static_if_entry_patch(static_if_entry_t sie, int branch)
+ 
+ 	if ((vm_offset_t)__text_exec_start <= patch_point &&
+ 	    patch_point < (vm_offset_t)__text_exec_end) {
++		/* Refuse to overwrite anything other than this entry's NOP or branch. */
++		if ((patch_point & 3) != 0 ||
++		    !arm64_static_if_valid_preimage(*(const volatile uint32_t *)patch_point, sie->sie_target)) {
++			__builtin_trap();
++		}
+ 		asm volatile (""
+ 		     /* patch the instruction */
+                      "str     %w1, [%0]"     "\n\t"

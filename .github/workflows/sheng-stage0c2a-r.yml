@@ -1,5 +1,5 @@
-name: Sheng Stage 0C-2E ARM64e and strict-prelink
-run-name: Stage 0C-2E / fixed input compile and strict-prelink
+name: Sheng Stage 0C-2C preimage census ARM64e and strict-prelink
+run-name: Stage 0C-2C preimage census / fixed input compile and strict-prelink
 on:
   workflow_dispatch:
     inputs:
@@ -15,10 +15,10 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: sheng-stage0c2e
+  group: sheng-stage0c2c-preimage
   cancel-in-progress: false
 jobs:
-  build-arm64e-stage0c2e:
+  build-arm64e-stage0c2c-preimage:
     runs-on: macos-26
     timeout-minutes: 360
     env:
@@ -34,8 +34,8 @@ jobs:
       EXPECTED_FINALIZER_SHA256: 8c77e632e4b8bf60bb0fb49cb21959fc95553588af11a3781b58f509b9737882
       EXPECTED_NEGATIVE_TEST_SHA256: 1e8f43fe84cb15e04b1c186808b7db06b74b79ba314f739917d5b3487907b57e
       EXPECTED_STAGE2E_ASSET_0: e3cde9571528cb648aa69411061f612e69bbac7478b3820e69bfdbcb4eb10db1
-      EXPECTED_STAGE2E_ASSET_1: 3cdeb2c2c3b88acac8c7f01a6b475c65bdce176d92d378148c7c7557084f4382
-      EXPECTED_STAGE2E_ASSET_2: 203ca4772927001f07877c0e716a9436c8f42c871ce3679effbfe21d39f70153
+      EXPECTED_STAGE2E_ASSET_1: e032402deded890648c36d14a0e8d1ff8cc98442678e11428954ed54c7045b39
+      EXPECTED_STAGE2E_ASSET_2: a099e1085c1c9fd8c2480bb72f58ac90d549115076117dbf83a38d014024104c
       EXPECTED_STAGE2E_ASSET_3: 98a092ce9705089e090368c9501ab81fb51723be00cf5327b2be294a6f3e9cb1
       EXPECTED_STAGE2E_ASSET_4: 751505eec5fa1b0b98688fb3b448cb0e6a813083e56fbdea8b30a45d63ab1b24
     steps:
@@ -43,9 +43,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = refs/heads/codex/stage0c2e-arm64e-20261121
+          test "$GITHUB_REF" = refs/heads/codex/stage0c2c-arm64e-census
           if [[ "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
-            echo 'Stage 0C-2E requires attempt 1' >&2
+            echo 'Stage 0C-2C preimage census requires attempt 1' >&2
             exit 1
           fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -103,7 +103,8 @@ jobs:
               "scripts/repro/stage0c2e/shengufs.patch": os.environ["EXPECTED_STAGE2E_ASSET_3"],
               "scripts/repro/stage0c2e/stage0c2e-inputs.json": os.environ["EXPECTED_STAGE2E_ASSET_4"],
           }
-          for name, wanted in (expected | stage2e_assets).items():
+          stage2c_assets = {'scripts/repro/stage0c2e/sheng-stage0c2c-panic-marker.patch': 'f9bd58a3880e17242a3f2aaa94a599eba2728ae3a8b98450af9da03e72bac17f', 'scripts/repro/stage0c2e/sheng-stage0c2c-static-if-preimage.patch': '97f09ef79474a92eaa733e35314a63d054c055a1d5475f0f380ab0b9748650d4', 'scripts/repro/stage0c2e/audit-stage0c2c.py': '90bf93f2d003f7b69345eb63ea7a9db36cfa538a9d6fede2e40d9b52c22e6101', 'scripts/repro/stage0c2e/kc_image.py': '2a2561308b27ace4e21dd4e45924bdeca937ee13047b7c6fd5ce580018f68747', 'scripts/repro/stage0c2e/stage0c2c-inputs.json': 'b90293b4efe750ca4935f5f27faf1019073ab6b2a761a0df04457a8a7c26eb97'}
+          for name, wanted in (expected | stage2e_assets | stage2c_assets).items():
               actual = hashlib.sha256((root / name).read_bytes()).hexdigest()
               if actual != wanted:
                   raise SystemExit(f"tool identity mismatch for {name}: {actual}")
@@ -311,6 +312,10 @@ jobs:
                               "--parser", str(parser), "--output", str(negative)], check=True)
           if audit_result.returncode:
               raise SystemExit("candidate parser or independent segment audit rejected the candidate")
+          assets = root / "scripts/repro/stage0c2e"
+          subprocess.run(["python3", "-B", str(assets / "audit-stage0c2c.py"), "--candidate", str(candidate),
+                          "--capture", str(capture), "--kit", str(assets / "kc_image.py"),
+                          "--output", str(evidence / "stage0c2c-census.json")], check=True)
           PY
       - name: Validate evidence and decide job result
         if: always() && steps.identity.outcome == 'success'
@@ -326,7 +331,7 @@ jobs:
         if: always() && steps.identity.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: sheng-stage0c2e-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: sheng-stage0c2c-preimage-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-workflow-identity.json
             ${{ runner.temp }}/stage0c2a-r-publish/toolchain.json
@@ -340,5 +345,7 @@ jobs:
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2e-verdict.json
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2e-inputs.json
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-dependencies.json
+            ${{ runner.temp }}/stage0c2a-r-publish/stage0c2c-build-inputs.json
+            ${{ runner.temp }}/stage0c2a-r-publish/stage0c2c-census.json
           if-no-files-found: error
           retention-days: 14

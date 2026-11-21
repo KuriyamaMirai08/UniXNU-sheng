@@ -238,6 +238,17 @@ def main():
     for path in ("board.toml", "scripts/sheng-strict-prelink.py", "scripts/clean_prelink_recovery.py",
                  "scripts/prepare-sheng-author-audit.py", "scripts/check-sheng-optional-providers.py"):
         shutil.copyfile(SOURCE / path, device / path)
+    stage2c = json.loads((ASSETS / "stage0c2c-inputs.json").read_bytes())
+    series = device / "patches/xnu-12377/series-sheng-24A446"
+    exact(device / "board.toml", stage2c["board_overlay_sha256"])
+    additions = stage2c["ordered_patches"][-2:]
+    for row in additions:
+        path = ASSETS / row["patch"]
+        exact(path, row["sha256"])
+        shutil.copyfile(path, series.parent / path.name)
+    with series.open("ab") as stream:
+        require(series.read_bytes().endswith(b"\n"), "Malformed 24A446 series")
+        stream.write("".join(row["patch"] + "\n" for row in additions).encode())
     patch("shengufs", assets / "shenguFs.patch", device / "drivers/ShengUfs")
     patch("ramblock", assets / "ramblock.patch", framework / "drivers/RamBlock")
     patch("bootlog", assets / "bootlog.patch", device)
@@ -368,6 +379,16 @@ def main():
         except (OSError, ValueError, KeyError, struct.error) as error:
             save("diagnostic-error.json", dict(error_type=type(error).__name__))
         raise
+    stamp = json.loads((work / "xnu-inputs.json").read_bytes())
+    expected = [(Path(row["patch"]).name, row["sha256"]) for row in stage2c["ordered_patches"]]
+    applied = [(Path(row["path"]).name, row["sha256"]) for row in stamp["patches"]]
+    require(stamp["commit"] == stage2c["fixed_framework_soc_xnu"]["xnu"] and applied == expected,
+            "Effective XNU source or ordered 95+2 patches differ")
+    for path, wanted in stage2c["patched_xnu_source_sha256"].items():
+        exact(tree / ".cache/xnu-work" / path, wanted)
+    save("stage0c2c-build-inputs.json", dict(xnu_commit=stamp["commit"], ordered_patches=stage2c["ordered_patches"],
+         patched_xnu_source_sha256=stage2c["patched_xnu_source_sha256"], source_commit=stage2c["source_commit"],
+         source_tree=stage2c["source_tree"]))
     objects = collect_diagnostics()
     require(len(objects) == 3 and all(
         (row["magic"], row["cpu"], row["subtype"] & 0xffffff, row["filetype"]) ==
@@ -392,7 +413,7 @@ def main():
     require(receipt["candidate_sha256"] !=
             "0c71523a177783fd7fbfa4c5dee8b21622554b04ff3357cc518f2e7a821d315a",
             "Stage 0C-2E candidate unexpectedly equals the historical Stage 0C-1F bytes")
-    save("strict-result.json", dict(candidate_track="stage0c2e", status=receipt["status"], inputs=receipt["inputs"],
+    save("strict-result.json", dict(candidate_track="stage0c2c-preimage", status=receipt["status"], inputs=receipt["inputs"],
          candidate_sha256=receipt["candidate_sha256"], map_sha256=digest(output.with_suffix(".map.json")),
          placement=receipt["native_data_placement"], retained_entries=receipt["retained_entries_verified"],
          corecrypto_hmac_sha256=statistics["corecrypto_hmac_sha256"], runtime_qualified=False, loadable=False,

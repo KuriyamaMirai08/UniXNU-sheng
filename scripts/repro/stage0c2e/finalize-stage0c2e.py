@@ -73,7 +73,7 @@ def main():
                 parser_sdk_identity(doc)
             else:
                 if name == "strict-result.json":
-                    require(doc.pop("candidate_track", None) == "stage0c2e", "CANDIDATE_TRACK")
+                    require(doc.pop("candidate_track", None) == "stage0c2c-preimage", "CANDIDATE_TRACK")
                 RULES["validate"](name, doc)
             records[name] = doc
             save(name, doc)
@@ -123,9 +123,26 @@ def main():
              for row in tests.get("negative_fixtures", []))),
     )
     issue.extend(code for code, passed in positives if not passed)
+    try:
+        expected = read_json(Path(__file__).with_name("stage0c2c-inputs.json"))
+        inputs = read_json(base / "stage0c2c-build-inputs.json")
+        wanted = {key: expected[key] for key in (
+            "ordered_patches", "patched_xnu_source_sha256", "source_commit", "source_tree")}
+        wanted["xnu_commit"] = expected["fixed_framework_soc_xnu"]["xnu"]
+        require(inputs == wanted, "PRODUCTION_SOURCE")
+        census = read_json(base / "stage0c2c-census.json")
+        require((census["candidate_sha256"], census["candidate_bytes"]) ==
+                (candidate["sha256"], candidate["bytes"]) and census["runtime_wx"] == "NOT_OBSERVED",
+                "CENSUS_IDENTITY")
+        require(bool(census["census"]["relative_write_page_ranges"]["static_if_possible_text_patch"])
+                and bool(census["census"]["relative_callback_entry_page_ranges"]), "CENSUS_EMPTY")
+        save("stage0c2c-build-inputs.json", inputs)
+        save("stage0c2c-census.json", census)
+    except (OSError, ValueError, KeyError, TypeError):
+        issue.append("STAGE0C2C_INPUTS_OR_CENSUS")
     digests = {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(args.publish.glob("*.json"))}
     status = "BLOCKED" if issue else "PASS"
-    save("stage0c2e-verdict.json", dict(candidate_track="stage0c2e", status=status, issues=issue,
+    save("stage0c2e-verdict.json", dict(candidate_track="stage0c2c-preimage", status=status, issues=issue,
          build=args.build_outcome, capture=args.capture_outcome, candidate_identity=candidate,
          parser_observation=capture.get("parser_result", "NOT_RUN"), artifacts_sha256=digests))
     print("Stage 0C-2E", status, ",".join(issue))
