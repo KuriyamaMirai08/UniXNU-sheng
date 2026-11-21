@@ -1,0 +1,1481 @@
+diff --git a/NativeUfs.cpp b/NativeUfs.cpp
+index d767094..42289e5 100644
+--- a/NativeUfs.cpp
++++ b/NativeUfs.cpp
+@@ -999,7 +999,6 @@ static void hostWrite (unsigned offset, uint32_t value)
+ static uint32_t hostCompletionCount (unsigned slot);
+ static bool hostInterruptMode (void);
+ static void hostWaitCompletion (unsigned slot, uint32_t seen, uint64_t started);
+-static uint64_t hostDmaAddress (const void *va);
+ #include "RootCommands.h"
+ 
+ static uint64_t gLun0CapacityBlocks = 0;
+@@ -1019,7 +1018,7 @@ extern "C" volatile uint64_t native_ufs_irq_sleeps = 0, native_ufs_irqs = 0;
+ extern "C" volatile uint32_t native_ufs_irq_mode = 0;
+ 
+ static uint32_t hostCompletionCount (unsigned slot) { return __atomic_load_n (&gSlotGen[slot], __ATOMIC_ACQUIRE); }
+-static bool hostInterruptMode (void) { return gIrqMode && !gHostPanic; }
++static bool hostInterruptMode (void) { return gIrqMode; }
+ static uint64_t gSpinTicks = 0;
+ static uint32_t gSpinTicksUs = ~0U;
+ static void hostWaitCompletion (unsigned slot, uint32_t seen, uint64_t started)
+@@ -1058,15 +1057,8 @@ static void hostInterrupt (void *)
+   }
+ }
+ 
+-// Zero copy (RootCommands.h): a kernel page's physical address, if the storage stream can reach it (gDmaLimit, from the SMMU's
+-// bypass width and the controller's 64-bit addressing, set at bring-up; 0 until then, so no zero copy).
+-static uint64_t gDmaLimit = 0;
+-static uint64_t hostDmaAddress (const void *va)
+-{
+-  const uint64_t address = ml_vtophys (reinterpret_cast<vm_offset_t> (va));
+-  return address && address < gDmaLimit && gDmaLimit - address >= 4096 ? address : 0;
+-}
+-extern "C" void native_ufs_set_zero_copy (int on) { gZeroCopy = on != 0; }
++// Preserve the tuning ABI. Caller buffers need a DMA lifetime contract before direct DMA is allowed.
++extern "C" void native_ufs_set_zero_copy (int) {}
+ extern "C" void native_ufs_set_spin (uint32_t us) { gSpinUs = us; }
+ 
+ static void hostEnableInterrupt (void)
+@@ -1150,31 +1142,38 @@ static void hostSlotsUpgrade (unsigned regionSlots, unsigned entries, bool wide)
+ // ---- Write-authority lock -----------------------------------------------------------------------------------------
+ // One IOLock serializes every authorization transition and the check -> WRITE doorbell window
+ // (the storage of these runs in RootCommands.h). It is installed here, before any window can be
+-// registered; until then the Sealed state denies every write. A panic context never blocks on it:
+-// the write path uses the try-acquire route and fails closed when the lock is busy.
++// registered. A panic context never enters the transport.
+ static IOLock *gAuthorityLock = nullptr;
+ static bool authorityLockTryAcquire (void *) { return gAuthorityLock ? IOLockTryLock (gAuthorityLock) : false; }
+ static void authorityLockAcquire (void *) { if (gAuthorityLock) IOLockLock (gAuthorityLock); }
+ static void authorityLockRelease (void *) { if (gAuthorityLock) IOLockUnlock (gAuthorityLock); }
+-static void installAuthorityLock (void)
++static bool installAuthorityLock (void)
+ {
+-  if (!gAuthorityLock) gAuthorityLock = IOLockAlloc ();
+-  if (gAuthorityLock) {
+-    const UfsAuthorityLockOps ops = { &authorityLockTryAcquire, &authorityLockAcquire, &authorityLockRelease, nullptr };
+-    ufsWriteAuthoritySetLock (&ops);
+-  }
++  if (gAuthorityLock) return true;
++  gAuthorityLock = IOLockAlloc ();
++  if (!gAuthorityLock) return false;
++  const UfsAuthorityLockOps ops = { &authorityLockTryAcquire, &authorityLockAcquire, &authorityLockRelease, nullptr };
++  ufsWriteAuthoritySetLock (&ops);
++  return true;
+ }
+ 
+ static bool hostBringUp (const char **why)
+ {
+-  installAuthorityLock ();
+-  if (gHost.poisoned) {
++  if (hostTransportPoisoned ()) {
+     *why = "transport quarantined";
+     return false;
+   }
+   if (gHost.ready) {
+     return true;
+   }
++  if (!installAuthorityLock ()) {
++    *why = "write authority lock unavailable";
++    return false;
++  }
++  if (!gSubmitLock && !(gSubmitLock = IOLockAlloc ())) {
++    *why = "submission lock unavailable";
++    return false;
++  }
+   gRootDiagnostic.stage = "controller map";
+   gHost.hc = mapPhys (UFS_HC_BASE, UFS_HC_SIZE, gHost.hcMap);
+   if (!gHost.hc) {
+@@ -1365,16 +1364,6 @@ static bool hostBringUp (const char **why)
+     gRootDiagnostic.smmuId2 = read32 (gHost.smmu, 0x28);
+     gRootDiagnostic.cba2r = read32 (gHost.smmu, 0x1800 + 4 * (report[0] >> 16));
+   }
+-  {
+-    uint64_t limit = wide ? ~0ULL : 0x100000000ULL;
+-    const uint32_t idr2 = gHost.smmu ? read32 (gHost.smmu, 0x28) : 0;
+-    for (unsigned shift = 0; shift <= 8; shift += 4) {
+-      const unsigned bits = ufsSmmuAddressBits ((idr2 >> shift) & 15);
+-      const uint64_t width = bits ? (bits >= 64 ? ~0ULL : 1ULL << bits) : 0;
+-      if (width < limit) limit = width;
+-    }
+-    gDmaLimit = limit;
+-  }
+   hostSlotsUpgrade (regionSlots, entries, wide);
+   if (!hostStartQueue (why)) return false;
+   gRootDiagnostic.stage = "NOP OUT";
+@@ -1413,7 +1402,7 @@ static bool hostBringUp (const char **why)
+       ready = true;
+       break;
+     }
+-    if (gHost.poisoned) break;
++    if (hostTransportPoisoned ()) break;
+     IOSleep (10);
+   }
+   if (!ready) {
+@@ -1423,7 +1412,7 @@ static bool hostBringUp (const char **why)
+   }
+   gRootDiagnostic.stage = "LUN capacity";
+   if (hostReadCapacity10 (&gLun0CapacityBlocks) != kIOReturnSuccess) gLun0CapacityBlocks = 0;
+-  if (gHost.poisoned) {
++  if (hostTransportPoisoned ()) {
+     gHost.ready = false;
+     *why = "LUN capacity";
+     return false;
+@@ -1448,7 +1437,7 @@ static uint32_t be32w (const uint8_t *at)
+ 
+ static bool validateRootWriteContract (const RootLayout *layout, const char **why)
+ {
+-  if (!layout || !gHost.ready || !gLun0CapacityBlocks) {
++  if (!layout || !gHost.ready || hostTransportPoisoned () || !gLun0CapacityBlocks) {
+     *why = "UFS capacity unavailable";
+     return false;
+   }
+@@ -1539,7 +1528,7 @@ extern "C" int native_ufs_store_open (uint64_t blocks, uint64_t *firstLba, const
+   const char *reason = "";
+   int ok = 0;
+   if (!storeMode ()) reason = "off";
+-  else if (!gStoreGeometry.valid || !gHost.ready) reason = "no root layout";
++  else if (!gStoreGeometry.valid || !gHost.ready || hostTransportPoisoned ()) reason = "no root layout";
+   else if (gStoreRegionBlocks) reason = "already open";
+   else {
+     uint64_t partition = gStoreGeometry.last - gStoreGeometry.first + 1;
+@@ -1598,16 +1587,9 @@ static int storeWrite (uint64_t rel, uint32_t blocks, const void *src, bool fua)
+   if (storeMode () != 2 || !gStoreRegionBlocks || !src || !blocks || rel >= gStoreRegionBlocks ||
+       blocks > gStoreRegionBlocks - rel) return 0;
+   const uint64_t t0 = mach_absolute_time ();
+-  int ok = 1;
+-  while (blocks) {
+-    uint32_t chunk = blocks > kXferMax / 4096 ? static_cast<uint32_t> (kXferMax / 4096) : blocks;
+-    uint64_t lba = 0;
+-    if (!checkedWriteLba (gStoreRegionFirst, rel, chunk, &lba) ||
+-        hostWrite4k (UfsWriteRole::Data, 0, lba, chunk, src, fua) != kIOReturnSuccess) { ok = 0; break; }
+-    src = static_cast<const uint8_t *> (src) + chunk * 4096ULL;
+-    rel += chunk;
+-    blocks -= chunk;
+-  }
++  uint64_t lba = 0;
++  const bool ok = checkedWriteLba (gStoreRegionFirst, rel, blocks, &lba) &&
++    hostWrite4k (UfsWriteRole::Data, 0, lba, blocks, src, fua) == kIOReturnSuccess;
+   storeAccount (&native_ufs_store_wr_ops, &native_ufs_store_wr_ticks, t0);
+   return ok;
+ }
+@@ -1679,7 +1661,7 @@ extern "C" uint32_t native_ufs_dpu_map (unsigned slot, const uint64_t *pages, un
+ 
+ extern "C" int native_ufs_part_find (const char *name, uint32_t *lun, uint64_t *first, uint64_t *blocks)
+ {
+-  if (!gHost.ready || !name || !lun || !first || !blocks) return 0;
++  if (!gHost.ready || hostTransportPoisoned () || !name || !lun || !first || !blocks) return 0;
+   uint8_t *buffer = static_cast<uint8_t *> (IOMalloc (4096));
+   if (!buffer) return 0;
+   int found = 0;
+@@ -1719,7 +1701,7 @@ extern "C" int native_ufs_part_find (const char *name, uint32_t *lun, uint64_t *
+ // Reads `blocks` 4096-byte blocks from lba of the LUN (absolute, as native_ufs_part_find returned them).
+ extern "C" int native_ufs_part_read (uint32_t lun, uint64_t lba, uint32_t blocks, void *dst)
+ {
+-  if (!gHost.ready || !dst || !blocks || lun > 5) return 0;
++  if (!gHost.ready || hostTransportPoisoned () || !dst || !blocks || lun > 5) return 0;
+   while (blocks) {
+     uint32_t chunk = blocks > kXferMax / 4096 ? static_cast<uint32_t> (kXferMax / 4096) : blocks;
+     if (hostRead4k (static_cast<uint8_t> (lun), lba, chunk, dst) != kIOReturnSuccess) return 0;
+@@ -1760,7 +1742,7 @@ extern "C" int native_ufs_log_open (uint64_t *firstLba, uint64_t *blocks, const
+   const char *reason = "";
+   int ok = 0;
+   if (!logMode ()) reason = "off";
+-  else if (!gStoreGeometry.valid || !gHost.ready) reason = "no root layout";
++  else if (!gStoreGeometry.valid || !gHost.ready || hostTransportPoisoned ()) reason = "no root layout";
+   else if (gLogRegionBlocks) reason = "already open";
+   else {
+     uint64_t partition = gStoreGeometry.last - gStoreGeometry.first + 1;
+@@ -1788,16 +1770,9 @@ extern "C" int native_ufs_log_open (uint64_t *firstLba, uint64_t *blocks, const
+ extern "C" int native_ufs_log_write (uint64_t rel, uint32_t blocks, const void *src)
+ {
+   if (!gLogRegionBlocks || !src || !blocks || rel >= gLogRegionBlocks || blocks > gLogRegionBlocks - rel) return 0;
+-  while (blocks) {
+-    uint32_t chunk = blocks > kDataMax / 4096 ? static_cast<uint32_t> (kDataMax / 4096) : blocks;
+-    uint64_t lba = 0;
+-    if (!checkedWriteLba (gLogRegionFirst, rel, chunk, &lba) ||
+-        hostWrite4k (gHostPanic ? UfsWriteRole::Panic : UfsWriteRole::Log, 0, lba, chunk, src) != kIOReturnSuccess) return 0;
+-    src = static_cast<const uint8_t *> (src) + chunk * 4096ULL;
+-    rel += chunk;
+-    blocks -= chunk;
+-  }
+-  return 1;
++  uint64_t lba = 0;
++  return checkedWriteLba (gLogRegionFirst, rel, blocks, &lba) &&
++    hostWrite4k (UfsWriteRole::Log, 0, lba, blocks, src) == kIOReturnSuccess;
+ }
+ 
+ // The export region below the log window: its size in blocks once the log is open, else 0; writes at a block offset inside it.
+@@ -1807,16 +1782,9 @@ extern "C" int native_ufs_export_write (uint64_t rel, uint32_t blocks, const voi
+ {
+   if (!gLogRegionBlocks || !src || !blocks || rel >= kExportBlocks || blocks > kExportBlocks - rel) return 0;
+   const uint64_t base = gLogRegionFirst - kExportBlocks;
+-  while (blocks) {
+-    uint32_t chunk = blocks > kDataMax / 4096 ? static_cast<uint32_t> (kDataMax / 4096) : blocks;
+-    uint64_t lba = 0;
+-    if (!checkedWriteLba (base, rel, chunk, &lba) ||
+-        hostWrite4k (UfsWriteRole::Export, 0, lba, chunk, src) != kIOReturnSuccess) return 0;
+-    src = static_cast<const uint8_t *> (src) + chunk * 4096ULL;
+-    rel += chunk;
+-    blocks -= chunk;
+-  }
+-  return 1;
++  uint64_t lba = 0;
++  return checkedWriteLba (base, rel, blocks, &lba) &&
++    hostWrite4k (UfsWriteRole::Export, 0, lba, blocks, src) == kIOReturnSuccess;
+ }
+ 
+ // ---- UniPro attributes (read only) --------------------------------------------------------------------------------
+@@ -1825,7 +1793,7 @@ extern "C" int native_ufs_export_write (uint64_t rel, uint32_t blocks, const voi
+ // UIC command at a time. Returns 1 with *value, 0 on refusal, timeout or a nonzero result code (*value then holds 0xffff0000 | code).
+ extern "C" int native_ufs_dme_get (uint32_t attribute, uint32_t selector, uint32_t *value)
+ {
+-  if (!gHost.ready || !value || gHostPanic) return 0;
++  if (!gHost.ready || !value || hostTransportPoisoned ()) return 0;
+   IOLockLock (gHost.lock);
+   int ok = 0;
+   *value = 0xffffffffU;
+@@ -1855,21 +1823,20 @@ extern "C" void native_ufs_slot_stats (uint32_t *slots, uint32_t *peak, uint64_t
+ extern "C" int native_ufs_log_sync (void)
+ {
+   return gLogRegionBlocks &&
+-    hostSyncCache (gHostPanic ? UfsWriteRole::Panic : UfsWriteRole::Log) == kIOReturnSuccess;
++    hostSyncCache (UfsWriteRole::Log) == kIOReturnSuccess;
+ }
+ 
+-// From a panic, before the log writes that keep its message: later host commands no longer wait on the host lock. 1 = the log is open.
++// Keep the ABI for old loggers. Panic contexts cannot acquire a UFS lease.
+ extern "C" int native_ufs_log_panic (void)
+ {
+-  gHostPanic = true;
+-  return gLogRegionBlocks != 0 && ufsWriteAuthoritySnapshot ().state == UfsWriteState::Ready;
++  return 0;
+ }
+ 
+ // Re-read both GPT copies and revoke every write role on any transport or content mismatch.
+ // 0 = unchanged and still authorized.
+ extern "C" unsigned native_ufs_store_gpt_check (void)
+ {
+-  if (!gStoreGeometry.valid || !gHost.ready) return 1;
++  if (!gStoreGeometry.valid || !gHost.ready || hostTransportPoisoned ()) return 1;
+   // Compare the live GPT against one consistent authority snapshot; the epoch is re-read before any
+   // revocation so a transition that happened during our reads owns the outcome.
+   const UfsWriteAuthority auth = ufsWriteAuthoritySnapshot ();
+@@ -1958,7 +1925,7 @@ extern "C" uint32_t native_ufs_store_authority_state (void)
+ // every role. 0 means the current authority base is still identical and Ready.
+ extern "C" unsigned native_ufs_store_authority_verify (void)
+ {
+-  if (!gStoreGeometry.valid || !gHost.ready) return 1;
++  if (!gStoreGeometry.valid || !gHost.ready || hostTransportPoisoned ()) return 1;
+   const unsigned gpt = native_ufs_store_gpt_check ();
+   if (gpt) return 10 + gpt;
+   uint64_t capacity = 0;
+diff --git a/README.md b/README.md
+index c45b5bc..133a338 100644
+--- a/README.md
++++ b/README.md
+@@ -27,6 +27,11 @@ into the kernel. On sheng it serves the iPadOS 27.0.1 (24A446) root and Data.
+ 
+ ## Command path
+ 
++Panic contexts leave UFS logging to the normal writer's last completed
++records. Media I/O uses driver-owned slot buffers so timeout cannot leave a
++DMA reference to a caller's memory. An uncertain completion quarantines the
++transport until reboot and refuses queued slot requests.
++
+ Up to 32 commands run at once, one per command slot. The request list sits on
+ a write-combined page of its own, so slot s uses list entry s; without that page
+ 16 slots use the even entries of the DMA region, so no two entries share a cache
+@@ -53,7 +58,7 @@ on two lanes in FAST mode, as the boot firmware leaves it.
+ per-slot entries, descriptors, tags and data, the pool, busy retries, the panic
+ slot and the one-slot fallback. `tests/check_arm64_root_commands.py` runs it on
+ QEMU's UFS controller at EL1 with real cache maintenance, including eight
+-outstanding commands and a 512 KiB zero-copy read.
++outstanding commands and a 512 KiB buffered read.
+ 
+ ## Wi-Fi DMA window
+ 
+diff --git a/RootCommands.h b/RootCommands.h
+index 05a2cb3..118f39f 100644
+--- a/RootCommands.h
++++ b/RootCommands.h
+@@ -18,6 +18,20 @@ static int8_t gEntrySlot[32] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+ // Doorbell bits of the commands rung and not yet seen complete (read by the completion interrupt), and per slot the completions the
+ // interrupt has seen (what a waiting command sleeps on).
+ static volatile uint32_t gOutstanding = 0;
++static bool hostTransportPoisoned () { return __atomic_load_n (&gHost.poisoned, __ATOMIC_ACQUIRE); }
++// Serialize poison publication and the final MMIO submit. Never hold this
++// lock across descriptor preparation, authority acquisition or command waits.
++static IOLock *gSubmitLock = nullptr;
++static void hostPoisonTransport ()
++{
++  IOLockLock (gSubmitLock);
++  __atomic_store_n (&gHost.poisoned, true, __ATOMIC_RELEASE);
++  IOLockUnlock (gSubmitLock);
++}
++static bool hostSlotOutstanding (const UfsSlot &slot)
++{
++  return (__atomic_load_n (&gOutstanding, __ATOMIC_ACQUIRE) & slot.bit) != 0;
++}
+ static volatile uint32_t gSlotGen[kSlots] = {};
+ 
+ static void hostSlotGeometry (unsigned index, uint8_t *utrd, uint32_t entry, uint8_t *ucd, uint64_t ucdPhys, uint8_t *data,
+@@ -79,30 +93,21 @@ static uint32_t loadBe32 (const uint8_t *at)
+ // each touches only its own entry, descriptor and data area, and rings only its own doorbell bit (writing 0 bits has no effect).
+ // hostSubmit's halves: hostIssue rings the doorbell (*deadline: when the command times out); hostAwait polls for its completion.
+ // One caller may have commands of several slots outstanding between them.
+-// Zero copy (Linux ufshcd and Apple's storage drivers DMA straight into the request's pages): a physical region description table
+-// built from the caller's buffer (hostBuildPrds) instead of the slot's data area. Up to kMaxPrds entries of up to 256 KiB each, at most
+-// kXferMax per command; the caller's buffer gets the cache maintenance the data area otherwise gets.
+-struct UfsPrd { uint64_t addr; uint32_t bytes; };
+-static constexpr unsigned kMaxPrds = (kUcdStride - kPrdtOffset) / 16;
+-static constexpr uint32_t kXferMax = 1U << 20, kPrdMax = 256U << 10;
+-static bool gZeroCopy = true;
++static constexpr uint32_t kXferMax = 1U << 20;
+ 
+ static IOReturn hostIssue (const UfsSlot &slot, uint32_t direction, uint32_t dataBytes, uint32_t timeoutUs, uint64_t *deadline,
+-                           uint32_t *ocs, const UfsPrd *prd = nullptr, unsigned prds = 0, const void *buffer = nullptr)
++                           uint32_t *ocs)
+ {
+   *ocs = 15;
+-  if (prds > kMaxPrds || (prds && !buffer)) return kIOReturnBadArgument;
+-  if (!timeoutUs || dataBytes > (prds ? kXferMax : kDataMax) || (dataBytes & 3) ||
++  if (!timeoutUs || dataBytes > kDataMax || (dataBytes & 3) ||
+       (dataBytes ? (direction != 1 && direction != 2) : direction != 0)) return kIOReturnBadArgument;
+-  if (gHost.poisoned) return kIOReturnNotReady;
++  if (hostTransportPoisoned () || hostSlotOutstanding (slot)) return kIOReturnNotReady;
+   if (read32 (gHost.hc, 0x58) & slot.bit) {
+-    gHost.poisoned = true;
+-    gHost.ready = false;
++    hostPoisonTransport ();
+     return recordTransport (kIOReturnBusy, *ocs);
+   }
+   if (read32 (gHost.hc, 0x20) & kUfsFatalStatus) {
+-    gHost.poisoned = true;
+-    gHost.ready = false;
++    hostPoisonTransport ();
+     return recordTransport (kIOReturnIOError, *ocs);
+   }
+   gRootDiagnostic.command++;
+@@ -126,34 +131,34 @@ static IOReturn hostIssue (const UfsSlot &slot, uint32_t direction, uint32_t dat
+   words[4] = static_cast<uint32_t> (ucdPhys);
+   words[5] = static_cast<uint32_t> (ucdPhys >> 32);
+   words[6] = (512U >> 2) | ((kRspOffset >> 2) << 16);
+-  const unsigned entries = dataBytes ? (prds ? prds : 1U) : 0U;
++  const unsigned entries = dataBytes ? 1U : 0U;
+   words[7] = entries | ((kPrdtOffset >> 2) << 16);
+   if (dataBytes) {
+     uint32_t *table = reinterpret_cast<uint32_t *> (slot.ucd + kPrdtOffset);
+-    uint64_t sum = 0;
+-    for (unsigned i = 0; i < entries; ++i) {
+-      const uint64_t address = prds ? prd[i].addr : slot.dataPhys;
+-      const uint32_t bytes = prds ? prd[i].bytes : dataBytes;
+-      if (!bytes || bytes > kPrdMax || (bytes & 3) || (address & 3)) return kIOReturnBadArgument;
+-      table[4 * i] = static_cast<uint32_t> (address);
+-      table[4 * i + 1] = static_cast<uint32_t> (address >> 32);
+-      table[4 * i + 2] = 0;
+-      table[4 * i + 3] = bytes - 1;
+-      sum += bytes;
+-    }
+-    if (sum != dataBytes) return kIOReturnBadArgument;
++    if (slot.dataPhys & 3) return kIOReturnBadArgument;
++    table[0] = static_cast<uint32_t> (slot.dataPhys);
++    table[1] = static_cast<uint32_t> (slot.dataPhys >> 32);
++    table[2] = 0;
++    table[3] = dataBytes - 1;
+   }
+   if (!gListUncached) cacheCivac (slot.utrd, 32);
+   cacheCivac (slot.ucd, kPrdtOffset + 16 * (entries ? entries : 1U));
+-  if (dataBytes) cacheCivac (prds ? buffer : slot.data, dataBytes);
++  if (dataBytes) cacheCivac (slot.data, dataBytes);
++  ufsAuthorityProbe (UfsProbeBeforeSubmit);
++  IOLockLock (gSubmitLock);
++  if (hostTransportPoisoned ()) {
++    IOLockUnlock (gSubmitLock);
++    return kIOReturnNotReady;
++  }
+   if (!hostInterruptMode ()) hostWrite (0x20, 1);  // Acknowledge completion only; preserve error evidence. With interrupts the handler does.
+   clock_interval_to_deadline (timeoutUs, kMicrosecondScale, deadline);
+   __atomic_or_fetch (&gOutstanding, slot.bit, __ATOMIC_RELEASE);
+   hostWrite (0x58, slot.bit);
++  IOLockUnlock (gSubmitLock);
+   return kIOReturnSuccess;
+ }
+ 
+-static IOReturn hostAwait (const UfsSlot &slot, uint32_t dataBytes, uint64_t deadline, uint32_t *ocs, const void *buffer = nullptr)
++static IOReturn hostAwait (const UfsSlot &slot, uint32_t dataBytes, uint64_t deadline, uint32_t *ocs)
+ {
+   HardwareTransferPort port = { slot, deadline, 0 };
+   UfsTransferPoll state;
+@@ -166,12 +171,11 @@ static IOReturn hostAwait (const UfsSlot &slot, uint32_t dataBytes, uint64_t dea
+   if (end != UfsTransferEnd::Completed) {
+     // No cancel/reset/retry: the controller may still own the buffer, even
+     // with DB=0. Keep it allocated and prohibit all subsequent CPU writes.
+-    gHost.poisoned = true;
+-    gHost.ready = false;
++    hostPoisonTransport ();
+     return recordTransport (end == UfsTransferEnd::Timeout ? kIOReturnTimeout : kIOReturnIOError, *ocs);
+   }
+   cacheInvalidate (slot.ucd, kPrdtOffset);
+-  if (dataBytes) cacheInvalidate (buffer ? buffer : slot.data, dataBytes);
++  if (dataBytes) cacheInvalidate (slot.data, dataBytes);
+   gRootDiagnostic.response = loadBe32 (slot.ucd + kRspOffset);
+   return recordTransport (*ocs == 0 ? kIOReturnSuccess : kIOReturnIOError, *ocs);
+ }
+@@ -185,17 +189,15 @@ static IOReturn hostSubmit (const UfsSlot &slot, uint32_t direction, uint32_t da
+ 
+ static bool hostClearUcd (const UfsSlot &slot)
+ {
+-  if (gHost.poisoned) return false;
++  if (hostTransportPoisoned () || hostSlotOutstanding (slot)) return false;
+   // Check before touching the command/response area, not just before ringing.
+   if (read32 (gHost.hc, 0x58) & slot.bit) {
+-    gHost.poisoned = true;
+-    gHost.ready = false;
++    hostPoisonTransport ();
+     recordTransport (kIOReturnBusy, 15);
+     return false;
+   }
+   if (read32 (gHost.hc, 0x20) & kUfsFatalStatus) {
+-    gHost.poisoned = true;
+-    gHost.ready = false;
++    hostPoisonTransport ();
+     recordTransport (kIOReturnIOError, 15);
+     return false;
+   }
+@@ -209,8 +211,7 @@ static bool hostClearUcd (const UfsSlot &slot)
+ static IOReturn hostProtocolError (uint32_t reason)
+ {
+   gRootDiagnostic.protocol = reason;
+-  gHost.ready = false;
+-  gHost.poisoned = true;
++  hostPoisonTransport ();
+   return recordTransport (kIOReturnIOError, gRootDiagnostic.ocs);
+ }
+ 
+@@ -250,12 +251,11 @@ static IOReturn hostNop (void)
+ // The task tag is the slot's request list entry, unique among the commands in flight. hostScsiIssue builds and rings the command,
+ // hostScsiAwait waits for it and checks its response; hostScsiDir runs both.
+ // hostScsiPrepare fills the descriptor and rings nothing: a caller that must submit under the authority lock (the WRITE path) or
+-// that wants the descriptor built before taking a lock (the synchronize path) uses it and then calls hostIssue itself.
++// that needs the doorbell under the authority lock calls hostIssue after preparation.
+ static IOReturn hostScsiPrepare (const UfsSlot &slot, uint8_t lun, const uint8_t *cdb, unsigned cdbLength, unsigned direction,
+-                                 uint32_t dataBytes, const UfsPrd *prd, unsigned prds, const void *buffer)
++                                 uint32_t dataBytes)
+ {
+-  (void) prd; (void) buffer;   // the descriptor is filled from the CDB; the PRDT is built by hostIssue
+-  if (direction == 1 || !cdb || !cdbLength || cdbLength > 16 || dataBytes > (prds ? kXferMax : kDataMax) || direction > 2 ||
++  if (direction == 1 || !cdb || !cdbLength || cdbLength > 16 || dataBytes > kDataMax || direction > 2 ||
+       (dataBytes & 3) || (dataBytes ? !direction : direction)) return kIOReturnBadArgument;
+   if (!hostClearUcd (slot)) return kIOReturnNotReady;
+   uint8_t *ucd = slot.ucd;
+@@ -272,22 +272,20 @@ static IOReturn hostScsiPrepare (const UfsSlot &slot, uint8_t lun, const uint8_t
+ }
+ 
+ static IOReturn hostScsiIssue (const UfsSlot &slot, uint8_t lun, const uint8_t *cdb, unsigned cdbLength, unsigned direction,
+-                               uint32_t dataBytes, uint32_t timeoutUs, uint64_t *deadline, uint32_t *scsiStatus,
+-                               const UfsPrd *prd = nullptr, unsigned prds = 0, const void *buffer = nullptr)
++                               uint32_t dataBytes, uint32_t timeoutUs, uint64_t *deadline, uint32_t *scsiStatus)
+ {
+   *scsiStatus = 0xffff;
+-  IOReturn prepared = hostScsiPrepare (slot, lun, cdb, cdbLength, direction, dataBytes, prd, prds, buffer);
++  IOReturn prepared = hostScsiPrepare (slot, lun, cdb, cdbLength, direction, dataBytes);
+   if (prepared != kIOReturnSuccess) return prepared;
+   uint32_t ocs = 0xf;
+-  return hostIssue (slot, direction ? direction : 0U, dataBytes, timeoutUs, deadline, &ocs, prd, prds, buffer);
++  return hostIssue (slot, direction ? direction : 0U, dataBytes, timeoutUs, deadline, &ocs);
+ }
+ 
+-static IOReturn hostScsiAwait (const UfsSlot &slot, uint8_t lun, uint32_t dataBytes, uint64_t deadline, uint32_t *scsiStatus,
+-                               const void *buffer = nullptr)
++static IOReturn hostScsiAwait (const UfsSlot &slot, uint8_t lun, uint32_t dataBytes, uint64_t deadline, uint32_t *scsiStatus)
+ {
+   *scsiStatus = 0xffff;
+   uint32_t ocs = 0xf;
+-  IOReturn status = hostAwait (slot, dataBytes, deadline, &ocs, buffer);
++  IOReturn status = hostAwait (slot, dataBytes, deadline, &ocs);
+   if (status != kIOReturnSuccess) return status;
+   const uint8_t tag = static_cast<uint8_t> (slot.entry);
+   status = hostResponseHeader (slot, 0x21, lun, tag);
+@@ -295,7 +293,9 @@ static IOReturn hostScsiAwait (const UfsSlot &slot, uint8_t lun, uint32_t dataBy
+   const uint8_t *rsp = slot.ucd + kRspOffset;
+   *scsiStatus = (uint32_t (rsp[6]) << 8) | rsp[7];
+   gRootDiagnostic.scsi = *scsiStatus;
+-  gRootDiagnostic.residual = loadBe32 (rsp + 12);
++  const uint32_t residual = loadBe32 (rsp + 12);
++  gRootDiagnostic.residual = residual;
++  ufsAuthorityProbe (UfsProbeAfterResponseResidual);
+   unsigned length = (unsigned (rsp[10]) << 8) | rsp[11];
+   if (length) {
+     unsigned senseLength = (unsigned (rsp[32]) << 8) | rsp[33];
+@@ -306,31 +306,28 @@ static IOReturn hostScsiAwait (const UfsSlot &slot, uint8_t lun, uint32_t dataBy
+     else if (senseLength >= 4 && ((sense[0] & 0x7f) == 0x72 || (sense[0] & 0x7f) == 0x73))
+       gRootDiagnostic.sense = (uint32_t (sense[1] & 15) << 16) | (uint32_t (sense[2]) << 8) | sense[3];
+   }
+-  if (!*scsiStatus && ((rsp[1] & 0x60) || gRootDiagnostic.residual)) return hostProtocolError (6);
++  if (!*scsiStatus && ((rsp[1] & 0x60) || residual)) return hostProtocolError (6);
+   IOReturn result = *scsiStatus == 0 ? kIOReturnSuccess : kIOReturnNotReady;
+   gRootDiagnostic.result = static_cast<uint32_t> (result);
+   return result;
+ }
+ 
+ static IOReturn hostScsiDir (const UfsSlot &slot, uint8_t lun, const uint8_t *cdb, unsigned cdbLength, unsigned direction,
+-                             uint32_t dataBytes, uint32_t timeoutUs, uint32_t *scsiStatus,
+-                             const UfsPrd *prd = nullptr, unsigned prds = 0, const void *buffer = nullptr)
++                             uint32_t dataBytes, uint32_t timeoutUs, uint32_t *scsiStatus)
+ {
+   uint64_t deadline = 0;
+-  IOReturn status = hostScsiIssue (slot, lun, cdb, cdbLength, direction, dataBytes, timeoutUs, &deadline, scsiStatus, prd, prds, buffer);
+-  return status != kIOReturnSuccess ? status : hostScsiAwait (slot, lun, dataBytes, deadline, scsiStatus, prds ? buffer : nullptr);
++  IOReturn status = hostScsiIssue (slot, lun, cdb, cdbLength, direction, dataBytes, timeoutUs, &deadline, scsiStatus);
++  return status != kIOReturnSuccess ? status : hostScsiAwait (slot, lun, dataBytes, deadline, scsiStatus);
+ }
+ 
+ // The descriptor half of the sole media-write entry. No production call site other than hostWrite4k
+ // reaches this function; hostScsiIssue/hostScsiDir reject direction 1. It rings nothing: hostWrite4k
+ // calls hostIssue itself while holding the authority lock, so the permission check and the doorbell
+ // are one linearized step.
+-static IOReturn hostScsiWritePrepare (const UfsSlot &slot, const uint8_t *cdb, unsigned cdbLength, uint32_t dataBytes,
+-                                      const UfsPrd *prd, unsigned prds, const void *buffer)
++static IOReturn hostScsiWritePrepare (const UfsSlot &slot, const uint8_t *cdb, unsigned cdbLength, uint32_t dataBytes)
+ {
+-  (void) prd;   // the PRDT is built by hostIssue from the caller's buffer
+-  if (!cdb || cdbLength != 10 || !dataBytes || dataBytes > (prds ? kXferMax : kDataMax) ||
+-      (dataBytes & 3) || !buffer) return kIOReturnBadArgument;
++  if (!cdb || cdbLength != 10 || !dataBytes || dataBytes > kDataMax ||
++      (dataBytes & 3)) return kIOReturnBadArgument;
+   if (!hostClearUcd (slot)) return kIOReturnNotReady;
+   uint8_t *ucd = slot.ucd;
+   const uint8_t tag = static_cast<uint8_t> (slot.entry);
+@@ -353,11 +350,10 @@ static IOReturn hostScsi (uint8_t lun, const uint8_t *cdb, unsigned cdbLength, b
+ 
+ // SCSI READ CAPACITY(10), LUN 0. The GPT and every write use 4096-byte units; return failure for a
+ // different reported logical block size or a malformed response.
+-static IOReturn hostReadCapacity10 (uint64_t *capacityBlocks)
++static IOReturn hostReadCapacityOnSlot (const UfsSlot &slot, uint64_t *capacityBlocks)
+ {
+   if (!capacityBlocks) return kIOReturnBadArgument;
+   *capacityBlocks = 0;
+-  const UfsSlot slot = ufsSlot (0);
+   uint8_t cdb[10] = { 0x25 };
+   uint32_t scsi = 0;
+   IOReturn status = hostScsiDir (slot, 0, cdb, 10, 2, 8, 1000000, &scsi);
+@@ -401,8 +397,7 @@ static IOReturn hostQueryRead (uint8_t opcode, uint8_t idn, uint32_t *value)
+ }
+ 
+ // ---- Command slots ------------------------------------------------------------------------------------------------
+-// gSlotCount slots exist (hostSlotsInit: what the DMA region and the request list hold). With more than one, the last is kept for
+-// the panic path, which must not wait, and the others form the pool that block I/O takes a slot from for one command.
++// All configured slots are exclusively leased to normal callers.
+ static unsigned gSlotCount = 1;
+ static uint32_t gSlotFree = 1;
+ static IOLock *gSlotLock = nullptr;
+@@ -415,35 +410,22 @@ static UfsSlotWaiter *gSlotWaitHead = nullptr, *gSlotWaitTail = nullptr;
+ // Hybrid completion waits (as Linux's hybrid block polling): a wait polls for its first gSpinUs microseconds, then sleeps on the
+ // completion interrupt. Short commands complete while polling; long ones leave the CPU after the budget.
+ static uint32_t gSpinUs = 200;
+-// Set once by the panic path (native_ufs_log_panic). The CPUs that still run may hold a slot forever, so with one slot it is tried for
+-// 200 ms and then used anyway. Commands only poll (TransferPoll.h), so they also run with interrupts masked.
+-static bool gHostPanic = false;
+-
+ static void hostSlotsInit (unsigned count, IOLock *lock)
+ {
+   gSlotCount = count < 1 ? 1 : count > kSlots ? kSlots : count;
+-  gSlotFree = gSlotCount > 1 ? (1U << (gSlotCount - 1)) - 1 : 1;
++  gSlotFree = UINT32_MAX >> (32 - gSlotCount);
+   gSlotLock = lock;
+ }
+ 
+-// Returns the slot to use; *pooled says whether it must be given back.
+-static UfsSlot hostSlotTake (bool *pooled)
++// Panic contexts do not enter the pool.
++static bool hostSlotTake (UfsSlot *slot)
+ {
+-  *pooled = false;
+-  if (gHostPanic) {
+-    if (gSlotCount > 1) return ufsSlot (gSlotCount - 1);
+-    for (unsigned tries = 0; tries < 200000; tries++) {
+-      if (IOLockTryLock (gSlotLock)) {
+-        const bool free = gSlotFree & 1;
+-        if (free) gSlotFree = 0;
+-        IOLockUnlock (gSlotLock);
+-        if (free) { *pooled = true; break; }
+-      }
+-      IODelay (1);
+-    }
+-    return ufsSlot (0);
+-  }
++  if (hostTransportPoisoned ()) return false;
+   IOLockLock (gSlotLock);
++  if (hostTransportPoisoned ()) {
++    IOLockUnlock (gSlotLock);
++    return false;
++  }
+   unsigned index;
+   if (gSlotFree) {
+     index = static_cast<unsigned> (__builtin_ctz (gSlotFree));
+@@ -453,22 +435,33 @@ static UfsSlot hostSlotTake (bool *pooled)
+     UfsSlotWaiter waiter = { nullptr, -1 };
+     if (gSlotWaitTail) gSlotWaitTail->next = &waiter; else gSlotWaitHead = &waiter;
+     gSlotWaitTail = &waiter;
+-    while (waiter.slot < 0) IOLockSleep (gSlotLock, &waiter, THREAD_UNINT);
++    while (waiter.slot == -1) IOLockSleep (gSlotLock, &waiter, THREAD_UNINT);
++    if (waiter.slot < 0 || hostTransportPoisoned ()) {
++      IOLockUnlock (gSlotLock);
++      return false;
++    }
+     index = static_cast<unsigned> (waiter.slot);
+   }
+   if (++gSlotsBusy > gSlotsPeak) gSlotsPeak = gSlotsBusy;
++  *slot = ufsSlot (index);
+   IOLockUnlock (gSlotLock);
+-  *pooled = true;
+-  return ufsSlot (index);
++  return true;
+ }
+ 
+-static void hostSlotGive (const UfsSlot &slot, bool pooled)
++static void hostSlotGive (const UfsSlot &slot)
+ {
+-  if (!pooled) return;
+-  if (gHostPanic) { gSlotFree |= 1U << slot.index; return; }   // no sleeper wakes in a panic
+   IOLockLock (gSlotLock);
+   --gSlotsBusy;
+-  if (UfsSlotWaiter *waiter = gSlotWaitHead) {
++  if (hostTransportPoisoned () || hostSlotOutstanding (slot)) {
++    gSlotFree = 0;
++    // A late interrupt cannot restart the transport or return the allocation.
++    while (UfsSlotWaiter *waiter = gSlotWaitHead) {
++      gSlotWaitHead = waiter->next;
++      waiter->slot = -2;
++      IOLockWakeup (gSlotLock, waiter, true);
++    }
++    gSlotWaitTail = nullptr;
++  } else if (UfsSlotWaiter *waiter = gSlotWaitHead) {
+     gSlotWaitHead = waiter->next;
+     if (!gSlotWaitHead) gSlotWaitTail = nullptr;
+     waiter->slot = static_cast<int> (slot.index);
+@@ -479,6 +472,17 @@ static void hostSlotGive (const UfsSlot &slot, bool pooled)
+   IOLockUnlock (gSlotLock);
+ }
+ 
++static IOReturn hostReadCapacity10 (uint64_t *capacityBlocks)
++{
++  if (!capacityBlocks) return kIOReturnBadArgument;
++  *capacityBlocks = 0;
++  UfsSlot slot;
++  if (!hostSlotTake (&slot)) return kIOReturnNotReady;
++  const IOReturn status = hostReadCapacityOnSlot (slot, capacityBlocks);
++  hostSlotGive (slot);
++  return status;
++}
++
+ // A command the device refused for now: BUSY (0x08) or TASK SET FULL (0x28), as when more commands are queued than it accepts. It is
+ // sent again after a short pause, up to kBusyRetries times; any other status is final.
+ static constexpr unsigned kBusyRetries = 50;
+@@ -489,61 +493,31 @@ static bool hostRetryable (IOReturn status, uint32_t scsi, unsigned attempt)
+   return true;
+ }
+ 
+-// The PRDT of a buffer for zero copy: its pages' DMA addresses (hostDmaAddress, supplied by the port; 0 = not reachable), adjacent
+-// pages merged. 0 when the buffer does not qualify (not page aligned, a partial page, longer than kXferMax, an unreachable page, more
+-// than kMaxPrds entries): the caller then uses the slot's data area.
+-static unsigned hostBuildPrds (const void *buffer, uint64_t bytes, UfsPrd *prd)
+-{
+-  if (!gZeroCopy || (reinterpret_cast<uintptr_t> (buffer) & 4095) || !bytes || (bytes & 4095) || bytes > kXferMax) return 0;
+-  unsigned count = 0;
+-  for (uint64_t at = 0; at < bytes; at += 4096) {
+-    const uint64_t address = hostDmaAddress (static_cast<const uint8_t *> (buffer) + at);
+-    if (!address || (address & 4095)) return 0;
+-    if (count && prd[count - 1].addr + prd[count - 1].bytes == address && prd[count - 1].bytes + 4096 <= kPrdMax) {
+-      prd[count - 1].bytes += 4096;
+-    } else {
+-      if (count == kMaxPrds) return 0;
+-      prd[count].addr = address; prd[count].bytes = 4096; ++count;
+-    }
+-  }
+-  return count;
+-}
+-
+-// Read `blocks` 4096-byte blocks of LUN `lun` starting at `lba` into dst: one command of up to kXferMax straight into dst when it
+-// qualifies for zero copy, else commands of up to kDataMax through the slot's data area.
++// The caller may release its destination on timeout. DMA only reaches slot memory.
+ static IOReturn hostRead4k (uint8_t lun, uint64_t lba, uint32_t blocks, void *dst)
+ {
+-  if (!gHost.ready || !dst || !blocks || lba > 0xffffffffULL - (blocks - 1)) {
+-    return kIOReturnBadArgument;
+-  }
+-  UfsPrd prd[kMaxPrds];
+-  const unsigned prds = blocks <= kXferMax / 4096 ? hostBuildPrds (dst, uint64_t (blocks) * 4096, prd) : 0;
+-  if (!prds && blocks > kDataMax / 4096) {
+-    // Beyond one command: pieces of kXferMax (each tried for zero copy again), or of kDataMax through the data area.
+-    const uint32_t step = blocks > kXferMax / 4096 ? kXferMax / 4096 : kDataMax / 4096;
+-    for (uint32_t done = 0; done < blocks; done += step) {
+-      const uint32_t chunk = blocks - done > step ? step : blocks - done;
+-      IOReturn status = hostRead4k (lun, lba + done, chunk, static_cast<uint8_t *> (dst) + uint64_t (done) * 4096);
+-      if (status != kIOReturnSuccess) return status;
++  if (!gHost.ready || !dst || !blocks || lba > 0xffffffffULL - (blocks - 1)) return kIOReturnBadArgument;
++  for (uint32_t remaining = blocks; remaining;) {
++    const uint32_t chunk = remaining > kDataMax / 4096 ? kDataMax / 4096 : remaining;
++    UfsSlot slot;
++    if (!hostSlotTake (&slot)) return kIOReturnNotReady;
++    gRootDiagnostic.lba = lba;
++    uint8_t cdb[10] = { 0x28, 0, uint8_t (lba >> 24), uint8_t (lba >> 16), uint8_t (lba >> 8), uint8_t (lba),
++                        0, uint8_t (chunk >> 8), uint8_t (chunk), 0 };
++    uint32_t scsi = 0;
++    IOReturn status;
++    for (unsigned attempt = 0;; ++attempt) {
++      status = hostScsiDir (slot, lun, cdb, 10, 2, chunk * 4096U, 1000000, &scsi);
++      if (!hostRetryable (status, scsi, attempt)) break;
+     }
+-    return kIOReturnSuccess;
+-  }
+-  bool pooled;
+-  const UfsSlot slot = hostSlotTake (&pooled);
+-  gRootDiagnostic.lba = lba;
+-  uint8_t cdb[10] = { 0x28, 0, uint8_t (lba >> 24), uint8_t (lba >> 16), uint8_t (lba >> 8), uint8_t (lba),
+-                      0, uint8_t (blocks >> 8), uint8_t (blocks), 0 };
+-  uint32_t scsi = 0;
+-  IOReturn status;
+-  for (unsigned attempt = 0;; ++attempt) {
+-    status = hostScsiDir (slot, lun, cdb, 10, 2, blocks * 4096U, 1000000, &scsi, prds ? prd : nullptr, prds, prds ? dst : nullptr);
+-    if (!hostRetryable (status, scsi, attempt)) break;
+-  }
+-  if (status == kIOReturnSuccess && !prds) {
+-    memcpy (dst, slot.data, blocks * 4096U);
++    if (status == kIOReturnSuccess) memcpy (dst, slot.data, chunk * 4096U);
++    hostSlotGive (slot);
++    if (status != kIOReturnSuccess) return status;
++    dst = static_cast<uint8_t *> (dst) + chunk * 4096U;
++    lba += chunk;
++    remaining -= chunk;
+   }
+-  hostSlotGive (slot, pooled);
+-  return status;
++  return kIOReturnSuccess;
+ }
+ 
+ // ---- Persistent store and log windows ------------------------------------------------------------------------------
+@@ -590,31 +564,31 @@ static bool hostStoreOpen (uint64_t first, uint64_t blocks)
+ // Prepare and submit one WRITE(10). The permission check and the doorbell run under the authority
+ // lock, so a withdrawal that has linearized can never be overtaken by this doorbell. While the lock
+ // is held across hostIssue a normal writer waits for a concurrent withdrawal (and vice versa); the
+-// panic path cannot wait, so it fails closed when the lock is busy. A submitted command is
++// lock also covers preparation of the descriptor and driver-owned buffer. A submitted command is
+ // registered in flight and stays so until its completion is observed. On entry *issued is false; it
+ // becomes true only once the doorbell has rung.
+ static IOReturn hostWriteSubmit (const UfsSlot &slot, UfsWriteRole role, uint64_t lba, uint32_t blocks, const void *src,
+-                                 const UfsPrd *prd, unsigned prds, bool fua, uint32_t *scsi, bool *issued)
++                                 uint32_t epoch, bool fua, uint32_t *scsi, bool *issued)
+ {
+   *issued = false;
+   uint8_t cdb[10] = { 0x2a, uint8_t (fua ? 0x08 : 0), uint8_t (lba >> 24), uint8_t (lba >> 16), uint8_t (lba >> 8), uint8_t (lba),
+                       0, uint8_t (blocks >> 8), uint8_t (blocks), 0 };
+-  IOReturn prepared = hostScsiWritePrepare (slot, cdb, 10, blocks * 4096U, prd, prds, src);
+-  if (prepared != kIOReturnSuccess) return prepared;
+-  if (gHostPanic) {
+-    if (!ufsWriteAuthorityTryAcquire ()) return kIOReturnNotPrivileged;   // never wait on a lock from a panicking CPU
+-  } else {
+-    ufsWriteAuthorityAcquire ();
+-  }
+-  if (!ufsWriteAuthorityAllowsLocked (role, 0, lba, blocks)) {
++  ufsWriteAuthorityAcquire ();
++  if (gUfsWriteAuthority.epoch != epoch || !ufsWriteAuthorityAllowsLocked (role, 0, lba, blocks)) {
+     ufsWriteAuthorityRelease ();
+     return kIOReturnNotPrivileged;
+   }
+   ufsAuthorityProbe (UfsProbeAfterCheck);
++  const IOReturn prepared = hostScsiWritePrepare (slot, cdb, 10, blocks * 4096U);
++  if (prepared != kIOReturnSuccess) {
++    ufsWriteAuthorityRelease ();
++    return prepared;
++  }
++  memcpy (slot.data, src, blocks * 4096U);
+   ufsWriteAuthorityEnterInflightLocked ();
+   uint64_t deadline = 0;
+   uint32_t ocs = 0x0f;
+-  IOReturn status = hostIssue (slot, 1, blocks * 4096U, 2000000, &deadline, &ocs, prd, prds, src);
++  IOReturn status = hostIssue (slot, 1, blocks * 4096U, 2000000, &deadline, &ocs);
+   if (status != kIOReturnSuccess) {
+     ufsWriteAuthorityExitInflightLocked ();   // the doorbell never rang
+     ufsWriteAuthorityRelease ();
+@@ -624,8 +598,8 @@ static IOReturn hostWriteSubmit (const UfsSlot &slot, UfsWriteRole role, uint64_
+   ufsAuthorityProbe (UfsProbeAfterDoorbell);
+   ufsWriteAuthorityRelease ();
+   ufsAuthorityProbe (UfsProbeAfterRelease);
+-  status = hostScsiAwait (slot, 0, blocks * 4096U, deadline, scsi, prds ? src : nullptr);
+-  ufsWriteAuthorityExitInflight ();
++  status = hostScsiAwait (slot, 0, blocks * 4096U, deadline, scsi);
++  if (!hostSlotOutstanding (slot)) ufsWriteAuthorityExitInflight ();
+   ufsAuthorityProbe (UfsProbeSubmitted);
+   return status;
+ }
+@@ -634,41 +608,38 @@ static IOReturn hostWriteSubmit (const UfsSlot &slot, UfsWriteRole role, uint64_
+ // before every doorbell. A storage command that was actually submitted and failed revokes every role.
+ static IOReturn hostWrite4k (UfsWriteRole role, uint8_t lun, uint64_t lba, uint32_t blocks, const void *src, bool fua = false)
+ {
+-  if (!gHost.ready || !src || !blocks || blocks > kXferMax / 4096 || lun != 0) {
++  if (!gHost.ready || !src || !blocks || lun != 0) {
+     return kIOReturnBadArgument;
+   }
+-  if ((gHostPanic && role != UfsWriteRole::Panic) ||
+-      (!gHostPanic && role != UfsWriteRole::Data && role != UfsWriteRole::Export && role != UfsWriteRole::Log)) {
+-    ufsWriteAuthorityNoteDenied (8);
+-    return kIOReturnNotPrivileged;
+-  }
+-  UfsPrd prd[kMaxPrds];
+-  const unsigned prds = hostBuildPrds (src, uint64_t (blocks) * 4096, prd);
+-  if (!prds && blocks > kDataMax / 4096) {
+-    for (uint32_t done = 0; done < blocks; done += kDataMax / 4096) {
+-      const uint32_t chunk = blocks - done > kDataMax / 4096 ? kDataMax / 4096 : blocks - done;
+-      IOReturn status = hostWrite4k (role, lun, lba + done, chunk,
+-                                     static_cast<const uint8_t *> (src) + uint64_t (done) * 4096, fua);
+-      if (status != kIOReturnSuccess) return status;
++  if (role == UfsWriteRole::Panic) return kIOReturnNotPrivileged;
++  if (hostTransportPoisoned ()) return kIOReturnNotReady;
++  ufsWriteAuthorityAcquire ();
++  const uint32_t epoch = gUfsWriteAuthority.epoch;
++  const bool allowed = ufsWriteAuthorityAllowsLocked (role, lun, lba, blocks);
++  ufsWriteAuthorityRelease ();
++  if (!allowed) return kIOReturnNotPrivileged;
++  for (uint32_t remaining = blocks; remaining;) {
++    const uint32_t chunk = remaining > kDataMax / 4096 ? kDataMax / 4096 : remaining;
++    UfsSlot slot;
++    if (!hostSlotTake (&slot)) return kIOReturnNotReady;
++    gRootDiagnostic.lba = lba;
++    uint32_t scsi = 0;
++    IOReturn status;
++    bool anyIssued = false;
++    for (unsigned attempt = 0;; ++attempt) {
++      bool issued = false;
++      status = hostWriteSubmit (slot, role, lba, chunk, src, epoch, fua, &scsi, &issued);
++      anyIssued |= issued;
++      if (!hostRetryable (status, scsi, attempt)) break;
+     }
+-    return kIOReturnSuccess;
+-  }
+-  bool pooled;
+-  const UfsSlot slot = hostSlotTake (&pooled);
+-  gRootDiagnostic.lba = lba;
+-  if (!prds) memcpy (slot.data, src, blocks * 4096U);
+-  uint32_t scsi = 0;
+-  IOReturn status = kIOReturnSuccess;
+-  bool anyIssued = false;
+-  for (unsigned attempt = 0;; ++attempt) {
+-    bool issued = false;
+-    status = hostWriteSubmit (slot, role, lba, blocks, src, prds ? prd : nullptr, prds, fua, &scsi, &issued);
+-    if (issued) anyIssued = true;
+-    if (!hostRetryable (status, scsi, attempt)) break;
++    if (status != kIOReturnSuccess && anyIssued) ufsWriteAuthorityRevoke (true);
++    hostSlotGive (slot);
++    if (status != kIOReturnSuccess) return status;
++    src = static_cast<const uint8_t *> (src) + chunk * 4096U;
++    lba += chunk;
++    remaining -= chunk;
+   }
+-  hostSlotGive (slot, pooled);
+-  if (status != kIOReturnSuccess && anyIssued) ufsWriteAuthorityRevoke (true);
+-  return status;
++  return kIOReturnSuccess;
+ }
+ 
+ // SYNCHRONIZE CACHE(10) for one authorized role window. Chunks avoid count=0, which would mean
+@@ -676,37 +647,36 @@ static IOReturn hostWrite4k (UfsWriteRole role, uint8_t lun, uint64_t lba, uint3
+ // the doorbell run under the authority lock.
+ static IOReturn hostSyncCache (UfsWriteRole role)
+ {
+-  if (!gHost.ready ||
+-      (gHostPanic && role != UfsWriteRole::Panic) ||
+-      (!gHostPanic && role == UfsWriteRole::Panic)) {
+-    return kIOReturnNotPrivileged;
+-  }
++  if (!gHost.ready || role == UfsWriteRole::Panic || hostTransportPoisoned ()) return kIOReturnNotPrivileged;
+   uint64_t lba = 0, blocks = 0;
+-  if (!ufsWriteAuthorityRoleWindow (role, &lba, &blocks)) return kIOReturnNotPrivileged;
++  ufsWriteAuthorityAcquire ();
++  const uint32_t epoch = gUfsWriteAuthority.epoch;
++  const bool allowed = ufsWriteAuthorityRoleWindowLocked (role, &lba, &blocks);
++  ufsWriteAuthorityRelease ();
++  if (!allowed) return kIOReturnNotPrivileged;
+   IOReturn status = kIOReturnSuccess;
+   bool anyIssued = false;
+   while (blocks && status == kIOReturnSuccess) {
+     const uint32_t chunk = blocks > 0xffff ? 0xffff : static_cast<uint32_t> (blocks);
+-    bool pooled;
+-    const UfsSlot slot = hostSlotTake (&pooled);
++    UfsSlot slot;
++    if (!hostSlotTake (&slot)) return kIOReturnNotReady;
+     uint8_t cdb[10] = { 0x35, 0, uint8_t (lba >> 24), uint8_t (lba >> 16), uint8_t (lba >> 8), uint8_t (lba),
+                         0, uint8_t (chunk >> 8), uint8_t (chunk), 0 };
+     uint32_t scsi = 0;
+     for (unsigned attempt = 0;; ++attempt) {
+-      IOReturn prepared = hostScsiPrepare (slot, 0, cdb, 10, 0, 0, nullptr, 0, nullptr);
+-      if (prepared != kIOReturnSuccess) { status = prepared; break; }
+-      if (gHostPanic) {
+-        if (!ufsWriteAuthorityTryAcquire ()) { status = kIOReturnNotPrivileged; break; }
+-      } else {
+-        ufsWriteAuthorityAcquire ();
+-      }
++      ufsWriteAuthorityAcquire ();
+       uint64_t winFirst = 0, winBlocks = 0;
+-      if (!ufsWriteAuthorityRoleWindowLocked (role, &winFirst, &winBlocks) || lba < winFirst ||
++      if (gUfsWriteAuthority.epoch != epoch || !ufsWriteAuthorityRoleWindowLocked (role, &winFirst, &winBlocks) || lba < winFirst ||
+           chunk > winBlocks || lba - winFirst > winBlocks - chunk) {
+         ufsWriteAuthorityRelease ();
+         status = kIOReturnNotPrivileged;
+         break;
+       }
++      status = hostScsiPrepare (slot, 0, cdb, 10, 0, 0);
++      if (status != kIOReturnSuccess) {
++        ufsWriteAuthorityRelease ();
++        break;
++      }
+       ufsWriteAuthorityEnterInflightLocked ();
+       uint64_t deadline = 0;
+       uint32_t ocs = 0x0f;
+@@ -720,14 +690,14 @@ static IOReturn hostSyncCache (UfsWriteRole role)
+       anyIssued = true;
+       ufsWriteAuthorityRelease ();
+       status = hostScsiAwait (slot, 0, 0, deadline, &scsi);
+-      ufsWriteAuthorityExitInflight ();
++      if (!hostSlotOutstanding (slot)) ufsWriteAuthorityExitInflight ();
+       if (!hostRetryable (status, scsi, attempt)) break;
+     }
+-    hostSlotGive (slot, pooled);
++    if (status != kIOReturnSuccess && anyIssued) ufsWriteAuthorityRevoke (true);
++    hostSlotGive (slot);
+     lba += chunk;
+     blocks -= chunk;
+   }
+-  if (status != kIOReturnSuccess && anyIssued) ufsWriteAuthorityRevoke (true);
+   return status;
+ }
+ 
+diff --git a/UfsWriteAuthority.h b/UfsWriteAuthority.h
+index 6f7cb20..9b51d62 100644
+--- a/UfsWriteAuthority.h
++++ b/UfsWriteAuthority.h
+@@ -138,7 +138,7 @@ static void ufsAuthorityFallbackRelax (void)
+ #endif
+ }
+ 
+-static bool ufsWriteAuthorityTryAcquire (void)
++[[maybe_unused]] static bool ufsWriteAuthorityTryAcquire (void)
+ {
+   if (gUfsAuthorityLockOps.tryAcquire) return gUfsAuthorityLockOps.tryAcquire (gUfsAuthorityLockOps.context);
+   return ufsAuthorityFallbackTry ();
+@@ -155,7 +155,8 @@ static void ufsWriteAuthorityRelease (void)
+ }
+ 
+ // Test-only linearization probes. Production leaves the pointer null (a single predictable branch).
+-enum { UfsProbeAfterCheck = 1, UfsProbeAfterDoorbell = 2, UfsProbeSubmitted = 3, UfsProbeAfterRelease = 4 };
++enum { UfsProbeAfterCheck = 1, UfsProbeAfterDoorbell = 2, UfsProbeSubmitted = 3, UfsProbeAfterRelease = 4,
++       UfsProbeBeforeSubmit, UfsProbeAfterResponseResidual };
+ static void (*gUfsAuthorityProbe)(int) = nullptr;
+ static inline void ufsWriteAuthoritySetProbe (void (*probe)(int)) { gUfsAuthorityProbe = probe; }
+ static void ufsAuthorityProbe (int point) { if (gUfsAuthorityProbe) gUfsAuthorityProbe (point); }
+@@ -400,7 +401,7 @@ static bool ufsWriteAuthorityRoleWindowLocked (UfsWriteRole role, uint64_t *firs
+   return true;
+ }
+ 
+-static bool ufsWriteAuthorityRoleWindow (UfsWriteRole role, uint64_t *first, uint64_t *blocks)
++[[maybe_unused]] static bool ufsWriteAuthorityRoleWindow (UfsWriteRole role, uint64_t *first, uint64_t *blocks)
+ {
+   ufsWriteAuthorityAcquire ();
+   const bool ok = ufsWriteAuthorityRoleWindowLocked (role, first, blocks);
+@@ -496,7 +497,7 @@ static UfsWriteState ufsWriteAuthorityState (void)
+ }
+ 
+ // Record a refusal that happens outside the state-machine helpers (role not permitted at all).
+-static void ufsWriteAuthorityNoteDenied (uint32_t reason)
++[[maybe_unused]] static void ufsWriteAuthorityNoteDenied (uint32_t reason)
+ {
+   ufsWriteAuthorityAcquire ();
+   ++gUfsWriteAuthority.deniedWrites;
+diff --git a/tests/RootCommands.cpp b/tests/RootCommands.cpp
+index 2232cd9..f6c9dd2 100644
+--- a/tests/RootCommands.cpp
++++ b/tests/RootCommands.cpp
+@@ -153,17 +153,17 @@ int main()
+   reset(Fault::HighBase); assert(ufs_test_stop_queue()); assert(!ufs_test_start_queue());
+   reset(); assert(ufs_test_stop_queue() && ufs_test_start_queue());
+   assert(registers[0x50/4]==0xcb5e9000 && registers[0x54/4]==8);
+-  // Command slots: each slot's entry, descriptor, tag and data area; the pool; busy retries; the panic slot; one-slot fallback.
++  // Command slots: each slot's entry, descriptor, tag and data area; the pool; busy retries; panic refusal and one-slot pool.
+   for (unsigned slot=0;slot<kRegionSlots;++slot) {
+     reset(); uint8_t read10[10]={0x28,0,0,0,0,1,0,0,1,0}; uint32_t status=0xffff;
+     assert(ufs_test_scsi_slot(slot,0,read10,10,4096,&status)==0 && status==0 && lastSlot==slot);
+     assert(memory[ufsSlotDataOffset(slot)]==uint8_t(0x7b+slot) && memory[ufsSlotDataOffset(slot)+4095]==uint8_t(0x7b+slot));
+   }
+   reset();
+-  assert(ufs_test_slot_count()==kRegionSlots && ufs_test_free_slots()==(1U<<(kRegionSlots-1))-1);   // the last slot is the panic's
++  assert(ufs_test_slot_count()==kRegionSlots && ufs_test_free_slots()==(1U<<kRegionSlots)-1);
+   assert(ufs_test_slot_take()==0 && ufs_test_slot_take()==1);
+   assert(ufs_test_read(0,7,1,out.data())==0 && lastSlot==2 && out[0]==uint8_t(0x7b+2));   // the first free slot
+-  assert(ufs_test_free_slots()==(1U<<(kRegionSlots-1))-1-3);                                    // given back after the command
++  assert(ufs_test_free_slots()==(1U<<kRegionSlots)-1-3);                                    // given back after the command
+   ufs_test_slot_give(0); ufs_test_slot_give(1);
+ 
+   // READ CAPACITY drives the geometry used by the write contract.
+@@ -231,10 +231,8 @@ int main()
+          std::array<uint64_t,3>{uint32_t(UfsWriteRole::Panic),400,1}}) {
+     assert(noDma([&]{return ufs_test_write(uint32_t(request[0]),0,request[1],uint32_t(request[2]),block.data());})==kIOReturnNotPrivileged);
+   }
+-  ufs_test_panic();
+-  assert(noDma([&]{return ufs_test_write(uint32_t(UfsWriteRole::Log),0,400,1,block.data());})==kIOReturnNotPrivileged);
+-  assert(ufs_test_write(uint32_t(UfsWriteRole::Panic),0,400,1,block.data())==0);
+-  assert(ufs_test_sync(uint32_t(UfsWriteRole::Panic))==0);
++  assert(ufs_test_write(uint32_t(UfsWriteRole::Panic),0,400,1,block.data())==kIOReturnNotPrivileged);
++  assert(ufs_test_sync(uint32_t(UfsWriteRole::Panic))==kIOReturnNotPrivileged);
+ 
+   // Window registration itself rejects post-partition, first-before-floor,
+   // overlapping and over-capacity geometry before a write can run.
+@@ -272,15 +270,12 @@ int main()
+   assert(ufs_test_write(uint32_t(UfsWriteRole::Data),0,210,1,block.data())==kIOReturnNotReady);
+   assert(gUfsWriteAuthority.state==UfsWriteState::Failed);
+ 
+-  assert(ufs_test_free_slots()==(1U<<(kRegionSlots-1))-1 || gHostPanic);
++  assert(ufs_test_free_slots()==(1U<<kRegionSlots)-1);
+   reset(Fault::Busy); busyLeft=1000; assert(ufs_test_read(0,1,1,out.data())==kIOReturnNotReady && !gHost.poisoned);
+-  assert(ufs_test_free_slots()==(1U<<(kRegionSlots-1))-1);                                      // a failed command gives its slot back
+-  reset(); ufs_test_panic(); assert(ufs_test_read(0,1,1,out.data())==0 && lastSlot==kRegionSlots-1);
+-  assert(ufs_test_free_slots()==(1U<<(kRegionSlots-1))-1);
++  assert(ufs_test_free_slots()==(1U<<kRegionSlots)-1);                                      // a failed command gives its slot back
+   reset(); ufs_test_slots(1); assert(ufs_test_slot_count()==1 && ufs_test_free_slots()==1);
+   assert(ufs_test_read(0,1,1,out.data())==0 && lastSlot==0 && ufs_test_free_slots()==1);
+-  ufs_test_panic(); assert(ufs_test_read(0,1,1,out.data())==0 && lastSlot==0);
+-  puts("PASS: command slots: per-slot entry, descriptor, tag and data; pool; busy and task-set-full retries; panic slot; one-slot fallback");
++  puts("PASS: command slots: per-slot entry, descriptor, tag and data; pool; busy and task-set-full retries; panic refusal and one-slot pool");
+   puts("PASS: deny-by-default WRITE(10), darwin/GPT/capacity authority, exact role boundaries, LUN/overflow checks and failure revocation");
+   puts("PASS: actual command/queue path; malformed DMA responses, bounds, short reads, sense, quarantine, queue refusal and full-width DMA");
+ }
+diff --git a/tests/RootCommandsArm64.cpp b/tests/RootCommandsArm64.cpp
+index 7fbbbb4..0d14920 100644
+--- a/tests/RootCommandsArm64.cpp
++++ b/tests/RootCommandsArm64.cpp
+@@ -44,7 +44,6 @@ static void IODelay(uint32_t us) {
+ // Single EL1 CPU, interrupts masked. This does not test XNU lock scheduling.
+ static void IOLockLock(void *) {}
+ static void IOLockUnlock(void *) {}
+-static bool IOLockTryLock(void *) { return true; }
+ struct IOLock;
+ constexpr int THREAD_UNINT=0;
+ static int IOLockSleep(void *, void *, int) { return 0; }   // single-threaded guest: the slot pool never runs empty
+@@ -57,7 +56,6 @@ static uint32_t hostCompletionCount(unsigned) { return 0; }
+ static bool hostInterruptMode() { return false; }
+ static void hostWaitCompletion(unsigned, uint32_t, uint64_t) { IODelay(2); }
+ // Zero copy: the guest's cached identity map covers 0x40000000..0x48000000.
+-static uint64_t hostDmaAddress(const void *va) { const uint64_t a=reinterpret_cast<uintptr_t>(va); return a>=0x40000000ULL && a<0x48000000ULL ? a : 0; }
+ #include "../RootCommands.h"
+ #include "../RootQueue.h"
+ 
+@@ -168,7 +166,6 @@ extern "C" void guest_main() {
+     check(result==kIOReturnNotReady && (scsi==2 || scsi==0x102),"TUR check condition");
+   }
+   check(result==0,"TUR ready");
+-  gZeroCopy=false;   // these checks cover the data-area path at the configured DMA address
+   const unsigned blockCounts[]={1,32};
+   for (unsigned blocks: blockCounts) {
+     check(hostRead4k(0,8,blocks,output)==0,"READ10");
+@@ -193,19 +190,11 @@ extern "C" void guest_main() {
+     }
+   }
+   puts("PASS concurrent slots\n");
+-  // Zero copy: 512 KiB straight into a page-aligned buffer of the identity map, as two 256 KiB PRDT entries.
+-  {
+-    gZeroCopy=true;
+-    alignas(4096) static uint8_t zc[512*1024];
+-    for (unsigned i=0;i<sizeof zc;++i) zc[i]=0xee;
+-    cacheCivac(zc,sizeof zc);
+-    check(hostRead4k(0,8,128,zc)==0,"zero-copy READ10");
+-    check((*reinterpret_cast<volatile uint32_t *>(ufsSlot(0).utrd+28)&0xffff)==2,"zero-copy PRDT entries");
+-    for (unsigned i=0;i<131072;++i) check(zc[i]==uint8_t((i*17+(i>>8)*31)^0xa5),"zero-copy payload");
+-    for (unsigned i=131072;i<sizeof zc;++i) check(zc[i]==0,"zero-copy tail");
+-  }
+-  gZeroCopy=false;
+-  puts("PASS zero-copy 512K\n");
++  alignas(4096) static uint8_t aligned[512*1024];
++  check(hostRead4k(0,8,128,aligned)==0,"bounced multi-slot-sized READ10");
++  for (unsigned i=0;i<131072;++i) check(aligned[i]==uint8_t((i*17+(i>>8)*31)^0xa5),"buffered payload");
++  for (unsigned i=131072;i<sizeof aligned;++i) check(aligned[i]==0,"buffered tail");
++  puts("PASS buffered 512K\n");
+   for (unsigned i=0;i<4096;++i) output[i]=0xa5;
+   check(hostRead4k(0,0x10000,1,output)!=0,"bad LBA accepted");
+   for (unsigned i=0;i<4096;++i) check(output[i]==0xa5,"bad LBA copied stale data");
+diff --git a/tests/RootCommandsBridge.cpp b/tests/RootCommandsBridge.cpp
+index d818a47..46a70fa 100644
+--- a/tests/RootCommandsBridge.cpp
++++ b/tests/RootCommandsBridge.cpp
+@@ -6,33 +6,7 @@
+ #include <cstring>
+ #include <cassert>
+ #include <mutex>
+-#if defined(_MSC_VER)
+-// The host fixture is deliberately single-threaded. These replace only the
+-// compiler atomics/bit primitive used by the production command code.
+-#define __ATOMIC_RELEASE 0
+-static uint32_t testAtomicOrFetch(volatile uint32_t *object, uint32_t operand)
+-{
+-  *object = *object | operand;
+-  return *object;
+-}
+-static uint32_t testAtomicAndFetch(volatile uint32_t *object, uint32_t operand)
+-{
+-  *object = *object & operand;
+-  return *object;
+-}
+-static unsigned testCtz(uint32_t value)
+-{
+-  unsigned bit = 0;
+-  while (value && !(value & 1U)) {
+-    value >>= 1;
+-    ++bit;
+-  }
+-  return bit;
+-}
+-#define __atomic_or_fetch(object,operand,order) testAtomicOrFetch((object),(operand))
+-#define __atomic_and_fetch(object,operand,order) testAtomicAndFetch((object),(operand))
+-#define __builtin_ctz(value) testCtz((value))
+-#endif
++#include <condition_variable>
+ #include "../RootDiagnostics.h"
+ #include "../TransferPoll.h"
+ using IOReturn = uint32_t;
+@@ -72,9 +46,15 @@ constexpr int THREAD_UNINT=0;
+ // never empties), so their bodies stay as guards.
+ static void IOLockLock(void *lock) { if (lock) static_cast<std::mutex *>(lock)->lock(); }
+ static void IOLockUnlock(void *lock) { if (lock) static_cast<std::mutex *>(lock)->unlock(); }
+-static bool IOLockTryLock(void *lock) { return lock ? static_cast<std::mutex *>(lock)->try_lock() : true; }
+-static int IOLockSleep(void *, void *, int) { assert(!"harness slot pool ran empty: size the pool for the test"); return 0; }
+-static void IOLockWakeup(void *, void *, bool) {}
++static std::condition_variable slotWakeup;
++static int IOLockSleep(void *lock, void *, int) {
++  assert(lock);
++  std::unique_lock<std::mutex> pool(*static_cast<std::mutex *>(lock), std::adopt_lock);
++  slotWakeup.wait(pool);
++  pool.release();
++  return 0;
++}
++static void IOLockWakeup(void *, void *, bool) { slotWakeup.notify_all(); }
+ static IOReturn recordTransport(IOReturn result,uint32_t ocs) {
+   gRootDiagnostic.result=result; gRootDiagnostic.ocs=ocs; return result;
+ }
+@@ -82,7 +62,6 @@ static IOReturn recordTransport(IOReturn result,uint32_t ocs) {
+ static uint32_t hostCompletionCount(unsigned) { return 0; }
+ static bool hostInterruptMode() { return false; }
+ static void hostWaitCompletion(unsigned, uint32_t, uint64_t) { IODelay(2); }
+-static uint64_t hostDmaAddress(const void *) { return 0; }   // no zero copy in the host model
+ #include "../RootCommands.h"
+ #include "../RootQueue.h"
+ extern "C" {
+@@ -90,15 +69,14 @@ void ufs_test_reset(Callback cb, uint64_t physical) {
+   callback=cb; memset(memory,0,sizeof(memory));
+   gHost={memory,physical,true,false,0,nullptr}; gRootDiagnostic=UfsRootDiagnostics{};
+   gStoreOpen=gLogOpen=false; gStoreFirst=gStoreBlocks=gLogFirst=gLogBlocks=0;
+-  hostSlotGeometryRegionA(kRegionSlots); hostSlotsInit(kRegionSlots,nullptr); gHostPanic=false; gOutstanding=0;
++  hostSlotGeometryRegionA(kRegionSlots); hostSlotsInit(kRegionSlots,nullptr); gOutstanding=0; gSlotsBusy=0;
+   hostWriteWindowsReset();
+ }
+ void ufs_test_slots(unsigned count) { hostSlotGeometryRegionA(count); hostSlotsInit(count,nullptr); }
+ unsigned ufs_test_slot_count() { return gSlotCount; }
+-int ufs_test_slot_take() { bool pooled; UfsSlot slot=hostSlotTake(&pooled); return pooled ? int(slot.index) : -1-int(slot.index); }
+-void ufs_test_slot_give(unsigned index) { hostSlotGive(ufsSlot(index),true); }
++int ufs_test_slot_take() { UfsSlot slot; return hostSlotTake(&slot) ? int(slot.index) : -1; }
++void ufs_test_slot_give(unsigned index) { hostSlotGive(ufsSlot(index)); }
+ uint32_t ufs_test_free_slots() { return gSlotFree; }
+-void ufs_test_panic() { gHostPanic=true; }
+ uint32_t ufs_test_scsi_slot(unsigned slot,uint8_t lun,const uint8_t *cdb,unsigned length,uint32_t bytes,uint32_t *scsi) {
+   return hostScsiDir(ufsSlot(slot),lun,cdb,length,bytes?2U:0U,bytes,200000,scsi);
+ }
+diff --git a/tests/RootCommandsConcurrency.cpp b/tests/RootCommandsConcurrency.cpp
+index 9670522..e3b4dd4 100644
+--- a/tests/RootCommandsConcurrency.cpp
++++ b/tests/RootCommandsConcurrency.cpp
+@@ -4,6 +4,15 @@
+ // authority probe, never by random stress. Every WRITE doorbell, its role/window, the revocation and
+ // the in-flight count are recorded.
+ #include "RootCommandsBridge.cpp"
++#ifdef STAGE0C2E_TEST_ENTRIES
++#include "PanicEntryPoints.inc"
++static uint64_t gStoreRegionBlocks, gStoreRegionFirst, gLogRegionBlocks, gLogRegionFirst;
++static constexpr uint32_t kExportBlocks = 65536;
++static volatile uint64_t native_ufs_store_wr_ops, native_ufs_store_wr_ticks;
++static unsigned storeMode () { return 2; }
++static void storeAccount (volatile uint64_t *, volatile uint64_t *, uint64_t) {}
++#include "WriteEntryPoints.inc"
++#endif
+ #include <array>
+ #include <atomic>
+ #include <chrono>
+@@ -16,7 +25,7 @@
+ // ---- Fixture ----------------------------------------------------------------------------------------------------
+ static constexpr uint64_t kPhys = 0x8cb5e9000ULL;
+ static std::mutex gIoMutex;
+-static std::mutex gSlotMutex;
++static std::mutex gSlotMutex, gSubmitMutex;
+ static std::array<uint32_t, 64> gRegisters;
+ static std::array<uint8_t, kDmaBytes> gDevice;
+ static std::atomic<uint64_t> gNow{ 0 };
+@@ -28,6 +37,7 @@ static std::atomic<uint64_t> gDoorbellSeq{ 0 };
+ static std::atomic<uint64_t> gRevokeSeq{ 0 };
+ static std::atomic<uint64_t> gCompleteSeq{ 0 };
+ static std::atomic<uint64_t> gBadWindow{ 0 };      // WRITE doorbell whose LBA left every expected window
++static uint32_t gResidual[kRegionSlots];
+ static std::atomic<bool> gAsync{ false };           // true: the doorbell does not complete the command
+ static std::array<int, kRegionSlots> gReleased;     // per slot: a clean happened since the last doorbell
+ static std::vector<int> gUsedSlots;
+@@ -55,7 +65,7 @@ static void completeSlotLocked (int slot)
+   memcpy (rsp, cmd, 32);
+   rsp[0] = static_cast<uint8_t> (cmd[0] + 0x20);
+   rsp[1] = 0;
+-  if (cmd[0] == 1) putBe32 (rsp + 12, 0);
++  if (cmd[0] == 1) putBe32 (rsp + 12, gResidual[slot]);
+   gCompleteSeq.store (nextSeq (), std::memory_order_relaxed);
+ }
+ 
+@@ -63,9 +73,9 @@ static uint64_t io (unsigned op, uint64_t address, uint64_t value, void *bytes)
+ {
+   if (op == 0) { std::lock_guard<std::mutex> lock (gIoMutex); return gRegisters.at (address / 4); }
+   if (op == 1) {
++    std::lock_guard<std::mutex> lock (gIoMutex);
+     if (address == 0x20) { gRegisters[0x20 / 4] &= ~uint32_t (value); return 0; }
+     if (address == 0x58) {
+-      std::lock_guard<std::mutex> lock (gIoMutex);
+       assert (value && !(value & (value - 1)));
+       const unsigned entry = unsigned (__builtin_ctz (uint32_t (value)));
+       assert (entry % 2 == 0 && entry / 2 < kRegionSlots);
+@@ -118,22 +128,24 @@ static void authorityUnlock (void *) { gAuthorityMutex.unlock (); }
+ static std::mutex gGateMutex;
+ static std::condition_variable gGateCond;
+ static int gGatePoint = -1;
++static unsigned gGateSkip = 0;
+ static bool gGateHolding = false, gGateOpen = false;
+ 
+ static void probe (int point)
+ {
+   std::unique_lock<std::mutex> lock (gGateMutex);
+   if (gGatePoint == point) {
++    if (gGateSkip) { --gGateSkip; return; }
++    gGatePoint = -1;
+     gGateHolding = true;
+     gGateCond.notify_all ();
+     gGateCond.wait (lock, [] { return gGateOpen; });
+-    gGatePoint = -1;
+   }
+ }
+-static void armGate (int point)
++static void armGate (int point, unsigned skip = 0)
+ {
+   std::unique_lock<std::mutex> lock (gGateMutex);
+-  gGatePoint = point; gGateHolding = false; gGateOpen = false;
++  gGatePoint = point; gGateSkip = skip; gGateHolding = false; gGateOpen = false;
+ }
+ static void awaitGateHolding ()
+ {
+@@ -155,12 +167,15 @@ static void resetFixture ()
+     gRegisters.fill (0); gDevice.fill (0);
+     gRegisters[0x34 / 4] = 1; gRegisters[0x30 / 4] = 15; gRegisters[0x60 / 4] = 1;
+     gReleased.fill (0);
++    std::fill (std::begin (gResidual), std::end (gResidual), 0);
+     gUsedSlots.clear ();
+   }
+   gNow.store (0); gDoorbells.store (0); gWriteDoorbells.store (0); gSyncDoorbells.store (0);
+   gDoorbellSeq.store (0); gRevokeSeq.store (0); gCompleteSeq.store (0); gBadWindow.store (0);
+   gAsync.store (false);
++  gUfsWriteAuthority = {}; // A fresh fixture models reboot, never in-place transport recovery.
+   ufs_test_reset (io, kPhys);
++  gSubmitLock = reinterpret_cast<IOLock *> (&gSubmitMutex);
+   hostSlotsInit (kRegionSlots, reinterpret_cast<IOLock *> (&gSlotMutex));
+ }
+ 
+@@ -188,6 +203,7 @@ int main ()
+   assert (state () == UfsWriteState::Sealed);
+   assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, block.data ()) == kIOReturnNotPrivileged);
+   assert (gDoorbells.load () == 0 && gWriteDoorbells.load () == 0);
++  for (size_t i = 0; i < kDmaBytes; ++i) assert (ufs_test_memory ()[i] == 0 && gDevice[i] == 0);
+   pass ("Sealed authority denies the WRITE and rings no doorbell");
+ 
+   // 2. Revoke before the check: the next WRITE is denied with no doorbell.
+@@ -275,28 +291,79 @@ int main ()
+   assert (inflight () == 0 && gSyncDoorbells.load () == 100 && gWriteDoorbells.load () == 100);
+   pass ("SYNCHRONIZE CACHE and WRITE share the authority and both complete");
+ 
+-  // 8. Timeout: a submitted WRITE that never completes is failed closed and latches Failed.
++  resetFixture (); assert (ready () && ufs_test_store_open (210, 40) == 1);
++  std::array<uint8_t, 41 * 4096> oversized{};
++  assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 41, oversized.data ()) == kIOReturnNotPrivileged);
++  assert (gDoorbells.load () == 0);
++  for (size_t i = 0; i < kDmaBytes; ++i) assert (ufs_test_memory ()[i] == 0 && gDevice[i] == 0);
++  pass ("full request crossing the authorized window leaves payload and descriptors untouched");
++
++  // DB reads zero even before completion. Keep the DMA region and authority in flight.
+   resetFixture (); assert (ready () && ufs_test_store_open (210, 20) == 1);
++  hostSlotsInit (1, reinterpret_cast<IOLock *> (&gSlotMutex));
+   gAsync.store (true);
+   armGate (UfsProbeAfterRelease);
+-  std::thread timeoutWriter ([&] { ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, block.data ()); });
++  alignas(4096) std::array<uint8_t, 4096> caller;
++  caller.fill (0x5a);
++  std::thread timeoutWriter ([&] {
++    assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, caller.data ()) == kIOReturnTimeout);
++  });
+   awaitGateHolding ();
+-  assert (inflight () == 1);
+-  gNow.store (1ULL << 62);                          // force the wait to expire (deadline was computed earlier)
++  assert (inflight () == 1 && gOutstanding == 1);
++
++#ifdef STAGE0C2E_TEST_ENTRIES
++  auto cpuBefore = std::vector<uint8_t> (ufs_test_memory (), ufs_test_memory () + kDmaBytes);
++  const auto dmaBefore = std::vector<uint8_t> (gDevice.begin (), gDevice.end ());
++  {
++    std::lock_guard<std::mutex> heldAuthority (gAuthorityMutex);
++    std::lock_guard<std::mutex> heldPool (gSlotMutex);
++    std::lock_guard<std::mutex> heldSubmit (gSubmitMutex);
++    std::thread cpu0 ([] { boot_log_panic_flush (); assert (native_ufs_log_panic () == 0); });
++    std::thread cpu1 ([] { boot_log_panic_flush (); assert (native_ufs_log_panic () == 0); });
++    cpu0.join (); cpu1.join ();
++  }
++  assert (boot_log_panicked == 1 && gDoorbells.load () == 1);
++  assert (std::equal (cpuBefore.begin (), cpuBefore.end (), ufs_test_memory ()) && std::equal (dmaBefore.begin (), dmaBefore.end (), gDevice.begin ()));
++  pass ("actual BootLog and native panic entry points return with held locks and a live slot");
++#endif
++
++  std::atomic<bool> waiterRefused { false };
++  const auto beforeWaits = gSlotWaits;
++  std::thread capacityWaiter ([&] {
++    uint64_t capacity = 42;
++    assert (hostReadCapacity10 (&capacity) == kIOReturnNotReady && capacity == 0);
++    waiterRefused = true;
++  });
++  for (;;) {
++    {
++      std::lock_guard<std::mutex> heldPool (gSlotMutex);
++      if (gSlotWaits != beforeWaits) break;
++    }
++    std::this_thread::yield ();
++  }
++  assert (gDoorbells.load () == 1);
++  gNow.store (1ULL << 62);
+   openGate ();
+   timeoutWriter.join ();
+-  assert (state () == UfsWriteState::Failed);
+-  assert (inflight () == 0);
+-  // The latched authority denies at its own gate...
++  capacityWaiter.join ();
++  assert (waiterRefused && ufs_test_free_slots () == 0);
++  assert (state () == UfsWriteState::Revoking && inflight () == 1);
++  assert (hostTransportPoisoned () && gOutstanding == 1);
+   assert (!ufsWriteAuthorityAllows (UfsWriteRole::Data, 0, 210, 1));
+-  const uint64_t afterTimeout = gWriteDoorbells.load ();
+-  // ...and the timed-out transport also poisons the controller, so a follow-up is refused at the
+-  // readiness guard before the authority check. Either way it is denied and rings no doorbell.
+-  assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, block.data ()) != kIOReturnSuccess);
+-  assert (gWriteDoorbells.load () == afterTimeout);
+-  completeAllSlots ();                              // the un-cancellable DMA arrives late
+-  assert (gWriteDoorbells.load () == afterTimeout); // a late completion is not a new submission
+-  pass ("a timed-out WRITE fails closed and revokes; a late completion is not a new submission");
++  caller.fill (0xcc);
++  const auto *prdt = gDevice.data () + ufsSlotUcdOffset (0) + kPrdtOffset;
++  uint32_t low, high;
++  memcpy (&low, prdt, sizeof low);
++  memcpy (&high, prdt + 4, sizeof high);
++  assert ((uint64_t (high) << 32 | low) == kPhys + ufsSlotDataOffset (0));
++  const auto *inflightData = gDevice.data () + ufsSlotDataOffset (0);
++  assert (std::all_of (inflightData, inflightData + caller.size (), [](uint8_t v) { return v == 0x5a; }));
++  completeAllSlots (); // late write completion, no release or re-establishment
++  ufsWriteAuthorityReset ();
++  assert (inflight () == 1 && !ready ());
++  assert (ufs_test_write (uint32_t (UfsWriteRole::Data), 0, 210, 1, caller.data ()) != kIOReturnSuccess);
++  assert (ufs_test_free_slots () == 0 && gDoorbells.load () == 1);
++  pass ("timeout refuses the waiter, retains DMA and authority, and preserves slot-owned payload across late completion");
+ 
+   // 9. Epoch monotonicity and re-authorization after a clean Reset + Establish.
+   resetFixture (); assert (ready () && ufs_test_store_open (210, 20) == 1);
+@@ -368,6 +435,87 @@ int main ()
+   pass ("concurrent initialization and withdrawal never submits an out-of-window WRITE and leaves no I/O in flight");
+ 
+   assert (gBadWindow.load () == 0);
++
++  // Park a second lease after cache preparation and before the final submit.
++  // An earlier READ times out without completing, so the second lease must never ring.
++  for (unsigned kind = 0; kind < 4; ++kind) {
++    resetFixture (); assert (ready () && ufs_test_store_open (210, 20) == 1);
++    gAsync.store (true);
++    std::array<uint8_t, 4096> first, second;
++    std::thread earlier ([&] { assert (hostRead4k (0, 100, 1, first.data ()) == kIOReturnTimeout); });
++    while (gDoorbells.load () != 1) std::this_thread::yield ();
++    armGate (UfsProbeBeforeSubmit);
++    std::thread later ([&] {
++      uint64_t capacity = 0;
++      IOReturn result = kIOReturnSuccess;
++      switch (kind) {
++        case 0: result = hostRead4k (0, 101, 1, second.data ()); break;
++        case 1: result = hostWrite4k (UfsWriteRole::Data, 0, 210, 1, block.data ()); break;
++        case 2: result = hostSyncCache (UfsWriteRole::Data); break;
++        case 3: result = hostReadCapacity10 (&capacity); break;
++      }
++      assert (result == kIOReturnNotReady);
++    });
++    awaitGateHolding ();
++    gNow.store (1ULL << 62);
++    earlier.join ();
++    assert (hostTransportPoisoned () && gDoorbells.load () == 1);
++    openGate ();
++    later.join ();
++    assert (gDoorbells.load () == 1 && gOutstanding == 1 && inflight () == 0);
++  }
++  pass ("poison publication precludes the pending READ, WRITE, SYNC and READ CAPACITY doorbells");
++
++  // A second response replaces the global diagnostic while the short read is paused.
++  resetFixture ();
++  gResidual[0] = 4096;
++  std::array<uint8_t, 4096> shortRead, goodRead;
++  shortRead.fill (0x5a);
++  armGate (UfsProbeAfterResponseResidual);
++  std::thread shortReader ([&] {
++    assert (hostRead4k (0, 100, 1, shortRead.data ()) == kIOReturnIOError);
++  });
++  awaitGateHolding ();
++  assert (hostRead4k (0, 101, 1, goodRead.data ()) == kIOReturnSuccess && gRootDiagnostic.residual == 0);
++  openGate ();
++  shortReader.join ();
++  assert (std::all_of (shortRead.begin (), shortRead.end (), [] (uint8_t byte) { return byte == 0x5a; }));
++  pass ("interleaved residuals reject the short read without copying its data");
++
++#ifdef STAGE0C2E_TEST_ENTRIES
++  // Exercise the actual Data, BootLog and Export wrappers across the previous
++  // outer loop boundary. Even a new authorization for the same range is a new request.
++  for (unsigned kind = 0; kind < 3; ++kind) {
++    resetFixture ();
++    gStoreRegionFirst = 210; gStoreRegionBlocks = 300;
++    gLogRegionFirst = kExportBlocks + 350; gLogRegionBlocks = 82;
++    auto establish = [&] {
++      assert (ufs_test_establish (100000, 100, 90000, 200, 99999, 99998) == 1);
++      if (kind == 0) assert (ufs_test_store_open (210, 300) == 1);
++      else assert (ufs_test_log_open (350, kExportBlocks, gLogRegionFirst, gLogRegionBlocks) == 1);
++    };
++    establish ();
++    const uint32_t blocks = kind == 0 ? 257 : 33;
++    std::vector<uint8_t> request (uint64_t (blocks) * 4096, 0x5a);
++    const unsigned completed = kind == 0 ? 8 : 1;
++    armGate (UfsProbeSubmitted, completed - 1);
++    std::thread writer ([&] {
++      const int result = kind == 0 ? native_ufs_store_write (0, blocks, request.data ()) :
++                         kind == 1 ? native_ufs_log_write (0, blocks, request.data ()) :
++                                     native_ufs_export_write (0, blocks, request.data ());
++      assert (result == 0);
++    });
++    awaitGateHolding ();
++    assert (gWriteDoorbells.load () == completed && inflight () == 0);
++    revokeAuthority (false);
++    ufsWriteAuthorityReset ();
++    establish ();
++    openGate ();
++    writer.join ();
++    assert (gWriteDoorbells.load () == completed && inflight () == 0);
++  }
++  pass ("Data, Log and Export public entry points stop a partial request across revocation and regrant");
++#endif
+   std::puts ("PASS: unified UFS write authority -- check/doorbell linearization, single shared state, revoke before/after submit, in-flight gating, timeout fail-closed, epoch and re-authorization");
+   return 0;
+ }

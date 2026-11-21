@@ -1,0 +1,19 @@
+{
+  "patches": {
+    "shengufs.patch": "98a092ce9705089e090368c9501ab81fb51723be00cf5327b2be294a6f3e9cb1",
+    "bootlog.patch": "e3cde9571528cb648aa69411061f612e69bbac7478b3820e69bfdbcb4eb10db1"
+  },
+  "sources": {
+    "drivers/ShengUfs/NativeUfs.cpp": "f86a0aa19e8d1739ca677fac9e9d99dbcafb0906b674dd1cfd6c80d2f03fd6e6",
+    "drivers/ShengUfs/RootCommands.h": "53a2bc3c17d391a8b2dd445234ba08ef56721fa3b52dd43b7875c36807868d8b",
+    "drivers/ShengUfs/UfsWriteAuthority.h": "84c79c2bca5b041f8e68f2fb014f20fae18bd54e6fe6498df97f210d551f8311",
+    "package/BootLog.c": "44a03e3b88a0e96dfd541ed7e628948ddf0598934da0a94d8ad0731312053914"
+  },
+  "baseline_runner_sha256": "1ee58ab79dd904ee86ac5e5d4a5adeb916a339ff2b1049d97d1ca4139324b842",
+  "storage_builder_sha256": "a5ecbe9e69f120e2670fffbf65623cfb4eb62c03c96f45c53b86d4fd41d3c585",
+  "archive_sha256": "f9328464d2f664a2b526a0d91bd3f35659cdfd9e2f26a5fa7696cf5f40c442ba",
+  "runner_images": [
+    "20261102.0473.1",
+    "20261117.0516.1"
+  ]
+}
