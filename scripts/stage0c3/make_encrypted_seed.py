@@ -134,6 +134,7 @@ def main():
     require(len(key) == 32, "seed encryption key must be 32 bytes")
 
     unixnu = args.unixnu.resolve()
+    (unixnu / "build").mkdir(parents=True, exist_ok=True)
     work = args.work.resolve()
     out = args.out.resolve()
     work.mkdir(parents=True, exist_ok=True)
