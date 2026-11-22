@@ -275,7 +275,7 @@ def main():
     stage2c = json.loads((ASSETS / "stage0c2c-inputs.json").read_bytes())
     series = device / "patches/xnu-12377/series-sheng-24A446"
     exact(device / "board.toml", stage2c["board_overlay_sha256"])
-    additions = stage2c["ordered_patches"][-2:]
+    additions = stage2c["ordered_patches"][-4:]
     for row in additions:
         path = ASSETS / row["patch"]
         exact(path, row["sha256"])
@@ -366,6 +366,12 @@ def main():
     exact(marker_patch, marker_recipe["patch_sha256"])
     patch("stage0c2c-marker-link-modes", marker_patch, framework)
     exact(marker_source, marker_recipe["after_sha256"])
+    sealer = stage2c["seal_recipe"]
+    for path, row in sealer["files"].items():
+        exact(framework / path, row["before_sha256"])
+    preseal_patch = ASSETS / "stage0c2c-preseal-fileset.patch"
+    exact(preseal_patch, sealer["patch_sha256"])
+    patch("stage0c2c-preseal-fileset", preseal_patch, framework)
     step("assemble-tree", [*cli, "tree", *common])
     work = root / "out/sheng/ipados-27.0.1-24A446/sheng_ipados27"
     tree = work / "tree"
@@ -453,7 +459,7 @@ def main():
     require(receipt["candidate_sha256"] !=
             "0c71523a177783fd7fbfa4c5dee8b21622554b04ff3357cc518f2e7a821d315a",
             "Stage 0C-2E candidate unexpectedly equals the historical Stage 0C-1F bytes")
-    save("strict-result.json", dict(candidate_track="stage0c2c-preimage", status=receipt["status"], inputs=receipt["inputs"],
+    save("strict-result.json", dict(candidate_track="stage0c2c-wx", status=receipt["status"], inputs=receipt["inputs"],
          candidate_sha256=receipt["candidate_sha256"], map_sha256=digest(output.with_suffix(".map.json")),
          placement=receipt["native_data_placement"], retained_entries=receipt["retained_entries_verified"],
          corecrypto_hmac_sha256=statistics["corecrypto_hmac_sha256"], runtime_qualified=False, loadable=False,
@@ -464,14 +470,20 @@ def main():
     expected = [(Path(row["patch"]).name, row["sha256"]) for row in stage2c["ordered_patches"]]
     applied = [(Path(row["path"]).name, row["sha256"]) for row in stamp["patches"]]
     require(stamp["commit"] == stage2c["fixed_framework_soc_xnu"]["xnu"] and applied == expected,
-            "Effective XNU source or ordered 95+2 patches differ")
+            "Effective XNU source or ordered 95+4 patches differ")
     for path, wanted in stage2c["patched_xnu_source_sha256"].items():
         exact(tree / ".cache/xnu-work" / path, wanted)
+    for path, row in sealer["files"].items():
+        exact(tree / path, row["after_sha256"])
+    osfmk = tree / "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT"
+    bootstrap_objects = {name: macho_info(osfmk / name, filetype=1) for name in
+                         ("start.o", "static_if.o", "arm_vm_init.o")}
     mode = tree / "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/.sheng-panic-marker-mode"
     require(mode.is_file() and mode.read_text().strip() == "1", "Final DEVELOPMENT marker compile gate was not enabled")
     save("stage0c2c-build-inputs.json", dict(xnu_commit=stamp["commit"], ordered_patches=stage2c["ordered_patches"],
          patched_xnu_source_sha256=stage2c["patched_xnu_source_sha256"], source_commit=stage2c["source_commit"],
-         source_tree=stage2c["source_tree"], marker_build_recipe=marker_recipe))
+         source_tree=stage2c["source_tree"], marker_build_recipe=marker_recipe, seal_recipe=sealer,
+         bootstrap_objects={name: {key: obj[key] for key in ("sha256", "bytes")} for name, obj in bootstrap_objects.items()}))
 
 
 if __name__ == "__main__":

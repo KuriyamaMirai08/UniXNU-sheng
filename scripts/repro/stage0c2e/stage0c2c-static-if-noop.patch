@@ -1,0 +1,34 @@
+--- a/osfmk/arm64/static_if.c
++++ b/osfmk/arm64/static_if.c
+@@ -71,10 +71,21 @@
+ 	if ((vm_offset_t)__text_exec_start <= patch_point &&
+ 	    patch_point < (vm_offset_t)__text_exec_end) {
+ 		/* Refuse to overwrite anything other than this entry's NOP or branch. */
+-		if ((patch_point & 3) != 0 ||
+-		    !arm64_static_if_valid_preimage(*(const volatile uint32_t *)patch_point, sie->sie_target)) {
++		if ((patch_point & 3) != 0) {
+ 			__builtin_trap();
+ 		}
++		const uint32_t old = *(const volatile uint32_t *)patch_point;
++		if (!arm64_static_if_valid_preimage(old, sie->sie_target)) {
++			__builtin_trap();
++		}
++		/* The build-time seal can already have installed the final instruction. */
++		if (old == insn) {
++			return;
++		}
++#if !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
++		/* Native bootstrap never makes instruction pages writable. */
++		__builtin_trap();
++#else
+ 		asm volatile (""
+ 		     /* patch the instruction */
+                      "str     %w1, [%0]"     "\n\t"
+@@ -85,6 +96,7 @@
+                      "isb     sy"
+ #endif /* !__ARM_IC_NOALIAS_ICACHE__ */
+                      : : "r"(patch_point), "r"(insn) : "memory");
++#endif
+ 	}
+ }
+ 

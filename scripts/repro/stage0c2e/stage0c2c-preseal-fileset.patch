@@ -1,0 +1,151 @@
+diff --git a/scripts/seal-source-crypto-kernel.py b/scripts/seal-source-crypto-kernel.py
+index 811a497..bc1f160 100755
+--- a/scripts/seal-source-crypto-kernel.py
++++ b/scripts/seal-source-crypto-kernel.py
+@@ -15,12 +15,15 @@ import hmac
+ import json
+ from pathlib import Path
+ import struct
++import sys
+ 
+ from kernel_target import ARCH, SUBTYPE
+ 
+ parser = argparse.ArgumentParser(description=__doc__)
+ parser.add_argument('kernel', type=Path)
+ parser.add_argument('--kernel-args', default='', help='boot arguments, to refuse ones that flip more static_if keys')
++parser.add_argument('--prepatch-fileset-static-if', action='store_true',
++                    help='apply the two source test keys to a final collection before sealing')
+ args = parser.parse_args()
+ # kern_feature_override_apply flips assert and sched debug keys only for these arguments.
+ for argument in args.kernel_args.split():
+@@ -99,9 +102,14 @@ def symbols(names):
+ 
+ # osfmk/tests/kernel_tests.c static_if_tests_setup: unconditional, one disable and one enable.
+ flips = [b'_static_if_test_key_true_to_false_jump_key', b'_static_if_test_key_false_to_true_jump_key']
+-present = symbols({b'_static_if_tests_setup', *flips})
++callbacks = (b'_static_if_tests_setup', b'_kern_feature_override_apply')
++present = symbols({*callbacks, *flips})
+ patched = 0
+-if b'_static_if_tests_setup' in present and not header:
++if args.prepatch_fileset_static_if and not header:
++    raise SystemExit('This static_if sealing mode requires a final fileset')
++if args.prepatch_fileset_static_if and b'_static_if_tests_setup' not in present:
++    raise SystemExit('Final fileset lacks the fixed static_if test initializer')
++if b'_static_if_tests_setup' in present and (not header or args.prepatch_fileset_static_if):
+     # Threaded rebases keep the key's low address bits; chained kernel-cache pointers keep a 30-bit offset.
+     target_mask = 0x3fffffff if chained else 0x7ffffffffff
+     keys = {(present[name] - (base if chained else 0)) & target_mask for name in flips if name in present}
+@@ -111,15 +119,53 @@ if b'_static_if_tests_setup' in present and not header:
+     if entries is None:
+         raise SystemExit('static_if test initializer present without the entry section')
+     address, size, position = entries
++    if size % 16:
++        raise SystemExit('Malformed static_if entry table')
++    if header:
++        kit = Path(__file__).resolve().parents[1] / 'kits/XnuPrelink'
++        sys.path.insert(0, str(kit))
++        from kc_image import Image
++        root = Image(data)
++        fixups = root.fixups()
++        text_exec = next(s for s in Image(data, header).segments if s['name'] == '__TEXT_EXEC')
++        absolute_keys = {present[name] for name in flips}
++        sites_by_key = dict.fromkeys(absolute_keys, 0)
++        initializers = next((row for row in sections if row[1] == b'__static_ifinit'), None)
++        if initializers is None:
++            raise SystemExit('Missing static_if initializer table')
++        init_va, init_size, _ = sections[initializers]
++        observed_callbacks = [fixups.get(slot, (None,))[0]
++                              for slot in range(init_va, init_va + init_size, 8)]
++        expected_callbacks = {present[name] for name in callbacks if name in present}
++        if (init_size != 8 * len(callbacks) or len(expected_callbacks) != len(callbacks)
++                or set(observed_callbacks) != expected_callbacks):
++            raise SystemExit('Final fileset contains an unreviewed static_if initializer set')
++    touched = set()
+     for entry in range(0, size, 16):
+         delta, target, link = struct.unpack_from('<iiQ', data, position + entry)
+         # The link is a rebase of key + flags; bit 0 says the site was emitted as a branch.
+-        if (link & target_mask & ~3) not in keys:
++        if header:
++            binding = fixups.get(address + entry + 8)
++            if binding is None or (binding[0] & ~3) not in absolute_keys:
++                continue
++            if binding[1] or (binding[0] & 3) != (link & 3):
++                raise SystemExit('Invalid static_if key binding')
++        elif (link & target_mask & ~3) not in keys:
+             continue
+         point = address + entry + delta
+-        site = code[0] + point - code[2]
+-        if not code[2] <= point < code[2] + code[1]:
++        if header:
++            if not text_exec['va'] <= point <= text_exec['va'] + text_exec['filesize'] - 4:
++                continue
++            site = root.offset(point, 4)
++        elif code[2] <= point <= code[2] + code[1] - 4:
++            site = code[0] + point - code[2]
++        else:
+             continue
++        if point % 4 or target % 4 or not -(1 << 27) <= target < (1 << 27) or point in touched:
++            raise SystemExit('Invalid or repeated static_if instruction site')
++        touched.add(point)
++        if header:
++            sites_by_key[binding[0] & ~3] += 1
+         current = struct.unpack_from('<I', data, site)[0]
+         branch = 0x14000000 | ((target >> 2) & 0x03ffffff)
+         expected, final = (branch, 0xd503201f) if link & 1 else (0xd503201f, branch)
+@@ -131,6 +177,8 @@ if b'_static_if_tests_setup' in present and not header:
+             raise SystemExit(f'static_if site {point:#x} holds {current:#010x}, not the emitted instruction')
+         struct.pack_into('<I', data, site, final)
+         patched += 1
++    if header and not all(sites_by_key.values()):
++        raise SystemExit('Final fileset lacks one or both static_if test-key sites')
+ mac = hmac.digest(b'\0', data[code[0]:code[0] + code[1]], 'sha256')
+ data[integrity:integrity + 32] = mac
+ args.kernel.write_bytes(data)
+diff --git a/scripts/unixnu/payload.py b/scripts/unixnu/payload.py
+index 4dcbfdc..90693f8 100644
+--- a/scripts/unixnu/payload.py
++++ b/scripts/unixnu/payload.py
+@@ -157,6 +157,15 @@ def build(ctx, kernel=None):
+     adt = spec.get('adt', {})
+     if adt.get('unique_chip_id') == 'required' and not seed:
+         raise Error('the platform seed is not stored in any repository: pass --unique-chip-id HEX (or UNIXNU_UNIQUE_CHIP_ID)')
++    prepatch_static_if = spec.get('prepatch_fileset_static_if', False)
++    entry_probe = bool(spec.get('panic_screen') or spec.get('entry_probe_reset_delay'))
++    if not isinstance(prepatch_static_if, bool):
++        raise Error('payload prepatch_fileset_static_if must be boolean')
++    if prepatch_static_if and entry_probe:
++        raise Error('presealed static_if requires source diagnostics without binary entry probes')
++    source_integrity = (prepatch_static_if or entry_probe) and b'_source_corecrypto14_bootstrap\0' in kernel.read_bytes()
++    if prepatch_static_if and not source_integrity:
++        raise Error('presealed static_if requires the source corecrypto provider')
+     out, image, report = paths(ctx)
+     stage = out / 'stage'
+     shutil.rmtree(stage, ignore_errors=True)
+@@ -164,7 +173,7 @@ def build(ctx, kernel=None):
+     payloads.mkdir(parents=True)
+     shutil.copyfile(kernel, payloads / 'kernel.macho')
+     # The entry probe (stage bars, optional reset) is wanted with either setting; the panic screen is only one part of it.
+-    if spec.get('panic_screen') or spec.get('entry_probe_reset_delay'):
++    if entry_probe:
+         probe = (['--reset-delay', str(int(spec['entry_probe_reset_delay']))]
+                  if spec.get('entry_probe_reset_delay') else ['--no-reset'])
+         screen = ['--panic-screen'] if spec.get('panic_screen') else []
+@@ -177,11 +186,13 @@ def build(ctx, kernel=None):
+                 probe.append('--reset-before')
+         run(['python3', ctx.tree / 'scripts/patch-xnu-entry-probe.py', payloads / 'kernel.macho', *screen, *probe],
+             cwd=ctx.tree, env=dict(os.environ, UNIXNU_UEFI=str(ctx.uefi or '')), log_file=ctx.logs / 'payload-patch.log')
+-        # The probes rewrite instructions inside __text, which the source corecrypto POST hashes.
+-        if b'_source_corecrypto14_bootstrap\0' in Path(kernel).read_bytes():
+-            boot_args = ' '.join([line, *spec.get('install', {}).get('confirm_args', [])])
+-            run(['python3', ctx.tree / 'scripts/seal-source-crypto-kernel.py', payloads / 'kernel.macho', '--kernel-args', boot_args],
+-                cwd=ctx.tree, env=dict(os.environ, **kernel_step.version_env({}, ctx)), log_file=ctx.logs / 'payload-seal.log')
++    # Source corecrypto hashes the final instructions in the staged fileset.
++    if source_integrity:
++        boot_args = ' '.join([line, *spec.get('install', {}).get('confirm_args', [])])
++        prepatch = ['--prepatch-fileset-static-if'] if prepatch_static_if else []
++        run(['python3', ctx.tree / 'scripts/seal-source-crypto-kernel.py', payloads / 'kernel.macho',
++             '--kernel-args', boot_args, *prepatch], cwd=ctx.tree,
++            env=dict(os.environ, **kernel_step.version_env({}, ctx)), log_file=ctx.logs / 'payload-seal.log')
+     if trust:
+         shutil.copyfile(trust, payloads / 'kernel.macho.trustcache')
+     if addon:

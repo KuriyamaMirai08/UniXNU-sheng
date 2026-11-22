@@ -1,5 +1,5 @@
-name: Sheng Stage 0C-2C preimage census ARM64e and strict-prelink
-run-name: Stage 0C-2C preimage census / fixed input compile and strict-prelink
+name: Sheng Stage 0C-2C bootstrap W^X ARM64e and strict-prelink
+run-name: Stage 0C-2C bootstrap W^X / fixed input compile and strict-prelink
 on:
   workflow_dispatch:
     inputs:
@@ -15,10 +15,10 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: sheng-stage0c2c-preimage
+  group: sheng-stage0c2c-wx
   cancel-in-progress: false
 jobs:
-  build-arm64e-stage0c2c-preimage:
+  build-arm64e-stage0c2c-wx:
     runs-on: macos-26
     timeout-minutes: 360
     env:
@@ -34,8 +34,8 @@ jobs:
       EXPECTED_FINALIZER_SHA256: 8c77e632e4b8bf60bb0fb49cb21959fc95553588af11a3781b58f509b9737882
       EXPECTED_NEGATIVE_TEST_SHA256: 1e8f43fe84cb15e04b1c186808b7db06b74b79ba314f739917d5b3487907b57e
       EXPECTED_STAGE2E_ASSET_0: e3cde9571528cb648aa69411061f612e69bbac7478b3820e69bfdbcb4eb10db1
-      EXPECTED_STAGE2E_ASSET_1: e69cf7821a8f1cc2d42dca1b29a1599a124bd95f14135888b9f2ba162371b663
-      EXPECTED_STAGE2E_ASSET_2: bb5d3b72bc9ba6230612d9fdfe0144097b8dd701fd0b29c51aa250579aa782c9
+      EXPECTED_STAGE2E_ASSET_1: 1a873720429093b3f9f9bfba8426a2a5463b90ba76589a8bbf20894feb5004b1
+      EXPECTED_STAGE2E_ASSET_2: 10cbc521c9d503e16c80422f85db11fce25f7f78a3b21e8d10c121a5c4ed6127
       EXPECTED_STAGE2E_ASSET_3: 98a092ce9705089e090368c9501ab81fb51723be00cf5327b2be294a6f3e9cb1
       EXPECTED_STAGE2E_ASSET_4: 751505eec5fa1b0b98688fb3b448cb0e6a813083e56fbdea8b30a45d63ab1b24
     steps:
@@ -43,9 +43,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = refs/heads/codex/stage0c2c-arm64e-census
+          test "$GITHUB_REF" = refs/heads/codex/stage0c2c-wx-arm64e
           if [[ "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
-            echo 'Stage 0C-2C preimage census requires attempt 1' >&2
+            echo 'Stage 0C-2C bootstrap W^X requires attempt 1' >&2
             exit 1
           fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -103,7 +103,7 @@ jobs:
               "scripts/repro/stage0c2e/shengufs.patch": os.environ["EXPECTED_STAGE2E_ASSET_3"],
               "scripts/repro/stage0c2e/stage0c2e-inputs.json": os.environ["EXPECTED_STAGE2E_ASSET_4"],
           }
-          stage2c_assets = {'scripts/repro/stage0c2e/sheng-stage0c2c-panic-marker.patch': 'e114d89c88927bde55df9f3957e23a4bca4b0309a80222f4e6611161adc5e294', 'scripts/repro/stage0c2e/sheng-stage0c2c-static-if-preimage.patch': '97f09ef79474a92eaa733e35314a63d054c055a1d5475f0f380ab0b9748650d4', 'scripts/repro/stage0c2e/audit-stage0c2c.py': 'b9fdee3840e5993e16afd8c67061d39259e710530e65758cf742dfef36477c9e', 'scripts/repro/stage0c2e/kc_image.py': '2a2561308b27ace4e21dd4e45924bdeca937ee13047b7c6fd5ce580018f68747', 'scripts/repro/stage0c2e/stage0c2c-inputs.json': '8926fd5cf13c378c83364402fb3fccdc3ca461739b5ace96296ea50643f872cf', 'scripts/repro/stage0c2e/sheng-stage0c2c-marker-link-modes.patch': 'dd99ff4cc82383956e76f7924056785ea9a2c309d13ac1aa6b8dac5c0264ea97'}
+          stage2c_assets = {'scripts/repro/stage0c2e/sheng-stage0c2c-panic-marker.patch': 'e114d89c88927bde55df9f3957e23a4bca4b0309a80222f4e6611161adc5e294', 'scripts/repro/stage0c2e/sheng-stage0c2c-static-if-preimage.patch': '97f09ef79474a92eaa733e35314a63d054c055a1d5475f0f380ab0b9748650d4', 'scripts/repro/stage0c2e/audit-stage0c2c.py': 'b9fdee3840e5993e16afd8c67061d39259e710530e65758cf742dfef36477c9e', 'scripts/repro/stage0c2e/kc_image.py': '2a2561308b27ace4e21dd4e45924bdeca937ee13047b7c6fd5ce580018f68747', 'scripts/repro/stage0c2e/stage0c2c-inputs.json': 'd92617e16164bf14394708cbbb6f5b0d3e6ce3abf406a350dc0a02204794d73f', 'scripts/repro/stage0c2e/sheng-stage0c2c-marker-link-modes.patch': 'dd99ff4cc82383956e76f7924056785ea9a2c309d13ac1aa6b8dac5c0264ea97', 'scripts/repro/stage0c2e/stage0c2c-wx-bootstrap.patch': 'c596f4dafc6fcbd9cf01e099e0c20d68f4ac9ac71cfcaed1e54073681e23230b', 'scripts/repro/stage0c2e/stage0c2c-static-if-noop.patch': 'ae5c2d8bb97282ea4db377c4aef0c1c8df8ed3f7519d81ad1f03d869d49f7e4e', 'scripts/repro/stage0c2e/stage0c2c-preseal-fileset.patch': '46e6c8a4651d672b8aa5727c157cf9235059c99652b54ecceb23aff7d5cedc1d', 'scripts/repro/stage0c2e/verify-stage0c2c-seal-pair.py': '74f0b1bc4055f05e13a6e01208ce71a95ee770986e3e6ee3f403f19b4edc4e40'}
           for name, wanted in (expected | stage2e_assets | stage2c_assets).items():
               actual = hashlib.sha256((root / name).read_bytes()).hexdigest()
               if actual != wanted:
@@ -325,6 +325,28 @@ jobs:
           subprocess.run(["python3", "-B", str(assets / "audit-stage0c2c.py"), "--candidate", str(candidate),
                           "--capture", str(capture), "--kit", str(assets / "kc_image.py"),
                           "--output", str(evidence / "stage0c2c-census.json"), "--require-panic-marker"], check=True)
+          import re, shutil, sys
+          tree = candidate.parent.parent / "tree"
+          installed_kit = tree / "kits/XnuPrelink/kc_image.py"
+          if installed_kit.read_bytes() != (assets / "kc_image.py").read_bytes():
+              raise SystemExit("source sealer and independent audit use different kit readers")
+          sealed = temp / "stage0c2c-private-sealed.macho"
+          shutil.copyfile(candidate, sealed)
+          subprocess.run([sys.executable, "-B", str(tree / "scripts/seal-source-crypto-kernel.py"), str(sealed),
+                          "--prepatch-fileset-static-if"], env=dict(os.environ, UNIXNU_XNU_ARCH="arm64e"), check=True)
+          result = evidence / "stage0c2c-seal-pair.json"
+          pair = temp / "stage0c2c-private-seal-pair.json"
+          subprocess.run([sys.executable, "-B", str(assets / "verify-stage0c2c-seal-pair.py"), str(candidate),
+                          str(sealed), str(assets / "kc_image.py"), str(pair)], check=True)
+          observed = subprocess.run([str(parser)], input=sealed.read_bytes(), capture_output=True, timeout=60)
+          parsed = re.fullmatch(rb"DarwinBoot parser PASS root_segments=(\d+) span=(\d+) entry=([0-9a-f]+)\n",
+                                observed.stdout)
+          if observed.returncode or not parsed or dict(root_segments=int(parsed[1]), span=int(parsed[2]),
+                  entry=int(parsed[3], 16)) != capture_doc["parser_summary"]:
+              raise SystemExit("sealed fileset parser or entry geometry disagrees")
+          row = json.loads(pair.read_bytes())
+          row["sealed_parser"] = "ACCEPT"
+          result.write_text(json.dumps(row, indent=2) + "\n")
           PY
       - name: Validate evidence and decide job result
         if: always() && steps.identity.outcome == 'success'
@@ -340,7 +362,7 @@ jobs:
         if: always() && steps.identity.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: sheng-stage0c2c-preimage-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: sheng-stage0c2c-wx-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-workflow-identity.json
             ${{ runner.temp }}/stage0c2a-r-publish/toolchain.json
@@ -356,5 +378,6 @@ jobs:
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-dependencies.json
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2c-build-inputs.json
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2c-census.json
+            ${{ runner.temp }}/stage0c2a-r-publish/stage0c2c-seal-pair.json
           if-no-files-found: error
           retention-days: 14

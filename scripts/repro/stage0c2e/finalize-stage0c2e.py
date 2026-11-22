@@ -74,7 +74,7 @@ def main():
                 parser_sdk_identity(doc)
             else:
                 if name == "strict-result.json":
-                    require(doc.pop("candidate_track", None) == "stage0c2c-preimage", "CANDIDATE_TRACK")
+                    require(doc.pop("candidate_track", None) == "stage0c2c-wx", "CANDIDATE_TRACK")
                 RULES["validate"](name, doc)
             records[name] = doc
             save(name, doc)
@@ -105,7 +105,7 @@ def main():
          (RULES["LD"], RULES["CLANG"], "25G332", "26.5")),
         ("RUST_TOOLCHAIN", dependencies.get("runner_image") == tools.get("runner_image") and
          dependencies.get("rust") == tools.get("rust") == "rustc 1.98.0 (88d9e12ae 2026-08-18)"),
-        ("NEW_IDENTITY", bool(candidate) and candidate.get("sha256") not in {RULES["CANDIDATE"], BASELINE_2E} and
+        ("NEW_IDENTITY", bool(candidate) and candidate.get("sha256") not in {RULES["CANDIDATE"], BASELINE_2E, "e38e88b00accde4a56108d03088d11343a5f0a126df026bc4b83c134a2695275"} and
          capture.get("sample_kind") == "new-candidate"),
         ("STRICT_AND_MAP", strict.get("candidate_sha256") == candidate.get("sha256") and
          strict.get("candidate_bytes") == candidate.get("bytes") and strict.get("map_sha256") ==
@@ -128,9 +128,13 @@ def main():
         expected = read_json(Path(__file__).with_name("stage0c2c-inputs.json"))
         inputs = read_json(base / "stage0c2c-build-inputs.json")
         wanted = {key: expected[key] for key in (
-            "ordered_patches", "patched_xnu_source_sha256", "source_commit", "source_tree", "marker_build_recipe")}
+            "ordered_patches", "patched_xnu_source_sha256", "source_commit", "source_tree", "marker_build_recipe", "seal_recipe")}
         wanted["xnu_commit"] = expected["fixed_framework_soc_xnu"]["xnu"]
+        objects = inputs.pop("bootstrap_objects")
+        require(set(objects) == {"start.o", "static_if.o", "arm_vm_init.o"} and
+                all(RULES["byte_identity"](obj) for obj in objects.values()), "BOOTSTRAP_OBJECTS")
         require(inputs == wanted, "PRODUCTION_SOURCE")
+        inputs["bootstrap_objects"] = objects
         census = read_json(base / "stage0c2c-census.json")
         require((census["candidate_sha256"], census["candidate_bytes"]) ==
                 (candidate["sha256"], candidate["bytes"]) and census["runtime_wx"] == "NOT_OBSERVED",
@@ -141,14 +145,24 @@ def main():
         require(marker["resolved"] is True and marker["reference"] in ("direct", "fixup"), "PANIC_MARKER")
         save("stage0c2c-build-inputs.json", inputs)
         save("stage0c2c-census.json", census)
+        seal = read_json(base / "stage0c2c-seal-pair.json")
+        require(set(seal) == {"before_sha256", "after_sha256", "bytes", "tested_static_if_sites",
+                              "source_crypto_post_hmac", "other_binary_changes", "runtime", "sealed_parser"},
+                "SEALED_FIELDS")
+        require(seal["before_sha256"] == candidate["sha256"] and seal["bytes"] == candidate["bytes"]
+                and RULES["HEX64"].fullmatch(seal["after_sha256"]) and seal["after_sha256"] != candidate["sha256"]
+                and type(seal["tested_static_if_sites"]) is int and seal["tested_static_if_sites"] > 0
+                and seal["source_crypto_post_hmac"] == "MATCH" and seal["other_binary_changes"] is False
+                and seal["runtime"] == "NOT_OBSERVED" and seal["sealed_parser"] == "ACCEPT", "SEALED_IDENTITY")
+        save("stage0c2c-seal-pair.json", seal)
     except (OSError, ValueError, KeyError, TypeError):
         issue.append("STAGE0C2C_INPUTS_OR_CENSUS")
     digests = {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(args.publish.glob("*.json"))}
     status = "BLOCKED" if issue else "PASS"
-    save("stage0c2e-verdict.json", dict(candidate_track="stage0c2c-preimage", status=status, issues=issue,
+    save("stage0c2e-verdict.json", dict(candidate_track="stage0c2c-wx", status=status, issues=issue,
          build=args.build_outcome, capture=args.capture_outcome, candidate_identity=candidate,
          parser_observation=capture.get("parser_result", "NOT_RUN"), artifacts_sha256=digests))
-    print("Stage 0C-2C preimage census", status, ",".join(issue))
+    print("Stage 0C-2C bootstrap W^X", status, ",".join(issue))
     return 1 if issue else 0
 
 
