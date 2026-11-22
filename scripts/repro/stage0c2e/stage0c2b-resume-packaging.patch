@@ -1,0 +1,214 @@
+diff --git a/scripts/unixnu/payload.py b/scripts/unixnu/payload.py
+index 90693f8..ac75dc6 100644
+--- a/scripts/unixnu/payload.py
++++ b/scripts/unixnu/payload.py
+@@ -13,6 +13,8 @@ import json
+ import os
+ import re
+ import shutil
++import struct
++import sys
+ import tempfile
+ from pathlib import Path
+ 
+@@ -54,6 +56,100 @@ def check_data_input(ctx, data):
+                     'persistent Data still needs its original seed to publish the volume')
+ 
+ 
++def resume_digest(spec, field):
++    value = spec.get('resume_only_storage_' + field + '_sha256')
++    if not isinstance(value, str) or not re.fullmatch(r'[a-f0-9]{64}', value) or value == '0' * 64:
++        raise Error(f'resume-only storage requires a fixed {field} SHA-256')
++    return value
++
++
++def resume_only_recovery(spec, kernel, arguments):
++    """Admit an exact WAL v2 kernel to a menu with no initialization entry."""
++    expected = spec.get('resume_only_storage_kernel_sha256')
++    if expected is None:
++        if any(key.startswith('resume_only_storage_') for key in spec):
++            raise Error('incomplete resume-only storage policy')
++        return None
++    expected = resume_digest(spec, 'kernel')
++    sealed = resume_digest(spec, 'sealed_kernel')
++    if expected == sealed:
++        raise Error('resume-only storage must distinguish the strict and sealed kernel identities')
++    if (spec.get('install') is not None or spec.get('panic_screen') or spec.get('entry_probe_reset_delay')
++            or spec.get('prepatch_fileset_static_if')):
++        raise Error('resume-only storage forbids Install and post-admission kernel mutation')
++    adt = spec.get('adt', {})
++    if adt.get('owned_memory_excluded_ranges') or adt.get('owned_memory_outside_ranges'):
++        raise Error('resume-only storage requires the contiguous W^X loader profile')
++    if sha256_file(kernel) not in {expected, sealed}:
++        raise Error('resume-only storage kernel identity mismatch')
++    values = {}
++    for argument in arguments:
++        key, separator, value = argument.lstrip('-').partition('=')
++        if key in {'validation_disables', 'serverperfmode', 'lcks'}:
++            raise Error(f'resume-only storage seal does not model {key}')
++        if key in {'data-reset', 'data-wal-v2', 'data-persist', 'log'}:
++            if not separator or argument.startswith('-') or key == 'data-reset' or key in values:
++                raise Error(f'resume-only storage forbids invalid or repeated {key}')
++            values[key] = value
++    if values.get('data-persist') != '2' or values.get('data-wal-v2') != '1':
++        raise Error('resume-only storage Boot requires data-persist=2 and data-wal-v2=1')
++    recovery = [argument for argument in arguments
++                if argument.lstrip('-').split('=', 1)[0] not in {'data-persist', 'log'}]
++    return check_args([*recovery, 'data-persist=1', 'log=0'])
++
++
++def stage_resume_kernel(ctx, spec, source, staged, arguments):
++    raw, sealed = (resume_digest(spec, name) for name in ('kernel', 'sealed_kernel'))
++    shutil.copyfile(source, staged)
++    staged_digest = sha256_file(staged)
++    if staged_digest == raw:
++        sealer = ctx.tree / 'scripts/seal-source-crypto-kernel.py'
++        for field, tool_path in (('sealer', sealer), ('kernel_target', ctx.tree / 'scripts/kernel_target.py'),
++                                 ('kc_image', ctx.tree / 'kits/XnuPrelink/kc_image.py')):
++            if not tool_path.is_file() or sha256_file(tool_path) != resume_digest(spec, field):
++                raise Error(f'resume-only storage {field} identity mismatch')
++        run([sys.executable, sealer, staged, '--prepatch-fileset-static-if', '--kernel-args=' + arguments], cwd=ctx.tree,
++            env=dict(os.environ, UNIXNU_XNU_ARCH='arm64e'), log_file=ctx.logs / 'payload-seal.log')
++        staged.with_suffix(staged.suffix + '.crypto-hmac.json').unlink(missing_ok=True)
++        staged_digest = sha256_file(staged)
++    if staged_digest != sealed:
++        raise Error('resume-only staged kernel does not match the accepted seal')
++
++
++def check_resume_seed(spec, data, skip_setup):
++    if skip_setup or data is None or not spec.get('adt', {}).get('packed_data_ramdisk'):
++        raise Error('resume-only storage requires the unchanged packed Data seed')
++    wanted = resume_digest(spec, 'seed')
++    logical_bytes = spec.get('resume_only_storage_seed_bytes')
++    if type(logical_bytes) is not int:
++        raise Error('resume-only storage requires fixed packed seed identity and logical size')
++    with data.open('rb') as stream:
++        physical_bytes = os.fstat(stream.fileno()).st_size
++        if not 32 <= physical_bytes <= 256 << 20:
++            raise Error('packed Data seed exceeds DarwinBoot input bounds')
++        header = stream.read(32)
++        if (len(header) != 32 or header[:8] != b'DBRDISK1' or int.from_bytes(header[8:12], 'little') != 1
++                or int.from_bytes(header[12:16], 'little') != 4096 or not 0 < logical_bytes <= 1 << 40
++                or logical_bytes % 4096 or int.from_bytes(header[16:24], 'little') != logical_bytes):
++            raise Error('resume-only packed Data seed geometry mismatch')
++        count = int.from_bytes(header[24:32], 'little')
++        if not 0 < count <= min(65536, (physical_bytes - 32) // 16):
++            raise Error('resume-only packed Data seed requires a bounded extent table')
++        cursor = 32 + 16 * count
++        end = 0
++        extents = stream.read(count * 16)
++        if len(extents) != count * 16:
++            raise Error('truncated packed Data seed extent table')
++        for offset, length in struct.iter_unpack('<QQ', extents):
++            if (not length or (offset | length) % 4096 or offset < end or offset + length > logical_bytes
++                    or cursor + length > physical_bytes):
++                raise Error('resume-only packed Data seed extent lies outside its layout')
++            end, cursor = offset + length, cursor + length
++        stream.seek(0)
++        if cursor != physical_bytes or hashlib.file_digest(stream, 'sha256').hexdigest() != wanted:
++            raise Error('resume-only packed Data seed byte identity or extent length mismatch')
++
++
+ def check_native_root(kernel, arguments, vmm_present=False):
+     """Refuse the known bare-metal AMFI panic before the volume is written.
+ 
+@@ -117,6 +213,7 @@ def build(ctx, kernel=None):
+     names = {item.split('=', 1)[0] for item in extra}
+     arguments = extra + [item for item in spec.get('kernel_args', []) if item.split('=', 1)[0] not in names]
+     line = check_args(arguments)
++    recovery_line = resume_only_recovery(spec, kernel, arguments)
+     log(f'kernel args: {line}')
+     check_native_root(kernel, arguments, bool(ctx.board.get('adt', {}).get('defaults', {}).get('u32', {}).get('vmm-present')))
+     owner_trust = getattr(args, 'owner_trust_cache', None)
+@@ -131,6 +228,8 @@ def build(ctx, kernel=None):
+     check_data_input(ctx, data)
+     if data and not data.is_file():
+         raise Error(f'Data ramdisk not found: {data}')
++    if recovery_line is not None:
++        check_resume_seed(spec, data, getattr(args, 'skip_setup', False))
+     if getattr(args, 'skip_setup', False):
+         if not data:
+             raise Error('--skip-setup edits the Data seed: pass the original one with --data-ramdisk FILE')
+@@ -142,6 +241,9 @@ def build(ctx, kernel=None):
+         raise Error(f'GPU addon not found or not made by scripts/make-gpu-addon.py: {addon}')
+     policy_path = spec.get('root_policies')
+     policies = expand(policy_path.format(tree=ctx.tree, out=ctx.work)) if policy_path else None
++    if recovery_line is not None and (not policies or not policies.is_file() or
++                                      sha256_file(policies) != resume_digest(spec, 'root_policies')):
++        raise Error('resume-only storage requires the pinned root-policy bundle')
+     if policies:
+         if ctx.schema_version != 2:
+             raise Error('Root-policy handoff requires a format 2 device tree')
+@@ -157,23 +259,18 @@ def build(ctx, kernel=None):
+     adt = spec.get('adt', {})
+     if adt.get('unique_chip_id') == 'required' and not seed:
+         raise Error('the platform seed is not stored in any repository: pass --unique-chip-id HEX (or UNIXNU_UNIQUE_CHIP_ID)')
+-    prepatch_static_if = spec.get('prepatch_fileset_static_if', False)
+-    entry_probe = bool(spec.get('panic_screen') or spec.get('entry_probe_reset_delay'))
+-    if not isinstance(prepatch_static_if, bool):
+-        raise Error('payload prepatch_fileset_static_if must be boolean')
+-    if prepatch_static_if and entry_probe:
+-        raise Error('presealed static_if requires source diagnostics without binary entry probes')
+-    source_integrity = (prepatch_static_if or entry_probe) and b'_source_corecrypto14_bootstrap\0' in kernel.read_bytes()
+-    if prepatch_static_if and not source_integrity:
+-        raise Error('presealed static_if requires the source corecrypto provider')
+     out, image, report = paths(ctx)
+     stage = out / 'stage'
+     shutil.rmtree(stage, ignore_errors=True)
+     payloads = stage / 'EFI/UniXNU/Payloads'
+     payloads.mkdir(parents=True)
+-    shutil.copyfile(kernel, payloads / 'kernel.macho')
++    staged_kernel = payloads / 'kernel.macho'
++    if recovery_line is None:
++        shutil.copyfile(kernel, staged_kernel)
++    else:
++        stage_resume_kernel(ctx, spec, kernel, staged_kernel, line)
+     # The entry probe (stage bars, optional reset) is wanted with either setting; the panic screen is only one part of it.
+-    if entry_probe:
++    if spec.get('panic_screen') or spec.get('entry_probe_reset_delay'):
+         probe = (['--reset-delay', str(int(spec['entry_probe_reset_delay']))]
+                  if spec.get('entry_probe_reset_delay') else ['--no-reset'])
+         screen = ['--panic-screen'] if spec.get('panic_screen') else []
+@@ -186,21 +283,24 @@ def build(ctx, kernel=None):
+                 probe.append('--reset-before')
+         run(['python3', ctx.tree / 'scripts/patch-xnu-entry-probe.py', payloads / 'kernel.macho', *screen, *probe],
+             cwd=ctx.tree, env=dict(os.environ, UNIXNU_UEFI=str(ctx.uefi or '')), log_file=ctx.logs / 'payload-patch.log')
+-    # Source corecrypto hashes the final instructions in the staged fileset.
+-    if source_integrity:
+-        boot_args = ' '.join([line, *spec.get('install', {}).get('confirm_args', [])])
+-        prepatch = ['--prepatch-fileset-static-if'] if prepatch_static_if else []
+-        run(['python3', ctx.tree / 'scripts/seal-source-crypto-kernel.py', payloads / 'kernel.macho',
+-             '--kernel-args', boot_args, *prepatch], cwd=ctx.tree,
+-            env=dict(os.environ, **kernel_step.version_env({}, ctx)), log_file=ctx.logs / 'payload-seal.log')
++        # The probes rewrite instructions inside __text, which the source corecrypto POST hashes.
++        if b'_source_corecrypto14_bootstrap\0' in Path(kernel).read_bytes():
++            boot_args = ' '.join([line, *spec.get('install', {}).get('confirm_args', [])])
++            run(['python3', ctx.tree / 'scripts/seal-source-crypto-kernel.py', payloads / 'kernel.macho', '--kernel-args', boot_args],
++                cwd=ctx.tree, env=dict(os.environ, **kernel_step.version_env({}, ctx)), log_file=ctx.logs / 'payload-seal.log')
+     if trust:
+         shutil.copyfile(trust, payloads / 'kernel.macho.trustcache')
+     if addon:
+         shutil.copyfile(addon, payloads / 'kernel.macho.gpuaddon')
+     if policies:
+-        shutil.copyfile(policies, payloads / 'kernel.macho.vroot')
++        staged_policy = payloads / 'kernel.macho.vroot'
++        shutil.copyfile(policies, staged_policy)
++        if recovery_line is not None and sha256_file(staged_policy) != resume_digest(spec, 'root_policies'):
++            raise Error('resume-only staged root-policy identity mismatch')
+     if data:
+         shutil.copyfile(data, payloads / 'scratch-data.img')
++        if recovery_line is not None:
++            check_resume_seed(spec, payloads / 'scratch-data.img', False)
+     if ctx.schema_version == 2:
+         from .devicetree import compile_hardware, generate
+         dtb = compile_hardware(ctx)
+@@ -236,6 +336,9 @@ def build(ctx, kernel=None):
+     config = (f'version = 1\n[boot]\ntimeout = {spec.get("timeout", 3)}\ndefault = "xnu"\n[kits]\nautoload = false\n{loader}'
+               f'[[entry]]\nid = "xnu"\ntitle = "{spec.get("title", "UniXNU")}"\ntype = "xnu"\npath = "Payloads/kernel.macho"\n{initrd}'
+               f'args = "{line}"\n')
++    if recovery_line is not None:
++        config += ('[[entry]]\nid = "recovery"\ntitle = "Read-only Recovery"\ntype = "xnu"\n'
++                   f'path = "Payloads/kernel.macho"\n{initrd}args = "{recovery_line}"\n')
+     install = spec.get('install')
+     if install:
+         if not data:

@@ -155,6 +155,10 @@ def main():
                 and seal["source_crypto_post_hmac"] == "MATCH" and seal["other_binary_changes"] is False
                 and seal["runtime"] == "NOT_OBSERVED" and seal["sealed_parser"] == "ACCEPT", "SEALED_IDENTITY")
         save("stage0c2c-seal-pair.json", seal)
+        fat = read_json(base / "stage0c2b-fat.json")
+        check_fat = runpy.run_path(str(Path(__file__).with_name("audit-stage0c2b-fat.py")))["validate_receipt"]
+        check_fat(fat, strict, seal)
+        save("stage0c2b-fat.json", fat)
     except (OSError, ValueError, KeyError, TypeError):
         issue.append("STAGE0C2C_INPUTS_OR_CENSUS")
     digests = {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(args.publish.glob("*.json"))}
