@@ -105,7 +105,7 @@ def main():
          (RULES["LD"], RULES["CLANG"], "25G332", "26.5")),
         ("RUST_TOOLCHAIN", dependencies.get("runner_image") == tools.get("runner_image") and
          dependencies.get("rust") == tools.get("rust") == "rustc 1.98.0 (88d9e12ae 2026-08-18)"),
-        ("NEW_IDENTITY", bool(candidate) and candidate.get("sha256") not in {RULES["CANDIDATE"], BASELINE_2E, "e38e88b00accde4a56108d03088d11343a5f0a126df026bc4b83c134a2695275"} and
+        ("NEW_IDENTITY", bool(candidate) and candidate.get("sha256") not in {RULES["CANDIDATE"], BASELINE_2E, "e38e88b00accde4a56108d03088d11343a5f0a126df026bc4b83c134a2695275", "445f592f3bb87cd847adf6a89aca8ec15aa5e094953c0a8f64a19ec82399709b"} and
          capture.get("sample_kind") == "new-candidate"),
         ("STRICT_AND_MAP", strict.get("candidate_sha256") == candidate.get("sha256") and
          strict.get("candidate_bytes") == candidate.get("bytes") and strict.get("map_sha256") ==

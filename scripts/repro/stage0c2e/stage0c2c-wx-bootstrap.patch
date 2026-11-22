@@ -1,34 +1,93 @@
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
-@@ -626,7 +626,140 @@
+@@ -490,6 +490,12 @@
+ 	ldr		x22, [x20, BA_VIRT_BASE]			// Get the kernel virt base
+ 	ldr		x23, [x20, BA_PHYS_BASE]			// Get the kernel phys base
+ 	ldr		x24, [x20, BA_MEM_SIZE]				// Get the physical memory size
++#if !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
++	/* This fileset profile uses one loader-owned contiguous window. */
++	ldr	x5, [x20, BA_MEM_SIZE_ACTUAL]
++	cmp	x5, x24
++	b.ne	Lbootstrap_tables_exhausted
++#endif
+ 	adrp	x25, EXT(bootstrap_pagetables)@page	// Get the start of the page tables
+ 	ldr		x26, [x20, BA_BOOT_FLAGS]			// Get the kernel boot flags
+ 
+@@ -586,6 +592,10 @@
+ 	 * x24 - Physical memory size
+ 	 */
+ 	sub		x18, x0, x23
++#if !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
++	cmp	x18, x24
++	b.hs	Lbootstrap_tables_exhausted
++#endif
+ 	sub		x24, x24, x18
+ 	add		x22, x22, x18
+ 	add		x23, x23, x18
+@@ -596,6 +606,40 @@
+ 	 * x14 - KVA virtual cursor
+ 	 * x15 - KVA physical cursor
+ 	 */
++#if !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
++	/* Both aliases have the same offset inside a 2 MiB block. */
++	cbz	x24, Lbootstrap_tables_exhausted
++	mov	x5, #(1ULL << 33)
++	cmp	x24, x5
++	b.hi	Lbootstrap_tables_exhausted
++	adds	x17, x23, x24
++	b.cs	Lbootstrap_tables_exhausted
++	orr	x5, x17, x23
++	tst	x5, #0xfff
++	b.ne	Lbootstrap_tables_exhausted
++	eor	x5, x22, x23
++	tst	x5, #0x1fffff
++	b.ne	Lbootstrap_tables_exhausted
++	sub	x5, x17, #1
++	lsr	x5, x5, #(64 - T0SZ_BOOT)
++	cbnz	x5, Lbootstrap_tables_exhausted
++	sub	x5, x24, #1
++	adds	x5, x22, x5
++	b.cs	Lbootstrap_tables_exhausted
++	lsr	x6, x22, #(64 - T1SZ_BOOT)
++	lsr	x5, x5, #(64 - T1SZ_BOOT)
++	cmp	x5, x6
++	b.ne	Lbootstrap_tables_exhausted
++	mov	x7, #((1 << T1SZ_BOOT) - 1)
++	cmp	x6, x7
++	b.ne	Lbootstrap_tables_exhausted
++	mov	x16, x23
++	and	x5, x23, #0xffffffffffe00000
++	sub	x27, x17, #1
++	sub	x27, x27, x5
++	lsr	x27, x27, #(ARM_TT_L2_SHIFT)
++	add	x27, x27, #1
++#endif
+ 	mov		x4, x0
+ 	mov		x14, x22
+ 	mov		x15, x23
+@@ -620,13 +664,224 @@
+ 	 */
  	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
+ 	/* create_bootstrap_mapping(vbase, pbase, num_ents, L1 table, freeptr) */
++#if !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
++	mov	x5, x27
++#endif
+ 	create_bootstrap_mapping x0,  x4,  x5, x1, x2, x6, x10, x11, x12, x13
+ 
+ 	/* Setup the KVA bootstrap mapping */
+ 	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
++#if !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
++	mov	x5, x27
++#endif
  	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
  
 +#if !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
 +#if T0SZ_BOOT != T1SZ_BOOT || (T1SZ_BOOT != 25 && T1SZ_BOOT != 26)
 +#error "Native bootstrap W^X requires matching 38-bit or 39-bit roots"
 +#endif
-+	/* Both tables are still inactive. Tag them from the same physical code range. */
-+	adrp	x3, segment$start$__TEXT_EXEC@page
-+	add	x3, x3, segment$start$__TEXT_EXEC@pageoff
-+	adrp	x4, segment$end$__TEXT_EXEC@page
-+	add	x4, x4, segment$end$__TEXT_EXEC@pageoff
-+	orr	x5, x3, x4
-+	tst	x5, #0xfff
-+	b.ne	Lbootstrap_tables_exhausted
-+	cmp	x4, x3
-+	b.ls	Lbootstrap_tables_exhausted
-+	eor	x5, x22, x23
-+	tst	x5, #0x1fffff
-+	b.ne	Lbootstrap_tables_exhausted
-+	and	x5, x23, #0xffffffffffe00000
-+	and	x6, x24, #0xffffffffffe00000
-+	adds	x5, x5, x6
-+	b.cs	Lbootstrap_tables_exhausted
-+	cmp	x3, x23
-+	b.lo	Lbootstrap_tables_exhausted
-+	cmp	x4, x5
-+	b.hi	Lbootstrap_tables_exhausted
++	/* Use the collection's executable range, which also contains retained code. */
++	mov	x19, lr
++	bl	Lbootstrap_wx_fileset_exec
 +	adr	x5, common_start
 +	cmp	x5, x3
 +	b.lo	Lbootstrap_tables_exhausted
@@ -40,13 +99,12 @@
 +	b.lo	Lbootstrap_tables_exhausted
 +	cmp	x5, x4
 +	b.hs	Lbootstrap_tables_exhausted
-+	sub	x5, lr, x22
++	sub	x5, x19, x22
 +	add	x5, x5, x23
 +	cmp	x5, x3
 +	b.lo	Lbootstrap_tables_exhausted
 +	cmp	x5, x4
 +	b.hs	Lbootstrap_tables_exhausted
-+	mov	x19, lr
 +	add	x1, x25, #(BOOTSTRAP_TABLE_BYTES >> 12), lsl #12
 +	mov	x15, #((1 << (64 - T1SZ_BOOT - ARM_TT_L1_SHIFT)) << TTE_SHIFT)
 +	mov	x0, x25
@@ -59,9 +117,89 @@
 +
 +#if !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
 +/*
++ * Read the loaded MH_FILESET header before activating either root.
++ * x16..x17 is the owned PA interval, x22 its VA start. Preserve x2 (pool
++ * cursor) and return the sole executable segment's PA bounds in x3..x4.
++ */
++Lbootstrap_wx_fileset_exec:
++	sub	x5, x17, x16
++	cmp	x5, #32
++	b.lo	Lbootstrap_tables_exhausted
++	ldr	w5, [x16]
++	movz	w6, #0xfacf
++	movk	w6, #0xfeed, lsl #16
++	cmp	w5, w6
++	b.ne	Lbootstrap_tables_exhausted
++	ldr	w5, [x16, #12]
++	cmp	w5, #0xc	// MH_FILESET
++	b.ne	Lbootstrap_tables_exhausted
++	ldp	w7, w5, [x16, #16]	// ncmds, sizeofcmds
++	cmp	w7, #4096
++	b.hi	Lbootstrap_tables_exhausted
++	add	x8, x16, #32
++	subs	x9, x17, x8
++	cmp	x5, x9
++	b.hi	Lbootstrap_tables_exhausted
++	add	x9, x8, x5
++	mov	x3, xzr
++Lbootstrap_wx_next_command:
++	cbz	w7, Lbootstrap_wx_commands_done
++	sub	x5, x9, x8
++	cmp	x5, #8
++	b.lo	Lbootstrap_tables_exhausted
++	ldp	w10, w11, [x8]
++	cmp	w11, #8
++	b.lo	Lbootstrap_tables_exhausted
++	tst	w11, #7
++	b.ne	Lbootstrap_tables_exhausted
++	cmp	x11, x5
++	b.hi	Lbootstrap_tables_exhausted
++	cmp	w10, #0x19	// LC_SEGMENT_64
++	b.ne	Lbootstrap_wx_advance_command
++	cmp	w11, #72
++	b.lo	Lbootstrap_tables_exhausted
++	ldr	w10, [x8, #60]	// initprot
++	tbz	w10, #2, Lbootstrap_wx_advance_command
++	cmp	w10, #5
++	b.ne	Lbootstrap_tables_exhausted
++	ldr	w10, [x8, #56]	// maxprot
++	cmp	w10, #5
++	b.ne	Lbootstrap_tables_exhausted
++	cbnz	x3, Lbootstrap_tables_exhausted
++	ldp	x12, x13, [x8, #8]
++	MOV64	x14, 0x455f545845545f5f	// "__TEXT_E"
++	cmp	x12, x14
++	b.ne	Lbootstrap_tables_exhausted
++	MOV64	x14, 0x434558		// "XEC" (zero padded)
++	cmp	x13, x14
++	b.ne	Lbootstrap_tables_exhausted
++	ldp	x5, x6, [x8, #24]	// vmaddr, vmsize
++	subs	x5, x5, x22
++	b.cc	Lbootstrap_tables_exhausted
++	cbz	x6, Lbootstrap_tables_exhausted
++	adds	x3, x16, x5
++	b.cs	Lbootstrap_tables_exhausted
++	adds	x4, x3, x6
++	b.cs	Lbootstrap_tables_exhausted
++	cmp	x4, x17
++	b.hi	Lbootstrap_tables_exhausted
++	orr	x5, x3, x4
++	tst	x5, #0xfff
++	b.ne	Lbootstrap_tables_exhausted
++Lbootstrap_wx_advance_command:
++	add	x8, x8, x11
++	sub	w7, w7, #1
++	b	Lbootstrap_wx_next_command
++Lbootstrap_wx_commands_done:
++	cbz	x3, Lbootstrap_tables_exhausted
++	cmp	x8, x9
++	b.ne	Lbootstrap_tables_exhausted
++	ret
++
++/*
 + * Retag one inactive 4 KiB bootstrap root. x25 is the pool base and x15
 + * is the active root length (a subpage root still reserves a full page).
-+ * x2 is the last used
++ * x16..x17 is the owned PA interval. x2 is the last used
 + * table page. x1 is the end-exclusive table pool. x3..x4 is the PA
 + * range that can execute. Keep the same MAIR index and shareability.
 + */
@@ -93,6 +231,10 @@
 +	bic	x9, x9, #0xc0
 +	orr	x9, x9, #(1 << 53)
 +	orr	x9, x9, #(1 << 54)
++	cmp	x10, x16
++	b.lo	Lbootstrap_wx_split
++	cmp	x13, x17
++	b.hi	Lbootstrap_wx_split
 +	cmp	x13, x3
 +	b.ls	Lbootstrap_wx_store_block
 +	cmp	x10, x4
@@ -115,6 +257,10 @@
 +	bic	x14, x14, #0x0000ffffffe00000
 +	mov	x12, x2
 +Lbootstrap_wx_page:
++	cmp	x10, x16
++	b.lo	Lbootstrap_wx_invalid_page
++	cmp	x10, x17
++	b.hs	Lbootstrap_wx_invalid_page
 +	orr	x11, x14, x10
 +	cmp	x10, x3
 +	b.lo	Lbootstrap_wx_store_page
@@ -122,6 +268,9 @@
 +	b.hs	Lbootstrap_wx_store_page
 +	bic	x11, x11, #(1 << 53)
 +	orr	x11, x11, #0x80
++	b	Lbootstrap_wx_store_page
++Lbootstrap_wx_invalid_page:
++	mov	x11, xzr
 +Lbootstrap_wx_store_page:
 +	str	x11, [x12], #8
 +	add	x10, x10, #4096
@@ -143,15 +292,18 @@
  	// the early debugger rather than corrupting memory or forging a map.
 --- a/osfmk/arm/pmap/pmap.h
 +++ b/osfmk/arm/pmap/pmap.h
-@@ -118,8 +118,9 @@
+@@ -116,10 +116,10 @@
+  */
+ #define BOOTSTRAP_TABLE_SIZE (ARM_PGBYTES * 34)
  #elif !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
- /* Native 4 KiB: two roots plus up to seven L2 pages per 6 GiB mapping.
-  * The physical and virtual bases may each straddle an extra 1 GiB region.
+-/* Native 4 KiB: two roots plus up to seven L2 pages per 6 GiB mapping.
+- * The physical and virtual bases may each straddle an extra 1 GiB region.
 - */
 -#define BOOTSTRAP_TABLE_SIZE (ARM_PGBYTES * 16)
-+ * Each alias can also split both boundaries of the executable PA range.
++/* Native 4 KiB: two roots plus up to nine L2 pages per 8 GiB alias.
++ * Each alias can split both the owned and executable interval boundaries.
 + */
-+#define BOOTSTRAP_TABLE_SIZE (ARM_PGBYTES * 20)
++#define BOOTSTRAP_TABLE_SIZE (ARM_PGBYTES * 28)
  #else /* defined(ARM_LARGE_MEMORY) */
  #define BOOTSTRAP_TABLE_SIZE (ARM_PGBYTES * 8)
  #endif /* defined(ARM_LARGE_MEMORY) */
@@ -239,19 +391,22 @@
  void
  arm_vm_prot_finalize(boot_args * args __unused)
  {
-@@ -2175,6 +2250,19 @@
+@@ -2175,6 +2250,22 @@
  #endif /* KASAN */
  
  	arm_vm_physmap_init(args);
 +#if !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
-+	const pmap_paddr_t exec_start = kvtophys(segTEXTEXECB);
-+	const pmap_paddr_t exec_end = exec_start + segSizeTEXTEXEC;
++	/* Match the fileset root command consumed in start.s, including retained text. */
++	const vm_offset_t exec_va = segKCTEXTEXECB;
++	const unsigned long exec_size = segSizeKCTEXTEXEC;
++	const pmap_paddr_t exec_start = kvtophys(exec_va);
++	const pmap_paddr_t exec_end = exec_start + exec_size;
 +	if (exec_end <= exec_start || ((exec_start | exec_end) & ARM_PGMASK) != 0) {
 +		panic("Invalid executable range for TTBR1 transition");
 +	}
 +	arm_vm_wx_check_root(cpu_tte, ARM_TT_L1_SHIFT, exec_start, exec_end);
-+	for (pmap_paddr_t offset = 0; offset < segSizeTEXTEXEC; offset += ARM_PGBYTES) {
-+		if (!arm_vm_wx_exec_covered(cpu_tte, segTEXTEXECB + offset, exec_start + offset)) {
++	for (pmap_paddr_t offset = 0; offset < exec_size; offset += ARM_PGBYTES) {
++		if (!arm_vm_wx_exec_covered(cpu_tte, exec_va + offset, exec_start + offset)) {
 +			panic("Final TTBR1 executable range not fully mapped");
 +		}
 +	}
@@ -259,3 +414,13 @@
  	set_mmu_ttb_alternate(cpu_ttep & TTBR_BADDR_MASK);
  
  #if XNU_MONITOR
+--- a/osfmk/arm64/genassym.c
++++ b/osfmk/arm64/genassym.c
+@@ -367,6 +367,7 @@
+ 	DECLARE("BA_VIRT_BASE", offsetof(struct boot_args, virtBase));
+ 	DECLARE("BA_PHYS_BASE", offsetof(struct boot_args, physBase));
+ 	DECLARE("BA_MEM_SIZE", offsetof(struct boot_args, memSize));
++	DECLARE("BA_MEM_SIZE_ACTUAL", offsetof(struct boot_args, memSizeActual));
+ 	DECLARE("BA_TOP_OF_KERNEL_DATA", offsetof(struct boot_args, topOfKernelData));
+ 	DECLARE("BA_BOOT_FLAGS", offsetof(struct boot_args, bootFlags));
+ 

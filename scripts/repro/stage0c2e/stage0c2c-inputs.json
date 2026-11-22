@@ -1,7 +1,7 @@
 {
   "candidate_track": "stage0c2c-wx",
-  "source_commit": "1a8cc04407e26ea06f0f0a4a3d22eb2c4e85be9c",
-  "source_tree": "2b519d1fc9eb351ed968c1a99502a9e8d706cbf7",
+  "source_commit": "6b6ddf30324a4e8a224fb386de339ae477946276",
+  "source_tree": "564eba82412e98f366a39b054723e811303c2c54",
   "base_device_commit": "a9f0500af098f8aee87c86a571638daee92caf26",
   "board_overlay_source": "bcbce475de0ca2dbb55cfb870e5be5b51b92b727",
   "board_overlay_sha256": "ec651d79adac428126696839a786157924ba86d5800e1229c6f0ac53c78eeb42",
@@ -499,7 +499,7 @@
     {
       "series": "device/patches/xnu-12377/series-sheng-24A446",
       "patch": "stage0c2c-wx-bootstrap.patch",
-      "sha256": "4cfe724b212df5f984893dc1049452b5e62b274b7b5e0b8441466c8b5a16ef28"
+      "sha256": "527812d639f6759b791e8d712d3c773a92660359471fe8211c96d35f504ee500"
     },
     {
       "series": "device/patches/xnu-12377/series-sheng-24A446",
@@ -510,9 +510,10 @@
   "patched_xnu_source_sha256": {
     "osfmk/arm64/static_if.c": "a0c6bf264b122c5e34ebbc14f4575dca3e5cc62812203c5dbf8f6d533482948b",
     "pexpert/arm/hwtrace/hwtrace.c": "a3143899b927d3af6e4a729454803c67f4ecef95261affd52a4b418b18db3cfd",
-    "osfmk/arm64/start.s": "d6f2fdbf6dcfba51c0ef1df0b831fcd4da1ca156137301e5833d9cf3b0bb2a2f",
-    "osfmk/arm64/arm_vm_init.c": "833a67498bb4679e65b391336ceb23606cb2dd3a45d049ae305c406569f5d0f0",
-    "osfmk/arm/pmap/pmap.h": "3dd4c179d5d15d9d206c3132afa756ef56b6021bc7b113ddb2adba92700a946d"
+    "osfmk/arm64/start.s": "8c6b7279236584e8f6bd6d02eb6a84d6a2a1df9ba2d4c7e963fbeb078a3b8932",
+    "osfmk/arm64/arm_vm_init.c": "39ebb6afb82aba8dacfeb9bdffbc142b527597427c20eaa0243eb535b13ca1bd",
+    "osfmk/arm/pmap/pmap.h": "24a15feb7557b2eab777d0158a8383419b11f7a279e945b145e973d9c5434167",
+    "osfmk/arm64/genassym.c": "69364d5b57eb02232c21a821adb930cda5e33332ebda261e8bfa39838d13629a"
   },
   "census_helper_sha256": "b9fdee3840e5993e16afd8c67061d39259e710530e65758cf742dfef36477c9e",
   "full_apple_arm64e_build": "NOT_RUN",
