@@ -235,8 +235,10 @@ def main():
             image = Image(data)
             kernel = Image(data, image.entries["com.apple.kernel"][1])
             symbols = kernel.symbols()
-            marker, = [va for va, names in symbols.items() if "_boot_log_panic_flush" in names]
-            hook, = [va for va, names in symbols.items() if "_PE_panic_hook" in names]
+            markers = [va for va, names in symbols.items() if "_boot_log_panic_flush" in names]
+            hooks = [va for va, names in symbols.items() if "_PE_panic_hook" in names]
+            require(len(markers) == len(hooks) == 1, "candidate must define exactly one panic hook and BootLog marker")
+            marker, hook = markers[0], hooks[0]
             starts = kernel.function_starts()
             require(hook in starts, "panic hook is not a known function start")
             end = next((va for va in starts if va > hook), None)

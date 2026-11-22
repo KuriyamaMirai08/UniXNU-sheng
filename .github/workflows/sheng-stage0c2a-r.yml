@@ -34,8 +34,8 @@ jobs:
       EXPECTED_FINALIZER_SHA256: 8c77e632e4b8bf60bb0fb49cb21959fc95553588af11a3781b58f509b9737882
       EXPECTED_NEGATIVE_TEST_SHA256: 1e8f43fe84cb15e04b1c186808b7db06b74b79ba314f739917d5b3487907b57e
       EXPECTED_STAGE2E_ASSET_0: e3cde9571528cb648aa69411061f612e69bbac7478b3820e69bfdbcb4eb10db1
-      EXPECTED_STAGE2E_ASSET_1: 3c3c72e79ce1c4d9ac7eb866d43a0d7e3f80725d48ed5b6aa3b008f8a9b49b92
-      EXPECTED_STAGE2E_ASSET_2: 384ce1c3b92cab2397037a2514333812017f64ad7b7caddf382c5636af0a2a8d
+      EXPECTED_STAGE2E_ASSET_1: e69cf7821a8f1cc2d42dca1b29a1599a124bd95f14135888b9f2ba162371b663
+      EXPECTED_STAGE2E_ASSET_2: bb5d3b72bc9ba6230612d9fdfe0144097b8dd701fd0b29c51aa250579aa782c9
       EXPECTED_STAGE2E_ASSET_3: 98a092ce9705089e090368c9501ab81fb51723be00cf5327b2be294a6f3e9cb1
       EXPECTED_STAGE2E_ASSET_4: 751505eec5fa1b0b98688fb3b448cb0e6a813083e56fbdea8b30a45d63ab1b24
     steps:
@@ -103,7 +103,7 @@ jobs:
               "scripts/repro/stage0c2e/shengufs.patch": os.environ["EXPECTED_STAGE2E_ASSET_3"],
               "scripts/repro/stage0c2e/stage0c2e-inputs.json": os.environ["EXPECTED_STAGE2E_ASSET_4"],
           }
-          stage2c_assets = {'scripts/repro/stage0c2e/sheng-stage0c2c-panic-marker.patch': 'e114d89c88927bde55df9f3957e23a4bca4b0309a80222f4e6611161adc5e294', 'scripts/repro/stage0c2e/sheng-stage0c2c-static-if-preimage.patch': '97f09ef79474a92eaa733e35314a63d054c055a1d5475f0f380ab0b9748650d4', 'scripts/repro/stage0c2e/audit-stage0c2c.py': 'd499b776a416b48c4f6e80047a62a7180a841328cda9f8153a61821c1d8bd1dd', 'scripts/repro/stage0c2e/kc_image.py': '2a2561308b27ace4e21dd4e45924bdeca937ee13047b7c6fd5ce580018f68747', 'scripts/repro/stage0c2e/stage0c2c-inputs.json': 'b2470734aaf9f396d22e5d89337dda495fcbeab1b99737c0753d2787a1443b9e', 'scripts/repro/stage0c2e/sheng-stage0c2c-marker-link-modes.patch': 'dd99ff4cc82383956e76f7924056785ea9a2c309d13ac1aa6b8dac5c0264ea97'}
+          stage2c_assets = {'scripts/repro/stage0c2e/sheng-stage0c2c-panic-marker.patch': 'e114d89c88927bde55df9f3957e23a4bca4b0309a80222f4e6611161adc5e294', 'scripts/repro/stage0c2e/sheng-stage0c2c-static-if-preimage.patch': '97f09ef79474a92eaa733e35314a63d054c055a1d5475f0f380ab0b9748650d4', 'scripts/repro/stage0c2e/audit-stage0c2c.py': 'b9fdee3840e5993e16afd8c67061d39259e710530e65758cf742dfef36477c9e', 'scripts/repro/stage0c2e/kc_image.py': '2a2561308b27ace4e21dd4e45924bdeca937ee13047b7c6fd5ce580018f68747', 'scripts/repro/stage0c2e/stage0c2c-inputs.json': '8926fd5cf13c378c83364402fb3fccdc3ca461739b5ace96296ea50643f872cf', 'scripts/repro/stage0c2e/sheng-stage0c2c-marker-link-modes.patch': 'dd99ff4cc82383956e76f7924056785ea9a2c309d13ac1aa6b8dac5c0264ea97'}
           for name, wanted in (expected | stage2e_assets | stage2c_assets).items():
               actual = hashlib.sha256((root / name).read_bytes()).hexdigest()
               if actual != wanted:
@@ -278,7 +278,7 @@ jobs:
             --public-evidence "$RUNNER_TEMP/stage0c1f-evidence"
       - name: Parse candidate and capture reviewed structural evidence
         id: capture
-        if: success()
+        if: ${{ always() && !cancelled() && steps.identity.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -296,8 +296,17 @@ jobs:
           capture = evidence / "stage0c2a-r-capture.json"
           negative = evidence / "stage0c2a-r-parser-tests.json"
           evidence.mkdir(parents=True, exist_ok=True)
+          strict = evidence / "strict-result.json"
+          if not strict.is_file():
+              print("No verified strict-prelink receipt; capture skipped")
+              raise SystemExit(0)
           if not candidate.is_file() or not source.is_file():
               raise SystemExit("strict-prelink output or fixed DarwinBoot source is missing")
+          accepted = json.loads(strict.read_text())
+          if (candidate.stat().st_size != accepted["candidate_bytes"]
+                  or hashlib.sha256(candidate.read_bytes()).hexdigest() != accepted["candidate_sha256"]
+                  or hashlib.sha256(map_file.read_bytes()).hexdigest() != accepted["map_sha256"]):
+              raise SystemExit("Strict-prelink byte identity changed before parser capture")
           if subprocess.check_output(["git", "-C", str(framework / "drivers/DarwinBoot"), "rev-parse", "HEAD"], text=True).strip() != "5243c68ec332a227fe3680cd5da6d5a0e127035c":
               raise SystemExit("DarwinBoot checkout identity mismatch")
           runtime = json.loads((temp / "stage0c2a-r-audit-runtime.json").read_text())

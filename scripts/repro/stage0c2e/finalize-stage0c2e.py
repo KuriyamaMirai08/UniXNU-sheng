@@ -13,6 +13,7 @@ OBJECTS = ("NativeUfs.late.o", "NativeRamBlock.late.o", "BootLog.o")
 OBJECT_TYPES = {"bytes", "sha256", "magic", "cpu", "subtype", "filetype"}
 PARSER_SDK = "stage0c2e-parser-sdk.json"
 RUNTIME = "stage0c2a-r-audit-runtime.json"
+BASELINE_2E = "5ce6879dceec2f079fa703991b6700079060228bca199603c48f54abcef96ef6"
 
 
 def parser_sdk_identity(row):
@@ -104,7 +105,7 @@ def main():
          (RULES["LD"], RULES["CLANG"], "25G332", "26.5")),
         ("RUST_TOOLCHAIN", dependencies.get("runner_image") == tools.get("runner_image") and
          dependencies.get("rust") == tools.get("rust") == "rustc 1.98.0 (88d9e12ae 2026-08-18)"),
-        ("NEW_IDENTITY", bool(candidate) and candidate.get("sha256") != RULES["CANDIDATE"] and
+        ("NEW_IDENTITY", bool(candidate) and candidate.get("sha256") not in {RULES["CANDIDATE"], BASELINE_2E} and
          capture.get("sample_kind") == "new-candidate"),
         ("STRICT_AND_MAP", strict.get("candidate_sha256") == candidate.get("sha256") and
          strict.get("candidate_bytes") == candidate.get("bytes") and strict.get("map_sha256") ==
@@ -147,7 +148,7 @@ def main():
     save("stage0c2e-verdict.json", dict(candidate_track="stage0c2c-preimage", status=status, issues=issue,
          build=args.build_outcome, capture=args.capture_outcome, candidate_identity=candidate,
          parser_observation=capture.get("parser_result", "NOT_RUN"), artifacts_sha256=digests))
-    print("Stage 0C-2E", status, ",".join(issue))
+    print("Stage 0C-2C preimage census", status, ",".join(issue))
     return 1 if issue else 0
 
 

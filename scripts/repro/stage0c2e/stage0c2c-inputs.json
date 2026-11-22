@@ -501,7 +501,7 @@
     "osfmk/arm64/static_if.c": "c00793491bb69fd269c27ef922105fd24df2b16ac5d2b5938aaad9b4ebf6077a",
     "pexpert/arm/hwtrace/hwtrace.c": "a3143899b927d3af6e4a729454803c67f4ecef95261affd52a4b418b18db3cfd"
   },
-  "census_helper_sha256": "d499b776a416b48c4f6e80047a62a7180a841328cda9f8153a61821c1d8bd1dd",
+  "census_helper_sha256": "b9fdee3840e5993e16afd8c67061d39259e710530e65758cf742dfef36477c9e",
   "full_apple_arm64e_build": "NOT_RUN",
   "candidate_sha256": null,
   "runtime_wx": "NOT_QUALIFIED",

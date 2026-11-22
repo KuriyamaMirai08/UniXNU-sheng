@@ -357,16 +357,20 @@ def main():
         ("extract-stock-firmware", [sys.executable, "scripts/extract-sheng-firmware.py", "--delete-archive"]),
     ):
         step(name, command, device)
+    marker_path = Path("scripts/build-xnu-4k-baseline.sh")
+    # Both CLI commands assemble scripts from the framework.
+    marker_source = framework / marker_path
+    marker_recipe = stage2c["marker_build_recipe"]
+    exact(marker_source, marker_recipe["before_sha256"])
+    marker_patch = ASSETS / "sheng-stage0c2c-marker-link-modes.patch"
+    exact(marker_patch, marker_recipe["patch_sha256"])
+    patch("stage0c2c-marker-link-modes", marker_patch, framework)
+    exact(marker_source, marker_recipe["after_sha256"])
     step("assemble-tree", [*cli, "tree", *common])
     work = root / "out/sheng/ipados-27.0.1-24A446/sheng_ipados27"
     tree = work / "tree"
     require(tree.is_dir(), "Assembled tree is absent at the selected profile path")
-    marker_build = tree / "scripts/build-xnu-4k-baseline.sh"
-    marker_recipe = stage2c["marker_build_recipe"]
-    exact(marker_build, marker_recipe["before_sha256"])
-    marker_patch = ASSETS / "sheng-stage0c2c-marker-link-modes.patch"
-    exact(marker_patch, marker_recipe["patch_sha256"])
-    patch("stage0c2c-marker-link-modes", marker_patch, tree)
+    marker_build = tree / marker_path
     exact(marker_build, marker_recipe["after_sha256"])
     step("stage0c2c-marker-recipe-shell-check", ["bash", "-n", marker_build], tree)
     exact(tree / REGRESSION_POLICY, contract["regression_policy_sha256"])
@@ -425,18 +429,6 @@ def main():
         except (OSError, ValueError, KeyError, struct.error) as error:
             save("diagnostic-error.json", dict(error_type=type(error).__name__))
         raise
-    stamp = json.loads((work / "xnu-inputs.json").read_bytes())
-    expected = [(Path(row["patch"]).name, row["sha256"]) for row in stage2c["ordered_patches"]]
-    applied = [(Path(row["path"]).name, row["sha256"]) for row in stamp["patches"]]
-    require(stamp["commit"] == stage2c["fixed_framework_soc_xnu"]["xnu"] and applied == expected,
-            "Effective XNU source or ordered 95+2 patches differ")
-    for path, wanted in stage2c["patched_xnu_source_sha256"].items():
-        exact(tree / ".cache/xnu-work" / path, wanted)
-    mode = tree / "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/.sheng-panic-marker-mode"
-    require(mode.read_text().strip() == "1", "Final DEVELOPMENT marker compile gate was not enabled")
-    save("stage0c2c-build-inputs.json", dict(xnu_commit=stamp["commit"], ordered_patches=stage2c["ordered_patches"],
-         patched_xnu_source_sha256=stage2c["patched_xnu_source_sha256"], source_commit=stage2c["source_commit"],
-         source_tree=stage2c["source_tree"], marker_build_recipe=marker_recipe))
     objects = collect_diagnostics()
     require(len(objects) == 3 and all(
         (row["magic"], row["cpu"], row["subtype"] & 0xffffff, row["filetype"]) ==
@@ -466,6 +458,20 @@ def main():
          placement=receipt["native_data_placement"], retained_entries=receipt["retained_entries_verified"],
          corecrypto_hmac_sha256=statistics["corecrypto_hmac_sha256"], runtime_qualified=False, loadable=False,
          candidate_bytes=output.stat().st_size, segment_layout=statistics["segment_layout"]))
+    # Preserve the strict result when a later source-identity gate refuses publication.
+    exact(marker_build, marker_recipe["after_sha256"])
+    stamp = json.loads((work / "xnu-inputs.json").read_bytes())
+    expected = [(Path(row["patch"]).name, row["sha256"]) for row in stage2c["ordered_patches"]]
+    applied = [(Path(row["path"]).name, row["sha256"]) for row in stamp["patches"]]
+    require(stamp["commit"] == stage2c["fixed_framework_soc_xnu"]["xnu"] and applied == expected,
+            "Effective XNU source or ordered 95+2 patches differ")
+    for path, wanted in stage2c["patched_xnu_source_sha256"].items():
+        exact(tree / ".cache/xnu-work" / path, wanted)
+    mode = tree / "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/.sheng-panic-marker-mode"
+    require(mode.is_file() and mode.read_text().strip() == "1", "Final DEVELOPMENT marker compile gate was not enabled")
+    save("stage0c2c-build-inputs.json", dict(xnu_commit=stamp["commit"], ordered_patches=stage2c["ordered_patches"],
+         patched_xnu_source_sha256=stage2c["patched_xnu_source_sha256"], source_commit=stage2c["source_commit"],
+         source_tree=stage2c["source_tree"], marker_build_recipe=marker_recipe))
 
 
 if __name__ == "__main__":
