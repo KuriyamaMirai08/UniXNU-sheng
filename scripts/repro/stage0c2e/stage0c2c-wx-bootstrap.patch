@@ -1,12 +1,12 @@
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
-@@ -626,7 +626,138 @@
+@@ -626,7 +626,140 @@
  	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
  	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
  
 +#if !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
-+#if T0SZ_BOOT != 25 || T1SZ_BOOT != 25
-+#error "Native bootstrap W^X requires 39-bit TTBR0 and TTBR1"
++#if T0SZ_BOOT != T1SZ_BOOT || (T1SZ_BOOT != 25 && T1SZ_BOOT != 26)
++#error "Native bootstrap W^X requires matching 38-bit or 39-bit roots"
 +#endif
 +	/* Both tables are still inactive. Tag them from the same physical code range. */
 +	adrp	x3, segment$start$__TEXT_EXEC@page
@@ -48,6 +48,7 @@
 +	b.hs	Lbootstrap_tables_exhausted
 +	mov	x19, lr
 +	add	x1, x25, #(BOOTSTRAP_TABLE_BYTES >> 12), lsl #12
++	mov	x15, #((1 << (64 - T1SZ_BOOT - ARM_TT_L1_SHIFT)) << TTE_SHIFT)
 +	mov	x0, x25
 +	bl	Lbootstrap_wx_retag
 +	add	x0, x25, #4096
@@ -58,14 +59,15 @@
 +
 +#if !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
 +/*
-+ * Retag one inactive 39-bit, 4 KiB bootstrap root. x25 is the pool base.
++ * Retag one inactive 4 KiB bootstrap root. x25 is the pool base and x15
++ * is the active root length (a subpage root still reserves a full page).
 + * x2 is the last used
 + * table page. x1 is the end-exclusive table pool. x3..x4 is the PA
 + * range that can execute. Keep the same MAIR index and shareability.
 + */
 +Lbootstrap_wx_retag:
 +	mov	x5, x0
-+	add	x6, x0, #4096
++	add	x6, x0, x15
 +Lbootstrap_wx_root:
 +	ldr	x9, [x5], #8
 +	cbz	x9, Lbootstrap_wx_next_root
@@ -155,7 +157,7 @@
  #endif /* defined(ARM_LARGE_MEMORY) */
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
-@@ -1663,6 +1663,77 @@
+@@ -1663,6 +1663,81 @@
  
  #endif // XNU_MONITOR
  
@@ -187,7 +189,9 @@
 +arm_vm_wx_check_root(const tt_entry_t *table, unsigned int shift,
 +    pmap_paddr_t exec_start, pmap_paddr_t exec_end)
 +{
-+	for (unsigned int slot = 0; slot < TTE_PGENTRIES; slot++) {
++	const unsigned int entries = shift == ARM_TT_L1_SHIFT ?
++	    (1U << (64 - T1SZ_BOOT - ARM_TT_L1_SHIFT)) : TTE_PGENTRIES;
++	for (unsigned int slot = 0; slot < entries; slot++) {
 +		const tt_entry_t entry = table[slot];
 +		if (!(entry & ARM_TTE_VALID)) {
 +			continue;
@@ -213,7 +217,9 @@
 +arm_vm_wx_exec_covered(const tt_entry_t *table, vm_offset_t va, pmap_paddr_t expected)
 +{
 +	for (unsigned int shift = ARM_TT_L1_SHIFT;; shift -= 9) {
-+		const tt_entry_t entry = table[(va >> shift) & (TTE_PGENTRIES - 1)];
++		const unsigned int slot = shift == ARM_TT_L1_SHIFT ?
++		    L1_TABLE_T1_INDEX(va, TCR_EL1_BOOT) : ((va >> shift) & (TTE_PGENTRIES - 1));
++		const tt_entry_t entry = table[slot];
 +		if (!(entry & ARM_TTE_VALID)) {
 +			return false;
 +		}
@@ -233,7 +239,7 @@
  void
  arm_vm_prot_finalize(boot_args * args __unused)
  {
-@@ -2175,6 +2246,19 @@
+@@ -2175,6 +2250,19 @@
  #endif /* KASAN */
  
  	arm_vm_physmap_init(args);
