@@ -541,11 +541,11 @@
   "storage_resume": {
     "RamBlock": {
       "patch": "stage0c2d-ramblock-resume.patch",
-      "patch_sha256": "b83830300548996b6c44d4bf55e49794d5c7b378207cd21028fb6f364fe53139",
+      "patch_sha256": "b3ab7b6e22a43d975008ce250443cbdf1b971bec0726b217c939580e79de174e",
       "files": {
         "NativeRamBlock.cpp": {
-          "before_sha256": "e2288556e4390f665a7d87a1533bb6e76588b842cbe77deb37218f8458bd2e53",
-          "after_sha256": "adbd7e90f40b5886e9fa3d824a4dddd3c4c32b657e423360ee0ebca8bd6da4d9"
+          "before_sha256": "3594cf762cf0914583157f7c1ccbf510eda70c188082d20524d87f4d769956ac",
+          "after_sha256": "63ba7bdeda79032d9e8f6579c9a328e21a5faef5109887e0e0f0bc1db9d8f153"
         },
         "PersistOverlay.h": {
           "before_sha256": "e3f92181fde394df0fa031bafccaf7fc9c33e26e458c0b59899e3fe1ff2b3960",

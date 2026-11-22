@@ -337,6 +337,15 @@ def main():
                                           "--tree", framework, "--output", optional_result], device)
     optional_receipt = json.loads((optional_result / "RESULT.json").read_bytes())
     save("optional-provider-check.json", optional_receipt)
+    storage_resume = stage2c["storage_resume"]
+    require(storage_resume["RamBlock"]["files"]["NativeRamBlock.cpp"]["before_sha256"] ==
+            optional_receipt["actual_ram_consumer_sha256"], "Recovery changes must begin at the verified RamBlock source")
+    for component, plan in storage_resume.items():
+        owner = (framework if component == "RamBlock" else device) / "drivers" / component
+        for name, row in plan["files"].items():
+            exact(owner / name, row["before_sha256"])
+        staged_patch = ASSETS / plan["patch"]
+        exact(staged_patch, plan["patch_sha256"])
     config = root / "build.toml"
     config.write_text("[build]\n")
     common = ["-D", device, "--os", "27", "--out", root / "out", "--config", config, "--uefi", uefi, "-j", "3"]
@@ -372,7 +381,6 @@ def main():
     preseal_patch = ASSETS / "stage0c2c-preseal-fileset.patch"
     exact(preseal_patch, sealer["patch_sha256"])
     patch("stage0c2c-preseal-fileset", preseal_patch, framework)
-    storage_resume = stage2c["storage_resume"]
     for component, plan in storage_resume.items():
         owner = (framework if component == "RamBlock" else device) / "drivers" / component
         for name, row in plan["files"].items():
@@ -408,8 +416,6 @@ def main():
                     for path in tree.rglob("*")), "Precompiled objects exist before kernel build")
     require(not (tree / NATIVE).exists() and not (tree / REFERENCE).exists(), "Stale linked kernel")
     exact(tree / "drivers/Adreno740/NativeAdrenoPublish.cpp", optional_receipt["actual_gpu_consumer_sha256"])
-    require(storage_resume["RamBlock"]["files"]["NativeRamBlock.cpp"]["before_sha256"] ==
-            optional_receipt["actual_ram_consumer_sha256"], "Recovery changes must begin at the verified RamBlock source")
     output = work / "kernel/kernel.macho"
     def collect_diagnostics():
         objects = {}

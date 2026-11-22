@@ -1,6 +1,6 @@
 --- a/NativeRamBlock.cpp
 +++ b/NativeRamBlock.cpp
-@@ -84,9 +84,10 @@
+@@ -79,9 +79,10 @@
    uint8_t *memory = nullptr;
    uint64_t capacity = 0;
    bool online = false;
@@ -13,7 +13,7 @@
    SeedDisk big = {};
    bool isBig = false;
    uint8_t seedHash[32] = {};
-@@ -120,8 +121,8 @@
+@@ -115,8 +116,8 @@
    uint32_t inflight = 0;   // direct requests running without the gate (gate held to change it)
    persist::StoreState storeState;
    static constexpr uint32_t kAuthorityReady = 1;   // UfsWriteState::Ready ABI, checked in tests
@@ -24,7 +24,7 @@
    bool direct = false;
    // Write back (direct mode only, unless data-fua=1): page writes may stay in the device's write cache; the disk reports a
    // write cache, and its synchronize (or the idle timer, kFlushSeconds after the first write since the last flush) makes the pages
-@@ -134,7 +135,11 @@
+@@ -129,7 +130,11 @@
    struct StoreOps {
      NativeRamBlock *disk;
      bool cached = false;
@@ -37,7 +37,7 @@
      bool write(uint64_t b, uint32_t n, const void *s) {
        IOLockLock(disk->authorityLock);
        if (!disk->authorizeStoreWrite()) {
-@@ -170,7 +175,9 @@
+@@ -165,7 +170,9 @@
    void persistFailed(persist::StoreFault reason)
    {
      const bool newlyFailed = storeState.fail(reason);
@@ -48,7 +48,7 @@
      native_data_persist_state = 5;
      if (newlyFailed) __atomic_fetch_add(&native_data_persist_errors, 1, __ATOMIC_RELAXED);
    }
-@@ -296,22 +303,28 @@
+@@ -291,22 +298,28 @@
    };
    IOReturn directReadWrite(IOMemoryDescriptor *buffer, uint64_t offset, uint64_t bytes, uint64_t *actual, uint64_t *waited);
  public:
@@ -89,7 +89,7 @@
        IOLockUnlock(gate);
        return;
      }
-@@ -321,8 +334,7 @@
+@@ -316,8 +329,7 @@
        return;
      }
      uint64_t pages = (isBig ? big.bytes : sparse.bytes) / 4096, first = 0;
@@ -99,7 +99,7 @@
      const char *why = "";
      native_data_persist_pages = pages;
      native_data_persist_gpt = native_ufs_store_gpt_check();
-@@ -331,11 +343,7 @@
+@@ -326,11 +338,7 @@
        return;
      }
      if (!pages || !persist::bitmapBlocksFor(pages, &bitmapCount) || !bitmapCount ||
@@ -112,7 +112,7 @@
          !native_ufs_store_open(window, &first, &why)) {
        native_data_persist_state = 4;
        IOLog("NativeRamBlock: persistent store refused: %s\n", why);
-@@ -349,119 +357,44 @@
+@@ -344,119 +352,44 @@
      native_data_persist_first_lba = first;
      overlayBits = static_cast<uint8_t *>(IOMallocZero(bitmapCount * persist::kBlock));
      stage = static_cast<uint8_t *>(IOMallocZero(kStagePages * persist::kBlock));
@@ -259,7 +259,7 @@
      if(ready){*base=(sparse.pages||isBig)?0:reinterpret_cast<uint64_t>(memory);*bytes=capacity*512;memcpy(hash,seedHash,32);}
      IOLockUnlock(gate);return ready;
    }
-@@ -479,13 +412,24 @@
+@@ -474,13 +407,24 @@
    IOReturn reportEjectability(bool *value) override { *value = false; return kIOReturnSuccess; }
    IOReturn reportMaxValidBlock(UInt64 *value) override { *value = capacity - 1; return kIOReturnSuccess; }
    IOReturn reportMediaState(bool *present, bool *changed) override {
@@ -286,7 +286,7 @@
      // v2 keeps committed transactions in WAL until synchronize requests a
      // checkpoint. Write-through v1 is already durable page by page.
      if (!writeBack) {
-@@ -587,8 +531,10 @@
+@@ -580,8 +524,10 @@
    }
    OSSafeReleaseNULL(medium);
    OSSafeReleaseNULL(characteristics);
@@ -298,7 +298,7 @@
    registerService();
    return true;
  }
-@@ -600,11 +546,17 @@
+@@ -593,11 +539,17 @@
        count > capacity - block || buffer->getLength() < count * 512 ||
        (buffer->getDirection() != kIODirectionIn && buffer->getDirection() != kIODirectionOut)) return kIOReturnBadArgument;
    if (!gate) return kIOReturnNotReady;
@@ -316,7 +316,7 @@
    if (direct) {
      ++inflight;
      IOLockUnlock(gate);
-@@ -628,8 +580,7 @@
+@@ -621,8 +573,7 @@
    }
    uint64_t actual;bool noMemory=false, persistError=false;
    if(isBig && !direct) {
@@ -326,7 +326,7 @@
      if(buffer->getDirection()==kIODirectionIn) {
        struct SeedReadOps {
          IOMemoryDescriptor *buffer;
-@@ -725,8 +676,14 @@
+@@ -718,8 +669,14 @@
    const uint64_t first = offset / 4096, last = (offset + bytes - 1) / 4096;
    *actual = 0;
    if (write && (!storeState.isWritable() || !verifyAuthority())) return kIOReturnIOError;
@@ -341,7 +341,7 @@
    if (write) {
      takeRange(first, last);
      IORWLockRead(flushRw);
-@@ -758,7 +715,11 @@
+@@ -751,7 +708,11 @@
    }
    if (write) { IORWLockUnlock(flushRw); giveRange(first, last); }
    giveStage(buf);
@@ -354,7 +354,7 @@
  }
  
  void NativeRamBlock::stop(IOService *provider)
-@@ -849,7 +810,6 @@
+@@ -842,7 +803,6 @@
      for (IOService *provider = media; provider && depth++ < 64; provider = provider->getProvider()) {
        NativeRamBlock *ram = OSDynamicCast(NativeRamBlock, provider);
        if (!ram) continue;
