@@ -1,0 +1,13 @@
+--- a/NativeUfs.cpp
++++ b/NativeUfs.cpp
+@@ -1741,7 +1741,9 @@
+ {
+   const char *reason = "";
+   int ok = 0;
+-  if (!logMode ()) reason = "off";
++  // Recovery keeps all media roles read-only, even if a log boot argument is present.
++  if (storeMode () == 1) reason = "read-only recovery";
++  else if (!logMode ()) reason = "off";
+   else if (!gStoreGeometry.valid || !gHost.ready || hostTransportPoisoned ()) reason = "no root layout";
+   else if (gLogRegionBlocks) reason = "already open";
+   else {

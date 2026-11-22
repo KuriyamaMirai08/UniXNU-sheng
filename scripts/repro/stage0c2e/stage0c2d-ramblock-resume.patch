@@ -1,0 +1,385 @@
+--- a/NativeRamBlock.cpp
++++ b/NativeRamBlock.cpp
+@@ -84,9 +84,10 @@
+   uint8_t *memory = nullptr;
+   uint64_t capacity = 0;
+   bool online = false;
++  uint32_t persistenceMode = 0;
+   RamSparseDisk sparse = {};
+-  // A disk above 2 GiB keeps only the nonzero pages of its seed (SeedDisk.h), in memory proportional to the content, and is served by the
+-  // direct (store-backed) path alone: it needs the persistent store open read-write, or its requests fail.
++  // A disk above 2 GiB keeps only the nonzero pages of its seed. An attached
++  // persistent view reads the overlay and seed directly without materializing it.
+   SeedDisk big = {};
+   bool isBig = false;
+   uint8_t seedHash[32] = {};
+@@ -120,8 +121,8 @@
+   uint32_t inflight = 0;   // direct requests running without the gate (gate held to change it)
+   persist::StoreState storeState;
+   static constexpr uint32_t kAuthorityReady = 1;   // UfsWriteState::Ready ABI, checked in tests
+-  // Direct mode (the store is open read-write): changed pages live in the store window only, never in RAM; reads of them go to the
+-  // window. A failed store write stops all further writes (a page the system was told is written must be on the medium).
++  // Direct mode serves persistent pages from the store instead of copying
++  // them into RAM. The store role controls whether writes are permitted.
+   bool direct = false;
+   // Write back (direct mode only, unless data-fua=1): page writes may stay in the device's write cache; the disk reports a
+   // write cache, and its synchronize (or the idle timer, kFlushSeconds after the first write since the last flush) makes the pages
+@@ -134,7 +135,11 @@
+   struct StoreOps {
+     NativeRamBlock *disk;
+     bool cached = false;
+-    bool read(uint64_t b, uint32_t n, void *d) { __atomic_fetch_add(&native_data_persist_loaded, n, __ATOMIC_RELAXED); return native_ufs_store_read(b, n, d); }
++    bool read(uint64_t b, uint32_t n, void *d) {
++      if (!disk->storeState.authorityStable(disk->authorityEpochNow())) return false;
++      __atomic_fetch_add(&native_data_persist_loaded, n, __ATOMIC_RELAXED);
++      return native_ufs_store_read(b, n, d) && disk->storeState.authorityStable(disk->authorityEpochNow());
++    }
+     bool write(uint64_t b, uint32_t n, const void *s) {
+       IOLockLock(disk->authorityLock);
+       if (!disk->authorizeStoreWrite()) {
+@@ -170,7 +175,9 @@
+   void persistFailed(persist::StoreFault reason)
+   {
+     const bool newlyFailed = storeState.fail(reason);
+-    overlay.fail();
++    // A published Recovery overlay is immutable. Concurrent readers stop
++    // through StoreState, without mutating the overlay they are traversing.
++    if (persistenceMode != 1) overlay.fail();
+     native_data_persist_state = 5;
+     if (newlyFailed) __atomic_fetch_add(&native_data_persist_errors, 1, __ATOMIC_RELAXED);
+   }
+@@ -296,22 +303,28 @@
+   };
+   IOReturn directReadWrite(IOMemoryDescriptor *buffer, uint64_t offset, uint64_t bytes, uint64_t *actual, uint64_t *waited);
+ public:
+-  // Called once, before the Data volume is mounted (native_ram_block_volume_seed): open the store window, put the pages that
+-  // earlier boots changed back into the sparse disk, and from then on write changed pages through. The seed identity
+-  // (seedHash) is not affected. A missing provider leaves the disk volatile. Once the UFS window or overlay has
+-  // been touched, any refusal/error is terminal for this boot: seed reads remain available, but persistent writes fail.
+-  // data-reset=1 or 2 (the boot menu's Install and boot) starts the overlay over (the old pages are dropped, not applied); 2 also
+-  // asks for Setup (BootWatchdogPolicy.c). It is the only way the store is made anew: a store of another seed, a blank or a damaged one
+-  // is kept as it is on any other boot.
+-  static bool discardRequested() { uint32_t v = 0; return PE_parse_boot_argn("data-reset", &v, sizeof v) && (v == 1 || v == 2); }
++  // SourceStorage starts and validates UFS before starting the Data disk.
++  // Attach once, before registering media or allowing filesystem probes.
+   void attachStore() {
+     if (!gate) return;
+     IOLockLock(gate);
+     if (!storeState.canBeginAttach()) { IOLockUnlock(gate); return; }
+-    unsigned mode = &native_ufs_store_mode ? native_ufs_store_mode() : 0;
+-    if ((mode != 1 && mode != 2) || !(sparse.pages || isBig) || !&native_ufs_store_open ||
+-        !&native_ufs_store_read || !&native_ufs_store_write || !&native_ufs_store_sync ||
+-        !&native_ufs_store_gpt_check || !authorityBackendReady()) {
++    const unsigned mode = persistenceMode;
++    uint32_t reset = 0;
++    if (mode == 0) {
++      IOLockUnlock(gate);
++      return;
++    }
++    if ((mode != 1 && mode != 2) || !walV2Requested() ||
++        PE_parse_boot_argn("data-reset", &reset, sizeof reset)) {
++      persistFailed(persist::StoreFault::AttachRejected);
++      IOLockUnlock(gate);
++      return;
++    }
++    if (!(sparse.pages || isBig) || !&native_ufs_store_mode || native_ufs_store_mode() != mode ||
++        !&native_ufs_store_open || !&native_ufs_store_read || !&native_ufs_store_gpt_check ||
++        (mode == 2 && (!&native_ufs_store_write || !&native_ufs_store_sync)) || !authorityBackendReady() ||
++        native_ufs_store_authority_state() != kAuthorityReady) {
+       IOLockUnlock(gate);
+       return;
+     }
+@@ -321,8 +334,7 @@
+       return;
+     }
+     uint64_t pages = (isBig ? big.bytes : sparse.bytes) / 4096, first = 0;
+-    uint64_t window = 0, bitmapCount = 0, walBlocks = 0;
+-    const bool useWalV2 = walV2Requested();
++    uint64_t window = 0, bitmapCount = 0;
+     const char *why = "";
+     native_data_persist_pages = pages;
+     native_data_persist_gpt = native_ufs_store_gpt_check();
+@@ -331,11 +343,7 @@
+       return;
+     }
+     if (!pages || !persist::bitmapBlocksFor(pages, &bitmapCount) || !bitmapCount ||
+-        (useWalV2
+-             ? (!persist::wal::windowBlocksFor(pages, kWalV2Blocks, &window) ||
+-                !(walBlocks = kWalV2Blocks))
+-             : !persist::windowBlocksFor(pages, &window)) ||
+-        !bitmapCount || bitmapCount > UINT64_MAX / persist::kBlock || bitmapCount > UINT32_MAX ||
++        !persist::wal::windowBlocksFor(pages, kWalV2Blocks, &window) || bitmapCount > UINT64_MAX / persist::kBlock || bitmapCount > UINT32_MAX ||
+         !native_ufs_store_open(window, &first, &why)) {
+       native_data_persist_state = 4;
+       IOLog("NativeRamBlock: persistent store refused: %s\n", why);
+@@ -349,119 +357,44 @@
+     native_data_persist_first_lba = first;
+     overlayBits = static_cast<uint8_t *>(IOMallocZero(bitmapCount * persist::kBlock));
+     stage = static_cast<uint8_t *>(IOMallocZero(kStagePages * persist::kBlock));
+-    if (useWalV2) {
+-      const uint64_t slots = walBlocks / persist::wal::kTransactionBlocks;
+-      if (slots > UINT32_MAX / persist::wal::kPagesPerTransaction) {
+-        persistFailed(persist::StoreFault::AttachRejected);
+-        IOLockUnlock(gate);
+-        return;
+-      }
+-      walEntryCapacity = static_cast<uint32_t>(slots * persist::wal::kPagesPerTransaction);
+-      walEntryBytes = uint64_t(walEntryCapacity) * sizeof(persist::wal::Entry);
+-      walEntries = static_cast<persist::wal::Entry *>(IOMallocZero(walEntryBytes));
+-    }
+-    StoreOps ops = { this, false };
+-    persist::Open result =
+-        overlayBits && stage && (!useWalV2 || walEntries)
+-            ? overlay.open(ops, pages, seedHash, mode == 1, overlayBits,
+-                           discardRequested(), useWalV2, walEntries,
+-                           walEntryCapacity, walBlocks)
+-            : persist::Open::Failed;
++    const uint64_t slots = kWalV2Blocks / persist::wal::kTransactionBlocks;
++    walEntryCapacity = static_cast<uint32_t>(slots * persist::wal::kPagesPerTransaction);
++    walEntryBytes = uint64_t(walEntryCapacity) * sizeof(persist::wal::Entry);
++    walEntries = static_cast<persist::wal::Entry *>(IOMallocZero(walEntryBytes));
++    StoreOps ops = {this, false};
++    const bool resumed = overlayBits && stage && walEntries &&
++        overlay.resumeExistingV2(ops, pages, seedHash, mode == 1, overlayBits, walEntries,
++                                 walEntryCapacity, kWalV2Blocks);
+     native_data_persist_header = static_cast<uint32_t>(overlay.header);
+-    if (result == persist::Open::Failed) {
++    if (!resumed || !verifyAuthority()) {
+       persistFailed(storeState.isFailed() ? storeState.fault() : persist::StoreFault::OverlayReset);
+       IOLockUnlock(gate);
+       return;
+     }
+-    if (result == persist::Open::Blank) {
+-      native_data_persist_state = 1;
+-    } else if (result == persist::Open::Kept) {
+-      native_data_persist_state = 7;
+-      overlay.active = false;
+-      IOLog("NativeRamBlock: the persistent store holds no Data of this seed (header %d); kept, Data runs from the seed: "
+-            "use Install and boot to start it over\n", overlay.header);
+-    } else if (result == persist::Open::Fresh) {
+-      native_data_persist_state = 3;
+-    } else if (mode == 2) {
+-      native_data_persist_state = 2;
+-    } else {
+-      struct Loader {
+-        NativeRamBlock *self;
+-        bool operator()(uint64_t i, const uint8_t *page) {
+-          if (i >= self->sparse.bytes / 4096) return false;
+-          if (!self->sparse.pages[i]) {
+-            uint8_t *fresh = static_cast<uint8_t *>(IOMallocZero(4096));
+-            if (!fresh) return false;
+-            self->sparse.pages[i] = fresh;
+-            self->sparse.resident += 4096;
+-          }
+-          memcpy(self->sparse.pages[i], page, 4096);
+-          __atomic_fetch_add(&native_data_persist_loaded, 1, __ATOMIC_RELAXED);
+-          return true;
+-        }
+-      } load = { this };
+-      if (!overlay.forEachPresent(ops, load, stage, kStagePages)) {
+-        persistFailed(persist::StoreFault::OverlayReset);
+-        IOLockUnlock(gate);
+-        return;
+-      }
+-      native_data_persist_state = 6;
+-      native_ram_block_resident_bytes = sparse.resident;
+-    }
+-
+-    direct = mode == 2 && overlay.active && !overlay.readOnly;
+-    // Direct and read-write: write back when the store offers cached writes and data-fua=1 does not ask for write through.
+-    if (direct && !overlay.walV2 && &native_ufs_store_write_cached && !fuaRequested()) {
+-      dirtyBytes = bitmapCount;
+-      dirtyBits = static_cast<uint8_t *>(IOMallocZero(dirtyBytes));
+-      flushCall = dirtyBits ? thread_call_allocate(flushTimer, this) : nullptr;
+-      if (dirtyBits && flushCall) {
+-        overlay.dirty = dirtyBits;
+-        overlay.dirtyBlocks = 0;
+-        writeBack = true;
+-      } else {
+-        if (dirtyBits) IOFree(dirtyBits, dirtyBytes);
+-        dirtyBits = nullptr; dirtyBytes = 0;
+-        if (flushCall) { thread_call_free(flushCall); flushCall = nullptr; }
+-      }
+-    }
+-    if (direct) {
+-      stagePool[0] = stage; stageCount = 1;
+-      while (stageCount < kStagePool) {
+-        uint8_t *buffer = static_cast<uint8_t *>(IOMallocZero(kStagePages * persist::kBlock));
+-        if (!buffer) break;
+-        stagePool[stageCount++] = buffer;
+-      }
+-      stageFree = (1u << stageCount) - 1;
+-    }
++    native_data_persist_state = mode == 1 ? 6 : 2;
++    direct = true;
++    stagePool[0] = stage; stageCount = 1;
++    while (stageCount < kStagePool) {
++      uint8_t *buffer = static_cast<uint8_t *>(IOMallocZero(kStagePages * persist::kBlock));
++      if (!buffer) break;
++      stagePool[stageCount++] = buffer;
++    }
++    stageFree = (1u << stageCount) - 1;
+     native_data_persist_present = overlay.present;
+-    native_data_persist_gpt_after = native_ufs_store_gpt_check();
+-    if (direct) {
+-      if (!verifyAuthority()) {
+-        IOLockUnlock(gate);
+-        return;
+-      }
+-      if (!storeState.commitWritable(writeBack)) {
+-        persistFailed(persist::StoreFault::InvalidState);
+-        IOLockUnlock(gate);
+-        return;
+-      }
+-      native_data_write_back = writeBack ? 1 : 0;
+-    } else {
+-      if (!storeState.commitReadOnly()) {
+-        persistFailed(persist::StoreFault::InvalidState);
+-        IOLockUnlock(gate);
+-        return;
+-      }
+-      native_data_write_back = 0;
+-    }
++    native_data_persist_gpt_after = 0; // verified above
++    const bool committed = mode == 1 ? storeState.commitReadOnly() : storeState.commitWritable(false);
++    if (!committed) persistFailed(persist::StoreFault::InvalidState);
++    native_data_write_back = 0;
+     IOLockUnlock(gate);
+   }
+ 
+-  bool available() const { return online && (memory || sparse.pages || isBig) && capacity; }
++  bool available() const {
++    return online && capacity && (memory || sparse.pages || isBig) && (!persistenceMode || storeState.isAttached());
++  }
+   bool seedInfo(uint64_t *base,uint64_t *bytes,uint8_t hash[32]) {
+     if(!gate || !base || !bytes || !hash)return false;
+-    IOLockLock(gate);bool ready=available();
++    IOLockLock(gate);
++    const bool ready = available();
+     if(ready){*base=(sparse.pages||isBig)?0:reinterpret_cast<uint64_t>(memory);*bytes=capacity*512;memcpy(hash,seedHash,32);}
+     IOLockUnlock(gate);return ready;
+   }
+@@ -479,13 +412,24 @@
+   IOReturn reportEjectability(bool *value) override { *value = false; return kIOReturnSuccess; }
+   IOReturn reportMaxValidBlock(UInt64 *value) override { *value = capacity - 1; return kIOReturnSuccess; }
+   IOReturn reportMediaState(bool *present, bool *changed) override {
+-    *present = online; if (changed) *changed = false; return kIOReturnSuccess;
++    if (!gate) return kIOReturnNotReady;
++    IOLockLock(gate);
++    *present = available();
++    IOLockUnlock(gate);
++    if (changed) *changed = false;
++    return kIOReturnSuccess;
+   }
+   IOReturn reportRemovability(bool *value) override { *value = false; return kIOReturnSuccess; }
+-  IOReturn reportWriteProtection(bool *value) override { *value = false; return kIOReturnSuccess; }
++  IOReturn reportWriteProtection(bool *value) override {
++    *value = persistenceMode == 1;
++    return kIOReturnSuccess;
++  }
+   IOReturn doSynchronizeCache() override {
+     if (!online) return kIOReturnNotReady;
+     if (storeState.isFailed()) return kIOReturnIOError;
++    if (persistenceMode && !storeState.isAttached()) return kIOReturnNotReady;
++    if (persistenceMode == 1)
++      return storeState.isReadOnly() && verifyAuthority() ? kIOReturnSuccess : kIOReturnNotReady;
+     // v2 keeps committed transactions in WAL until synchronize requests a
+     // checkpoint. Write-through v1 is already durable page by page.
+     if (!writeBack) {
+@@ -587,8 +531,10 @@
+   }
+   OSSafeReleaseNULL(medium);
+   OSSafeReleaseNULL(characteristics);
++  PE_parse_boot_argn("data-persist", &persistenceMode, sizeof persistenceMode);
++  if (persistenceMode) attachStore();
+   online = true;
+-  native_ram_block_ready = 1;
++  native_ram_block_ready = available();
+   registerService();
+   return true;
+ }
+@@ -600,11 +546,17 @@
+       count > capacity - block || buffer->getLength() < count * 512 ||
+       (buffer->getDirection() != kIODirectionIn && buffer->getDirection() != kIODirectionOut)) return kIOReturnBadArgument;
+   if (!gate) return kIOReturnNotReady;
++  if (persistenceMode == 1 && buffer->getDirection() == kIODirectionOut) return kIOReturnNotWritable;
+   const uint64_t bytes = count * 512;
+   const uint64_t entered = mach_absolute_time();
+   IOLockLock(gate);
+   const uint64_t gated = mach_absolute_time();
+   if (!online) { IOLockUnlock(gate); return kIOReturnNotReady; }
++  if (!available()) {
++    const IOReturn reason = storeState.isFailed() ? kIOReturnIOError : kIOReturnNotReady;
++    IOLockUnlock(gate);
++    return reason;
++  }
+   if (direct) {
+     ++inflight;
+     IOLockUnlock(gate);
+@@ -628,8 +580,7 @@
+   }
+   uint64_t actual;bool noMemory=false, persistError=false;
+   if(isBig && !direct) {
+-    // Before the store is attached (APFS probes the disk for its volume UUID long before the kernel asks for the Data volume, which is what
+-    // attaches the store) a disk this size is read from its seed alone; it has no volatile mode, so writes wait.
++    // Explicit volatile mode still permits reading a large sparse seed.
+     if(buffer->getDirection()==kIODirectionIn) {
+       struct SeedReadOps {
+         IOMemoryDescriptor *buffer;
+@@ -725,8 +676,14 @@
+   const uint64_t first = offset / 4096, last = (offset + bytes - 1) / 4096;
+   *actual = 0;
+   if (write && (!storeState.isWritable() || !verifyAuthority())) return kIOReturnIOError;
++  if (!write && storeState.isReadOnly() && !verifyAuthority()) return kIOReturnIOError;
+   const uint64_t t0 = mach_absolute_time();
+   uint8_t *buf = takeStage();
++  if (persistenceMode == 1 && (!storeState.isReadOnly() || !storeState.authorityStable(authorityEpochNow()))) {
++    giveStage(buf);
++    persistFailed(persist::StoreFault::AuthorityChanged);
++    return kIOReturnIOError;
++  }
+   if (write) {
+     takeRange(first, last);
+     IORWLockRead(flushRw);
+@@ -758,7 +715,11 @@
+   }
+   if (write) { IORWLockUnlock(flushRw); giveRange(first, last); }
+   giveStage(buf);
+-  return *actual == bytes ? kIOReturnSuccess : kIOReturnIOError;
++  if (persistenceMode == 1 && (!storeState.isReadOnly() || !storeState.authorityStable(authorityEpochNow()))) {
++    persistFailed(persist::StoreFault::AuthorityChanged);
++    *actual = 0;
++  }
++  return *actual == bytes && !storeError ? kIOReturnSuccess : kIOReturnIOError;
+ }
+ 
+ void NativeRamBlock::stop(IOService *provider)
+@@ -849,7 +810,6 @@
+     for (IOService *provider = media; provider && depth++ < 64; provider = provider->getProvider()) {
+       NativeRamBlock *ram = OSDynamicCast(NativeRamBlock, provider);
+       if (!ram) continue;
+-      ram->attachStore();
+       if (!ram->seedInfo(&base,&bytes,hash)) continue;
+       candidate = static_cast<dev_t>(makedev(mjr->unsigned32BitValue(), mnr->unsigned32BitValue()));
+       snprintf(candidatePath, sizeof(candidatePath), "/dev/%s", name->getCStringNoCopy());
+--- a/PersistOverlay.h
++++ b/PersistOverlay.h
+@@ -167,6 +167,18 @@
+     return true;
+   }
+ 
++  // Operation for profiles whose installer has no verified first-write
++  // ownership contract. Even a blank window can contain someone else's data.
++  template <class Ops> bool resumeExistingV2(Ops &ops, uint64_t pageCount, const uint8_t seed[32],
++                                             bool ro, uint8_t *bits, wal::Entry *entries,
++                                             uint32_t entryCount, uint64_t walBlocks)
++  {
++    if (open(ops, pageCount, seed, ro, bits, false, true, entries, entryCount, walBlocks) == Open::Resumed &&
++        walStore.checkpointCapable) return true;
++    fail();
++    return false;
++  }
++
+   // `readOnly`: never write; a stale or blank window is reported (Blank) and left alone. Otherwise a window without this seed's
+   // overlay is initialised only with `reset` (bitmap first, header last, so a tear leaves no valid header), and kept as it is
+   // without (Kept). `reset` also drops this seed's own overlay.

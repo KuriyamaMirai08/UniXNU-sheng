@@ -1,5 +1,5 @@
 {
-  "candidate_track": "stage0c2c-wx",
+  "candidate_track": "stage0c2d-resume",
   "source_commit": "6b6ddf30324a4e8a224fb386de339ae477946276",
   "source_tree": "564eba82412e98f366a39b054723e811303c2c54",
   "base_device_commit": "a9f0500af098f8aee87c86a571638daee92caf26",
@@ -535,6 +535,32 @@
       "scripts/unixnu/payload.py": {
         "before_sha256": "9377c4bf192c3b72de80c5b130789533f7189ca098313cfff808ef2fe957c94f",
         "after_sha256": "711ee8b6902c6d2879ee40b8b42bab1d5f0eb8aef1e9574a3a6dbd70c16bd55e"
+      }
+    }
+  },
+  "storage_resume": {
+    "RamBlock": {
+      "patch": "stage0c2d-ramblock-resume.patch",
+      "patch_sha256": "b83830300548996b6c44d4bf55e49794d5c7b378207cd21028fb6f364fe53139",
+      "files": {
+        "NativeRamBlock.cpp": {
+          "before_sha256": "e2288556e4390f665a7d87a1533bb6e76588b842cbe77deb37218f8458bd2e53",
+          "after_sha256": "adbd7e90f40b5886e9fa3d824a4dddd3c4c32b657e423360ee0ebca8bd6da4d9"
+        },
+        "PersistOverlay.h": {
+          "before_sha256": "e3f92181fde394df0fa031bafccaf7fc9c33e26e458c0b59899e3fe1ff2b3960",
+          "after_sha256": "c2d26733e6fd5acbfdf293d31f6aba536bab74990550dd015220c05ae0003970"
+        }
+      }
+    },
+    "ShengUfs": {
+      "patch": "stage0c2d-shengufs-resume.patch",
+      "patch_sha256": "8f93652b4ebb95b7554c2f06024006465626f069c439dd95fd55bf3c370aa43c",
+      "files": {
+        "NativeUfs.cpp": {
+          "before_sha256": "f86a0aa19e8d1739ca677fac9e9d99dbcafb0906b674dd1cfd6c80d2f03fd6e6",
+          "after_sha256": "1fb14824b2746a73555c89efca64fcccff0995826279987471bfa0d8444ecb52"
+        }
       }
     }
   }

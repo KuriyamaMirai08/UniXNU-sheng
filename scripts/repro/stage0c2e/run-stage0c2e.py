@@ -372,6 +372,22 @@ def main():
     preseal_patch = ASSETS / "stage0c2c-preseal-fileset.patch"
     exact(preseal_patch, sealer["patch_sha256"])
     patch("stage0c2c-preseal-fileset", preseal_patch, framework)
+    storage_resume = stage2c["storage_resume"]
+    for component, plan in storage_resume.items():
+        owner = (framework if component == "RamBlock" else device) / "drivers" / component
+        for name, row in plan["files"].items():
+            exact(owner / name, row["before_sha256"])
+        staged_patch = ASSETS / plan["patch"]
+        exact(staged_patch, plan["patch_sha256"])
+        patch("stage0c2d-" + component, staged_patch, owner)
+        for name, row in plan["files"].items():
+            exact(owner / name, row["after_sha256"])
+
+    def check_storage_resume(tree):
+        for component, plan in storage_resume.items():
+            for name, row in plan["files"].items():
+                exact(tree / "drivers" / component / name, row["after_sha256"])
+
     step("assemble-tree", [*cli, "tree", *common])
     work = root / "out/sheng/ipados-27.0.1-24A446/sheng_ipados27"
     tree = work / "tree"
@@ -382,16 +398,18 @@ def main():
     exact(tree / REGRESSION_POLICY, contract["regression_policy_sha256"])
     for relative, wanted in stage2e["sources"].items():
         resolved = "kits/sheng/BootLog.c" if relative == "package/BootLog.c" else relative
-        exact(tree / resolved, wanted)
+        if resolved != "drivers/ShengUfs/NativeUfs.cpp":
+            exact(tree / resolved, wanted)
+    check_storage_resume(tree)
     exact(tree / STORAGE_BUILDER, storage_builder["prepared_sha256"])
     for relative in ("scripts/sheng-strict-prelink.py", "scripts/clean_prelink_recovery.py"):
         exact(tree / relative, digest(SOURCE / relative))
     require(not any(path.is_file() and (path.suffix in (".o", ".a", ".cpo") or path.name == "kernel.macho")
                     for path in tree.rglob("*")), "Precompiled objects exist before kernel build")
     require(not (tree / NATIVE).exists() and not (tree / REFERENCE).exists(), "Stale linked kernel")
-    for path, key in (("drivers/Adreno740/NativeAdrenoPublish.cpp", "actual_gpu_consumer_sha256"),
-                      ("drivers/RamBlock/NativeRamBlock.cpp", "actual_ram_consumer_sha256")):
-        exact(tree / path, optional_receipt[key])
+    exact(tree / "drivers/Adreno740/NativeAdrenoPublish.cpp", optional_receipt["actual_gpu_consumer_sha256"])
+    require(storage_resume["RamBlock"]["files"]["NativeRamBlock.cpp"]["before_sha256"] ==
+            optional_receipt["actual_ram_consumer_sha256"], "Recovery changes must begin at the verified RamBlock source")
     output = work / "kernel/kernel.macho"
     def collect_diagnostics():
         objects = {}
@@ -459,7 +477,7 @@ def main():
     require(receipt["candidate_sha256"] !=
             "0c71523a177783fd7fbfa4c5dee8b21622554b04ff3357cc518f2e7a821d315a",
             "Stage 0C-2E candidate unexpectedly equals the historical Stage 0C-1F bytes")
-    save("strict-result.json", dict(candidate_track="stage0c2c-wx", status=receipt["status"], inputs=receipt["inputs"],
+    save("strict-result.json", dict(candidate_track="stage0c2d-resume", status=receipt["status"], inputs=receipt["inputs"],
          candidate_sha256=receipt["candidate_sha256"], map_sha256=digest(output.with_suffix(".map.json")),
          placement=receipt["native_data_placement"], retained_entries=receipt["retained_entries_verified"],
          corecrypto_hmac_sha256=statistics["corecrypto_hmac_sha256"], runtime_qualified=False, loadable=False,
@@ -475,6 +493,7 @@ def main():
         exact(tree / ".cache/xnu-work" / path, wanted)
     for path, row in sealer["files"].items():
         exact(tree / path, row["after_sha256"])
+    check_storage_resume(tree)
     osfmk = tree / "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT"
     bootstrap_objects = {name: macho_info(osfmk / name, filetype=1) for name in
                          ("start.o", "static_if.o", "arm_vm_init.o")}
@@ -482,7 +501,7 @@ def main():
     require(mode.is_file() and mode.read_text().strip() == "1", "Final DEVELOPMENT marker compile gate was not enabled")
     save("stage0c2c-build-inputs.json", dict(xnu_commit=stamp["commit"], ordered_patches=stage2c["ordered_patches"],
          patched_xnu_source_sha256=stage2c["patched_xnu_source_sha256"], source_commit=stage2c["source_commit"],
-         source_tree=stage2c["source_tree"], marker_build_recipe=marker_recipe, seal_recipe=sealer,
+         source_tree=stage2c["source_tree"], marker_build_recipe=marker_recipe, seal_recipe=sealer, storage_resume=storage_resume,
          bootstrap_objects={name: {key: obj[key] for key in ("sha256", "bytes")} for name, obj in bootstrap_objects.items()}))
 
 
