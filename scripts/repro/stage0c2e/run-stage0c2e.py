@@ -361,6 +361,14 @@ def main():
     work = root / "out/sheng/ipados-27.0.1-24A446/sheng_ipados27"
     tree = work / "tree"
     require(tree.is_dir(), "Assembled tree is absent at the selected profile path")
+    marker_build = tree / "scripts/build-xnu-4k-baseline.sh"
+    marker_recipe = stage2c["marker_build_recipe"]
+    exact(marker_build, marker_recipe["before_sha256"])
+    marker_patch = ASSETS / "sheng-stage0c2c-marker-link-modes.patch"
+    exact(marker_patch, marker_recipe["patch_sha256"])
+    patch("stage0c2c-marker-link-modes", marker_patch, tree)
+    exact(marker_build, marker_recipe["after_sha256"])
+    step("stage0c2c-marker-recipe-shell-check", ["bash", "-n", marker_build], tree)
     exact(tree / REGRESSION_POLICY, contract["regression_policy_sha256"])
     for relative, wanted in stage2e["sources"].items():
         resolved = "kits/sheng/BootLog.c" if relative == "package/BootLog.c" else relative
@@ -424,9 +432,11 @@ def main():
             "Effective XNU source or ordered 95+2 patches differ")
     for path, wanted in stage2c["patched_xnu_source_sha256"].items():
         exact(tree / ".cache/xnu-work" / path, wanted)
+    mode = tree / "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/.sheng-panic-marker-mode"
+    require(mode.read_text().strip() == "1", "Final DEVELOPMENT marker compile gate was not enabled")
     save("stage0c2c-build-inputs.json", dict(xnu_commit=stamp["commit"], ordered_patches=stage2c["ordered_patches"],
          patched_xnu_source_sha256=stage2c["patched_xnu_source_sha256"], source_commit=stage2c["source_commit"],
-         source_tree=stage2c["source_tree"]))
+         source_tree=stage2c["source_tree"], marker_build_recipe=marker_recipe))
     objects = collect_diagnostics()
     require(len(objects) == 3 and all(
         (row["magic"], row["cpu"], row["subtype"] & 0xffffff, row["filetype"]) ==

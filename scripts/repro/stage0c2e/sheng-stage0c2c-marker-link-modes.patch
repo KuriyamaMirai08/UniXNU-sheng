@@ -1,0 +1,23 @@
+diff --git a/scripts/build-xnu-4k-baseline.sh b/scripts/build-xnu-4k-baseline.sh
+index 394299b..917fc1b 100755
+--- a/scripts/build-xnu-4k-baseline.sh
++++ b/scripts/build-xnu-4k-baseline.sh
+@@ -832,6 +832,18 @@ if not stamp.exists() or stamp.read_text() != identity:
+     stamp.write_text(identity)
+ PY
+ EXTRA_CFLAGS="$EXTRA_CFLAGS -DXNU_BOOT_PROGRESS=$BOOT_PROGRESS"
++SHENG_PANIC_MARKER=$((1 - BOOTSTRAP))
++EXTRA_MAKE_ARGS+=("hwtrace.o_CFLAGS_ADD=-DXNU_SHENG_PANIC_MARKER=$SHENG_PANIC_MARKER")
++# The first link has no BootLog archive. Recompile the consumer and relink
++# when the real archive is present, even if make would reuse its first object.
++PANIC_MARKER_OBJROOT="$ROOT/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837"
++PANIC_MARKER_STAMP="$PANIC_MARKER_OBJROOT/.sheng-panic-marker-mode"
++if [ "$(cat "$PANIC_MARKER_STAMP" 2>/dev/null || true)" != "$SHENG_PANIC_MARKER" ]; then
++  mkdir -p "$PANIC_MARKER_OBJROOT"
++  rm -f "$PANIC_MARKER_OBJROOT/pexpert/DEVELOPMENT/hwtrace.o" \
++    "$PANIC_MARKER_OBJROOT/mach.development.bcm2837.unstripped"
++  printf '%s\n' "$SHENG_PANIC_MARKER" > "$PANIC_MARKER_STAMP"
++fi
+ make -C .cache/xnu-work "${XNU_BUILD_TARGET:-build}" SDKROOT="${XNU_SDKROOT:-iphoneos}" ARCH_CONFIGS=ARM64 \
+   MACHINE_CONFIGS=BCM2837 KERNEL_CONFIGS=DEVELOPMENT \
+   ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG="$XNU_ARCH_STRING" LARGE_MEMORY_DEFINE=-UARM_LARGE_MEMORY \

@@ -127,7 +127,7 @@ def main():
         expected = read_json(Path(__file__).with_name("stage0c2c-inputs.json"))
         inputs = read_json(base / "stage0c2c-build-inputs.json")
         wanted = {key: expected[key] for key in (
-            "ordered_patches", "patched_xnu_source_sha256", "source_commit", "source_tree")}
+            "ordered_patches", "patched_xnu_source_sha256", "source_commit", "source_tree", "marker_build_recipe")}
         wanted["xnu_commit"] = expected["fixed_framework_soc_xnu"]["xnu"]
         require(inputs == wanted, "PRODUCTION_SOURCE")
         census = read_json(base / "stage0c2c-census.json")

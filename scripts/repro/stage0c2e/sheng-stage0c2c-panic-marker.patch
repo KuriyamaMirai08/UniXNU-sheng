@@ -1,23 +1,21 @@
 diff --git a/pexpert/arm/hwtrace/hwtrace.c b/pexpert/arm/hwtrace/hwtrace.c
-index 1bbbf8c..17cab71 100644
+index 1bbbf8c..402b110 100644
 --- a/pexpert/arm/hwtrace/hwtrace.c
 +++ b/pexpert/arm/hwtrace/hwtrace.c
-@@ -496,9 +496,19 @@ PE_singlestep_hook(void)
+@@ -496,9 +496,17 @@ PE_singlestep_hook(void)
  {
  }
  
-+#if DEVELOPMENT
-+extern void boot_log_panic_flush(void) __attribute__((weak_import));
++#if DEVELOPMENT && XNU_SHENG_PANIC_MARKER
++extern void boot_log_panic_flush(void);
 +#endif
 +
  void
  PE_panic_hook(const char *str __unused)
  {
-+#if DEVELOPMENT
++#if DEVELOPMENT && XNU_SHENG_PANIC_MARKER
 +	/* The sheng BootLog panic entry only publishes a memory flag. */
-+	if (&boot_log_panic_flush) {
-+		boot_log_panic_flush();
-+	}
++	boot_log_panic_flush();
 +#endif
  	if (PE_arm_debug_panic_hook != NULL) {
  		PE_arm_debug_panic_hook(str);
