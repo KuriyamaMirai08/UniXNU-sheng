@@ -1,0 +1,30 @@
+{
+  "scope": "post-repartition readback + fastboot verification; sanitized (no serial or raw disk/partition GUIDs)",
+  "sda_1_to_28_unchanged": true,
+  "primary_and_backup_crc_ok": true,
+  "arrays_equal": true,
+  "userdata": {
+    "partition_number": 29,
+    "start_lba": 3094592,
+    "end_lba": 45132799,
+    "bytes": 172188499968,
+    "fastboot_partition_size": "0x28173C0000",
+    "fastboot_partition_type": "f2fs",
+    "erased": "OKAY"
+  },
+  "darwin": {
+    "partition_number": 30,
+    "start_lba": 45132800,
+    "end_lba": 64007162,
+    "bytes": 77309390848,
+    "type_guid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+    "fastboot_partition_size": "0x11FFFFB000",
+    "fastboot_partition_type": "raw",
+    "erased": "OKAY"
+  },
+  "metadata_erased": "OKAY",
+  "current_slot": "a",
+  "slot_a_untouched": true,
+  "battery_voltage_mv": "4320",
+  "device_mode_left_in": "fastboot"
+}
