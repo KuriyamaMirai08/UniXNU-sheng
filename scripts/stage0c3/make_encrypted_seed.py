@@ -137,26 +137,40 @@ def main():
     (unixnu / "build").mkdir(parents=True, exist_ok=True)
     grow_py = unixnu / "scripts/seed-data-grow.py"
     grow_src = grow_py.read_text(encoding="utf-8")
-    old_lookup = """            listing = plistlib.loads(subprocess.check_output(['diskutil', 'apfs', 'list', '-plist']))
+    old_lookup = """        try:
+            listing = plistlib.loads(subprocess.check_output(['diskutil', 'apfs', 'list', '-plist']))
             container = None
             for entry in listing['Containers']:
                 if any(s['DeviceIdentifier'] == store for s in entry.get('PhysicalStores', [])):
                     container = entry['ContainerReference']
             if not container:
-                sys.exit('No APFS container found on the attached seed')"""
-    new_lookup = """            import time
-            container = None
+                sys.exit('No APFS container found on the attached seed')
+            run('diskutil', 'apfs', 'resizeContainer', container, '0')
+        finally:
+            subprocess.run(['hdiutil', 'detach', store, '-force'], capture_output=True)"""
+    new_lookup = """        container = None
+        phys_stores = []
+        try:
+            import time
             for _ in range(15):
                 listing = plistlib.loads(subprocess.check_output(['diskutil', 'apfs', 'list', '-plist']))
                 for entry in listing.get('Containers', []):
-                    if any(s['DeviceIdentifier'] == store for s in entry.get('PhysicalStores', [])):
-                        container = entry['ContainerReference']
+                    cref = entry.get('ContainerReference')
+                    pdevs = [s.get('DeviceIdentifier') for s in entry.get('PhysicalStores', []) if s.get('DeviceIdentifier')]
+                    if cref == store or store in pdevs:
+                        container = cref
+                        phys_stores = pdevs
+                        break
                 if container:
                     break
                 time.sleep(1)
             if not container:
                 print(subprocess.check_output(['diskutil', 'list', store], text=True))
-                sys.exit('No APFS container found on the attached seed')"""
+                sys.exit('No APFS container found on the attached seed')
+            run('diskutil', 'apfs', 'resizeContainer', container, '0')
+        finally:
+            for dev in dict.fromkeys([d for d in [container, *phys_stores, store] if d]):
+                subprocess.run(['hdiutil', 'detach', dev, '-force'], capture_output=True)"""
     require(old_lookup in grow_src, "unexpected seed-data-grow.py lookup block")
     grow_py.write_text(grow_src.replace(old_lookup, new_lookup, 1), encoding="utf-8")
     work = args.work.resolve()
