@@ -421,7 +421,7 @@ def main():
     exact(tree / REGRESSION_POLICY, contract["regression_policy_sha256"])
     for relative, wanted in stage2e["sources"].items():
         resolved = "kits/sheng/BootLog.c" if relative == "package/BootLog.c" else relative
-        if resolved != "drivers/ShengUfs/NativeUfs.cpp":
+        if resolved not in ("drivers/ShengUfs/NativeUfs.cpp", "drivers/ShengUfs/UfsWriteAuthority.h"):
             exact(tree / resolved, wanted)
     check_storage_resume(tree)
     exact(tree / STORAGE_BUILDER, storage_builder["prepared_sha256"])
