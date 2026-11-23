@@ -100,15 +100,17 @@ def space_manager(logical, pages):
                 require(size == BLOCK and data_base <= address < data_base + data_count
                         and address in pages, "missing checkpoint space manager")
                 matches.append(pages[address])
-    require(len(matches) == 1 and valid_object(matches[0], 5) and struct.unpack_from("<Q", matches[0], 16)[0] == xid,
+    require(len(matches) == 1 and valid_object(matches[0], 5)
+            and struct.unpack_from("<QQ", matches[0], 8) == (space_oid, xid)
+            and struct.unpack_from("<I", matches[0], 32)[0] == BLOCK,
             "invalid space manager")
-    block_size, _, blocks, _, _, free_blocks = struct.unpack_from("<IIQQQQ", matches[0], 32)
-    require(block_size == BLOCK and blocks == logical // BLOCK and free_blocks <= blocks, "space manager bounds")
+    total, free, tier2 = (struct.unpack_from("<Q", matches[0], off)[0] for off in (48, 72, 96))
+    require(total == logical // BLOCK and free <= total and tier2 == 0, "space manager bounds")
     return dict(
         xid=xid,
-        blocks=blocks,
-        free_blocks=free_blocks,
-        nonfree_main_bytes=(blocks - free_blocks) * BLOCK,
+        blocks=total,
+        free_blocks=free,
+        nonfree_main_bytes=(total - free) * BLOCK,
         container_id=start[72:88].hex(),
     )
 
