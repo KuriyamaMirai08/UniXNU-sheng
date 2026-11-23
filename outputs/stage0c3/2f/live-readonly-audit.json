@@ -1,0 +1,613 @@
+{
+  "scope": "live ADB + root read-only audit; sanitized (no serial or raw disk GUIDs); fastboot getvar unobserved",
+  "device_identity": {
+    "product": "sheng",
+    "model": "24018RPACC",
+    "hwc": "CN",
+    "build_incremental": "OS3.0.306.0.WNXCNXM",
+    "build_fingerprint": "Xiaomi/sheng/sheng:16/BP2A.250605.031.A3/OS3.0.306.0.WNXCNXM:user/release-keys",
+    "security_patch": "2026-08-01",
+    "slot_suffix": "_a",
+    "prop_flash_locked": "1",
+    "prop_vbmeta_device_state": "locked",
+    "prop_verifiedbootstate": "orange",
+    "crypto_state": "encrypted"
+  },
+  "luns": {
+    "sda": {
+      "total_lbas": 64007168,
+      "primary_header_crc_ok": true,
+      "backup_header_crc_ok": true,
+      "primary_entries_crc_ok": true,
+      "backup_entries_crc_ok": true,
+      "arrays_equal": true,
+      "partition_count": 29,
+      "partitions": [
+        {
+          "number": 1,
+          "name": "switch",
+          "start_lba": 6,
+          "end_lba": 7,
+          "bytes": 8192,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 2,
+          "name": "ssd",
+          "start_lba": 8,
+          "end_lba": 15,
+          "bytes": 32768,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 3,
+          "name": "dbg",
+          "start_lba": 16,
+          "end_lba": 23,
+          "bytes": 32768,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 4,
+          "name": "bk01",
+          "start_lba": 24,
+          "end_lba": 31,
+          "bytes": 32768,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 5,
+          "name": "bk02",
+          "start_lba": 32,
+          "end_lba": 63,
+          "bytes": 131072,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 6,
+          "name": "bk03",
+          "start_lba": 64,
+          "end_lba": 127,
+          "bytes": 262144,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 7,
+          "name": "bk04",
+          "start_lba": 128,
+          "end_lba": 255,
+          "bytes": 524288,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 8,
+          "name": "keystore",
+          "start_lba": 256,
+          "end_lba": 383,
+          "bytes": 524288,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 9,
+          "name": "frp",
+          "start_lba": 384,
+          "end_lba": 511,
+          "bytes": 524288,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 10,
+          "name": "countrycode",
+          "start_lba": 512,
+          "end_lba": 1023,
+          "bytes": 2097152,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 11,
+          "name": "misc",
+          "start_lba": 1024,
+          "end_lba": 2047,
+          "bytes": 4194304,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 12,
+          "name": "bk05",
+          "start_lba": 2048,
+          "end_lba": 4095,
+          "bytes": 8388608,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 13,
+          "name": "logfs",
+          "start_lba": 4096,
+          "end_lba": 6143,
+          "bytes": 8388608,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 14,
+          "name": "ffu",
+          "start_lba": 6144,
+          "end_lba": 8191,
+          "bytes": 8388608,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 15,
+          "name": "devinfo",
+          "start_lba": 8192,
+          "end_lba": 12287,
+          "bytes": 16777216,
+          "attributes": "0x1000000000000000"
+        },
+        {
+          "number": 16,
+          "name": "metadata",
+          "start_lba": 12288,
+          "end_lba": 28671,
+          "bytes": 67108864,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 17,
+          "name": "mtdblk",
+          "start_lba": 28672,
+          "end_lba": 36863,
+          "bytes": 33554432,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 18,
+          "name": "blackbox",
+          "start_lba": 36864,
+          "end_lba": 76287,
+          "bytes": 161480704,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 19,
+          "name": "oops",
+          "start_lba": 76288,
+          "end_lba": 80383,
+          "bytes": 16777216,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 20,
+          "name": "rawdump",
+          "start_lba": 80384,
+          "end_lba": 157183,
+          "bytes": 314572800,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 21,
+          "name": "bk010",
+          "start_lba": 157184,
+          "end_lba": 163839,
+          "bytes": 27262976,
+          "attributes": "0x1000000000000000"
+        },
+        {
+          "number": 22,
+          "name": "vbmeta_system_a",
+          "start_lba": 163840,
+          "end_lba": 163871,
+          "bytes": 131072,
+          "attributes": "0x1004000000000000"
+        },
+        {
+          "number": 23,
+          "name": "vbmeta_system_b",
+          "start_lba": 163872,
+          "end_lba": 163903,
+          "bytes": 131072,
+          "attributes": "0x1000000000000000"
+        },
+        {
+          "number": 24,
+          "name": "mem",
+          "start_lba": 163904,
+          "end_lba": 164927,
+          "bytes": 4194304,
+          "attributes": "0x1000000000000000"
+        },
+        {
+          "number": 25,
+          "name": "opconfig",
+          "start_lba": 164928,
+          "end_lba": 170047,
+          "bytes": 20971520,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 26,
+          "name": "mbnconfig",
+          "start_lba": 170048,
+          "end_lba": 178239,
+          "bytes": 33554432,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 27,
+          "name": "rescue",
+          "start_lba": 178240,
+          "end_lba": 211007,
+          "bytes": 134217728,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 28,
+          "name": "super",
+          "start_lba": 211008,
+          "end_lba": 3094591,
+          "bytes": 11811160064,
+          "attributes": "0x0000000000000000"
+        },
+        {
+          "number": 29,
+          "name": "userdata",
+          "start_lba": 3094592,
+          "end_lba": 64007162,
+          "bytes": 249497890816,
+          "attributes": "0x0000000000000000"
+        }
+      ]
+    },
+    "sdb": {
+      "total_lbas": 5120,
+      "primary_header_crc_ok": true,
+      "backup_header_crc_ok": true,
+      "primary_entries_crc_ok": true,
+      "backup_entries_crc_ok": true,
+      "arrays_equal": true,
+      "partition_count": 5
+    },
+    "sdc": {
+      "total_lbas": 5120,
+      "primary_header_crc_ok": true,
+      "backup_header_crc_ok": true,
+      "primary_entries_crc_ok": true,
+      "backup_entries_crc_ok": true,
+      "arrays_equal": true,
+      "partition_count": 5
+    },
+    "sdd": {
+      "total_lbas": 8192,
+      "primary_header_crc_ok": true,
+      "backup_header_crc_ok": true,
+      "primary_entries_crc_ok": true,
+      "backup_entries_crc_ok": true,
+      "arrays_equal": true,
+      "partition_count": 5
+    },
+    "sde": {
+      "total_lbas": 521216,
+      "primary_header_crc_ok": true,
+      "backup_header_crc_ok": true,
+      "primary_entries_crc_ok": true,
+      "backup_entries_crc_ok": true,
+      "arrays_equal": true,
+      "partition_count": 76
+    },
+    "sdf": {
+      "total_lbas": 16384,
+      "primary_header_crc_ok": true,
+      "backup_header_crc_ok": true,
+      "primary_entries_crc_ok": true,
+      "backup_entries_crc_ok": true,
+      "arrays_equal": true,
+      "partition_count": 7
+    }
+  },
+  "userdata_layout": {
+    "number": 29,
+    "name": "userdata",
+    "start_lba": 3094592,
+    "end_lba": 64007162,
+    "bytes": 249497890816,
+    "attributes": "0x0000000000000000"
+  },
+  "darwin_partition_present": false,
+  "slot_partitions_16": {
+    "vbmeta_system_a": {
+      "lun": "sda",
+      "start_lba": 163840,
+      "end_lba": 163871,
+      "bytes": 131072,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x1004000000000000",
+        "priority": 0,
+        "active": true,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      }
+    },
+    "vbmeta_system_b": {
+      "lun": "sda",
+      "start_lba": 163872,
+      "end_lba": 163903,
+      "bytes": 131072,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x1000000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      }
+    },
+    "uefi_a": {
+      "lun": "sde",
+      "start_lba": 6,
+      "end_lba": 1285,
+      "bytes": 5242880,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x10c4000000000000",
+        "priority": 0,
+        "active": true,
+        "retry_count": 0,
+        "successful": true,
+        "unbootable": true,
+        "upper_byte_56_63_hex": "0x10"
+      }
+    },
+    "abl_a": {
+      "lun": "sde",
+      "start_lba": 62982,
+      "end_lba": 65029,
+      "bytes": 8388608,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x10c4000000000000",
+        "priority": 0,
+        "active": true,
+        "retry_count": 0,
+        "successful": true,
+        "unbootable": true,
+        "upper_byte_56_63_hex": "0x10"
+      }
+    },
+    "boot_a": {
+      "lun": "sde",
+      "start_lba": 81542,
+      "end_lba": 130693,
+      "bytes": 201326592,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x0077000000000000",
+        "priority": 3,
+        "active": true,
+        "retry_count": 6,
+        "successful": true,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      }
+    },
+    "vbmeta_a": {
+      "lun": "sde",
+      "start_lba": 130790,
+      "end_lba": 130821,
+      "bytes": 131072,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x10c4000000000000",
+        "priority": 0,
+        "active": true,
+        "retry_count": 0,
+        "successful": true,
+        "unbootable": true,
+        "upper_byte_56_63_hex": "0x10"
+      }
+    },
+    "dtbo_a": {
+      "lun": "sde",
+      "start_lba": 130822,
+      "end_lba": 136965,
+      "bytes": 25165824,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x00c4000000000000",
+        "priority": 0,
+        "active": true,
+        "retry_count": 0,
+        "successful": true,
+        "unbootable": true,
+        "upper_byte_56_63_hex": "0x00"
+      }
+    },
+    "vendor_boot_a": {
+      "lun": "sde",
+      "start_lba": 150086,
+      "end_lba": 174661,
+      "bytes": 100663296,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x00c4000000000000",
+        "priority": 0,
+        "active": true,
+        "retry_count": 0,
+        "successful": true,
+        "unbootable": true,
+        "upper_byte_56_63_hex": "0x00"
+      }
+    },
+    "init_boot_a": {
+      "lun": "sde",
+      "start_lba": 208531,
+      "end_lba": 210578,
+      "bytes": 8388608,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x00c4000000000000",
+        "priority": 0,
+        "active": true,
+        "retry_count": 0,
+        "successful": true,
+        "unbootable": true,
+        "upper_byte_56_63_hex": "0x00"
+      }
+    },
+    "uefi_b": {
+      "lun": "sde",
+      "start_lba": 210579,
+      "end_lba": 211858,
+      "bytes": 5242880,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x107b000000000000",
+        "priority": 3,
+        "active": false,
+        "retry_count": 7,
+        "successful": true,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      }
+    },
+    "abl_b": {
+      "lun": "sde",
+      "start_lba": 273555,
+      "end_lba": 275602,
+      "bytes": 8388608,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x107b000000000000",
+        "priority": 3,
+        "active": false,
+        "retry_count": 7,
+        "successful": true,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      }
+    },
+    "boot_b": {
+      "lun": "sde",
+      "start_lba": 292115,
+      "end_lba": 341266,
+      "bytes": 201326592,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x003b000000000000",
+        "priority": 3,
+        "active": false,
+        "retry_count": 7,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      }
+    },
+    "vbmeta_b": {
+      "lun": "sde",
+      "start_lba": 341363,
+      "end_lba": 341394,
+      "bytes": 131072,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x107b000000000000",
+        "priority": 3,
+        "active": false,
+        "retry_count": 7,
+        "successful": true,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      }
+    },
+    "dtbo_b": {
+      "lun": "sde",
+      "start_lba": 341395,
+      "end_lba": 347538,
+      "bytes": 25165824,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x007b000000000000",
+        "priority": 3,
+        "active": false,
+        "retry_count": 7,
+        "successful": true,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      }
+    },
+    "vendor_boot_b": {
+      "lun": "sde",
+      "start_lba": 360659,
+      "end_lba": 385234,
+      "bytes": 100663296,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x007b000000000000",
+        "priority": 3,
+        "active": false,
+        "retry_count": 7,
+        "successful": true,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      }
+    },
+    "init_boot_b": {
+      "lun": "sde",
+      "start_lba": 411424,
+      "end_lba": 413471,
+      "bytes": 8388608,
+      "matches_stock_extent": true,
+      "decoded": {
+        "raw_hex": "0x007b000000000000",
+        "priority": 3,
+        "active": false,
+        "retry_count": 7,
+        "successful": true,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      }
+    }
+  },
+  "all_16_extents_match_stock": true,
+  "avb_live": {
+    "vbmeta_a": {
+      "sha256": "6fc825718d151b2d85fd55b407f5dfc0c3e97898692c7612fecf31dd8946e9b7",
+      "algorithm": "SHA256_RSA2048",
+      "rollback_index": 0,
+      "flags": 3,
+      "matches_archived_stock_sha256": false
+    },
+    "vbmeta_b": {
+      "sha256": "6fc825718d151b2d85fd55b407f5dfc0c3e97898692c7612fecf31dd8946e9b7",
+      "algorithm": "SHA256_RSA2048",
+      "rollback_index": 0,
+      "flags": 3,
+      "matches_archived_stock_sha256": false
+    },
+    "vbmeta_system_a": {
+      "sha256": "1d3bfe03d92c1515c9735120e4914442473118577077f9bf3594da6d2f3e664e",
+      "algorithm": "SHA256_RSA2048",
+      "rollback_index": 1769904000,
+      "flags": 3,
+      "matches_archived_stock_sha256": false
+    },
+    "vbmeta_system_b": {
+      "sha256": "1d3bfe03d92c1515c9735120e4914442473118577077f9bf3594da6d2f3e664e",
+      "algorithm": "SHA256_RSA2048",
+      "rollback_index": 1769904000,
+      "flags": 3,
+      "matches_archived_stock_sha256": false
+    }
+  },
+  "slot_sha256_summary": {
+    "boot_a_eq_boot_b": true,
+    "init_boot_a_eq_init_boot_b": false,
+    "vendor_boot_a_eq_vendor_boot_b": true,
+    "dtbo_a_eq_dtbo_b": true,
+    "vbmeta_a_eq_vbmeta_b": true,
+    "vbmeta_system_a_eq_vbmeta_system_b": true
+  },
+  "device": "NO-GO"
+}

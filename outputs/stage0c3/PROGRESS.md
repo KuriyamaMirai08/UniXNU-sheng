@@ -41,3 +41,9 @@
   - 2C 三项审计全部 `PASS`：rebase/PAC `242,519` fixups + `267` headers 均在 bootstrap RW，`0` RX 违规；`static_if` 回调闭包 `2` 入口、`2` 可达函数、`0` 非 RX 页；EFI 窗口 `5,100,273,664` B。
 - 本地 `PlaceImage` 与根策略复核 (`outputs/stage0c3/run-45105676166/followup-placement-root.json`) 通过：`used_bytes=99,876,864`，95% FAT 余量 `75,472,160` B，48 GiB 窗口 `W=12,624,640` 块（LBA `51,120,379–63,745,018`），账本 LBA `51,119,339–51,119,354`。
 - 已更新 `porting.toml` 并生成 `outputs/stage0c3/DEVICE-APPROVAL-CHECKLIST.md`，设备维持 `NO-GO`。
+
+## 2F 真机只读取证（ADB + root，未进 Fastboot）
+- 实机状态已归档至 `outputs/stage0c3/2f/live-readonly-audit.json`（原始二进制及设备标识仅留仓外 `_private-inputs/device-2f-20261123/`），设备未做任何写操作，保持 `NO-GO`：
+  - 系统：`OS3.0.306.0.WNXCNXM`（官改，`init_boot_a` 与 `init_boot_b` 哈希不同，`vbmeta` `flags=3`）；`vbmeta_system` `rollback_index=1769904000`（与归档 `303` 一致）。
+  - 分区：`sda`–`sdf` 全部 6 个 LUN 主/备 GPT 头与分区表 CRC 全部通过且完全一致；全部 16 个 A/B 分区范围与原厂一致；`userdata` 为 `sda29`（LBA `3094592..64007162`，`249,497,890,816` B，FBE 加密 `f2fs`），尚无 `darwin` 分区。
+  - 槽位：`boot_a` `0x0077000000000000`（`active=True, successful=True`），`boot_b` `0x003b000000000000`（`active=False, successful=False`）。
