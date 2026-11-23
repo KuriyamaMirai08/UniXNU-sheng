@@ -41,10 +41,10 @@ index cc3c5d3..4cf0b17 100644
  	extern int sheng_boot_watchdog_policy(void *, uint64_t);
  	boot_progress_stage("temporary watchdog launch policy enter");
 diff --git a/osfmk/arm/arm_init.c b/osfmk/arm/arm_init.c
-index e8db5d8..6a53ce5 100644
+index e8db5d8..9593369 100644
 --- a/osfmk/arm/arm_init.c
 +++ b/osfmk/arm/arm_init.c
-@@ -345,6 +345,39 @@ arm_auxkc_init(void *mh, void *base)
+@@ -345,6 +345,41 @@ arm_auxkc_init(void *mh, void *base)
   *		Function:		Runs on the boot CPU, once, on entry from iBoot.
   */
  
@@ -57,6 +57,8 @@ index e8db5d8..6a53ce5 100644
 +	unsigned long v_baseaddr;
 +};
 +extern struct sheng_diag_vc_info vinfo;
++
++void sheng_diag_bar_va(uintptr_t fb, unsigned idx, uint32_t color);
 +
 +void
 +sheng_diag_bar_va(uintptr_t fb, unsigned idx, uint32_t color)
@@ -84,7 +86,7 @@ index e8db5d8..6a53ce5 100644
  __startup_func
  void
  arm_init(
-@@ -357,6 +390,10 @@ arm_init(
+@@ -357,6 +392,10 @@ arm_init(
  	DTEntry chosen = NULL;
  	unsigned int dt_entry_size = 0;
  
@@ -95,7 +97,7 @@ index e8db5d8..6a53ce5 100644
  #if T0SZ_USER != T0SZ_BOOT
  	/* Final TTBR0 size before the first pointer is signed (see TCR_EL1_KVA_ENTRY). */
  	set_tcr(TCR_EL1_KVA_ENTRY);
-@@ -366,6 +403,9 @@ arm_init(
+@@ -366,6 +405,9 @@ arm_init(
  	arm_slide_rebase_and_sign_image();
  
  	arm_static_if_init(args);
@@ -105,7 +107,7 @@ index e8db5d8..6a53ce5 100644
  
  	/* If kernel integrity is supported, use a constant copy of the boot args. */
  	const_boot_args = *args;
-@@ -587,6 +627,9 @@ arm_init(
+@@ -587,6 +629,9 @@ arm_init(
  	gDramSize = *dram_size;
  	pmap_first_pnum = (ppnum_t)atop(gDramBase);
  
@@ -115,7 +117,7 @@ index e8db5d8..6a53ce5 100644
  	boot_progress_stage("arm_vm_init enter");
  	arm_vm_init(xmaxmem, args);
  	boot_progress_stage("arm_vm_init returned");
-@@ -645,6 +688,9 @@ arm_init(
+@@ -645,6 +690,9 @@ arm_init(
  		disableConsoleOutput = FALSE;     /* Allow printfs to happen */
  	}
  	PE_create_console();
@@ -126,7 +128,7 @@ index e8db5d8..6a53ce5 100644
  	/* setup console output */
  	PE_init_printf(FALSE);
 diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
-index 1571fa3..a5e8bab 100644
+index 1571fa3..f4d131c 100644
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
 @@ -1705,7 +1705,7 @@ arm_vm_wx_check_root(const tt_entry_t *table, unsigned int shift,
@@ -134,7 +136,7 @@ index 1571fa3..a5e8bab 100644
  				panic("TTBR1 table outside bootstrap memory");
  			}
 -			arm_vm_wx_check_root((const tt_entry_t *)phystokv(child), shift - 9,
-+			arm_vm_wx_check_root((const tt_entry_t *)(uintptr_t)(child - gPhysBase + gVirtBase), shift - 9,
++			arm_vm_wx_check_root((const tt_entry_t *)(vm_map_address_t)(child - gPhysBase + gVirtBase), shift - 9,
  			    exec_start, exec_end);
  		} else if ((shift == ARM_PGSHIFT && !table_type) ||
  		    !arm_vm_wx_transition_leaf(entry, shift, exec_start, exec_end)) {
@@ -143,7 +145,7 @@ index 1571fa3..a5e8bab 100644
  			return false;
  		}
 -		table = (const tt_entry_t *)phystokv(entry & ARM_TTE_TABLE_MASK);
-+		table = (const tt_entry_t *)(uintptr_t)((entry & ARM_TTE_TABLE_MASK) - gPhysBase + gVirtBase);
++		table = (const tt_entry_t *)(vm_map_address_t)((entry & ARM_TTE_TABLE_MASK) - gPhysBase + gVirtBase);
  	}
  }
  #endif
@@ -282,14 +284,14 @@ index 6d95536..e770e11 100644
  
  #if defined(APPLE_ARM64_ARCH_FAMILY)
 diff --git a/osfmk/kern/debug.c b/osfmk/kern/debug.c
-index c3b6ac2..7761863 100644
+index c3b6ac2..b238b98 100644
 --- a/osfmk/kern/debug.c
 +++ b/osfmk/kern/debug.c
 @@ -1263,6 +1263,10 @@ panic_trap_to_debugger(const char *panic_format_str, va_list *panic_args, unsign
  		vsnprintf(buf, EARLY_PANIC_BUFLEN, panic_format_str, *panic_args);
  		paniclog_append_noflush("panic: %s\n", buf);
  		paniclog_append_noflush("Kernel panicked very early before serial init, spinning forever...\n");
-+#if DEVELOPMENT && XNU_SHENG_PANIC_MARKER
++#if DEVELOPMENT
 +		extern void sheng_diag_panic_screen(const char *str);
 +		sheng_diag_panic_screen(buf);
 +#endif
@@ -297,14 +299,14 @@ index c3b6ac2..7761863 100644
  	}
  
 diff --git a/pexpert/arm/hwtrace/hwtrace.c b/pexpert/arm/hwtrace/hwtrace.c
-index 402b110..6a54a3a 100644
+index 402b110..04421bf 100644
 --- a/pexpert/arm/hwtrace/hwtrace.c
 +++ b/pexpert/arm/hwtrace/hwtrace.c
-@@ -498,6 +498,185 @@ PE_singlestep_hook(void)
- 
- #if DEVELOPMENT && XNU_SHENG_PANIC_MARKER
+@@ -500,12 +500,196 @@ PE_singlestep_hook(void)
  extern void boot_log_panic_flush(void);
-+
+ #endif
+ 
++#if DEVELOPMENT
 +struct sheng_diag_vc_info {
 +	unsigned int v_height;
 +	unsigned int v_width;
@@ -483,13 +485,16 @@ index 402b110..6a54a3a 100644
 +	}
 +	__asm__ volatile ("dsb sy" ::: "memory");
 +}
- #endif
- 
++#endif
++
  void
-@@ -506,6 +685,7 @@ PE_panic_hook(const char *str __unused)
+ PE_panic_hook(const char *str __unused)
+ {
  #if DEVELOPMENT && XNU_SHENG_PANIC_MARKER
  	/* The sheng BootLog panic entry only publishes a memory flag. */
  	boot_log_panic_flush();
++#endif
++#if DEVELOPMENT
 +	sheng_diag_panic_screen(str);
  #endif
  	if (PE_arm_debug_panic_hook != NULL) {
