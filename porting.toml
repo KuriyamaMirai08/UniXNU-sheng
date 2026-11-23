@@ -173,6 +173,12 @@ kind = "source"
 reference = "board.toml"
 result = "[os_overrides.\"macos-27.3-26C5035r\".payload.runtime] data_seed_tool selects UniXNU scripts/make-macos-data-seed.py, which copies the system volume's Data template with owners as root."
 
+[[area.evidence]]
+kind = "ci"
+reference = "outputs/stage0c3/run-45105676166/verified/stage0c3-seed-admission.json"
+revision = "78afa4ea949a2e841b055abc96e2638553d2d9ee"
+result = "Stage 0C-3 Run S (45101784411) generated and Run P (45105676166) bound the 48 GiB APFS Data seed (packed 1,183,872 B, sha256 9c7d8c86fb56aa6dd2d9a65b0345a8b580a4cb0b391e9b8265db0197b9fcffea, container f64b5730fc854831905eae28cbc348f7, approval 528d882db0b79589e3ca50bae276ecb3fd71a320755484733bd0b6e111f120c8). Stage 0C-3 ledger patch (scripts/repro/stage0c2e/stage0c3-ledger.patch) adds UfsWriteRole::Ledger (16 blocks at [window_first-1040, window_first-1024), planned LBA 51119339..51119354) and passed 624/624 host WAL/UFS tests, freestanding aarch64 compile probe, and CI build. initialization_allowed=false, live_media_ownership=NOT_OBSERVED, device=NO-GO."
+
 [[area]]
 id = "display"
 status = "implemented"
@@ -633,6 +639,12 @@ result = "Global AppSync scope, on-device signature repair, dynamic kernel trust
 kind = "source"
 reference = "scripts/build-gop-legacy-display-27.py"
 result = "On macOS the keyboard firmware image is placed in __DATA,__firmware."
+
+[[area.evidence]]
+kind = "ci"
+reference = "outputs/stage0c3/run-45105676166/verified/stage0c3-fat.json"
+revision = "78afa4ea949a2e841b055abc96e2638553d2d9ee"
+result = "Stage 0C-3 Run P (45105676166) built raw kernel 5d73cb56e7c24891edc781a8a4776b3dd04ab9e641f5dbf8984dc1dbf024e16b, sealed kernel a186a16f5f8bbb24ac4bf8541dc5b5fb7c7ad87c63b48c63814dea8f74eb3628, packaged 176 MiB FAT ecd742dc52544982f148eb9d967ab5e9952d1352724e9c6bdf17ec5d6e4484bc with real 48 GiB APFS seed and same-build vroot e0787c6c86441714f090642594c97dee5b8bfb472278823bcde1cfa9a8a3b46b, passed DarwinBoot parser (ACCEPT), 2C rebase/PAC RW-RX ownership (242,519 fixups, 0 RX violations), static_if callback closure (2 entries, 2 reachable functions, 0 non-RX pages), and PlaceImage (99,876,864 B <= 5,100,273,664 B window). loadable=false, runtime_qualified=false, final_efi_map=NOT_OBSERVED, device=NO-GO."
 
 [[area]]
 id = "diagnostics"

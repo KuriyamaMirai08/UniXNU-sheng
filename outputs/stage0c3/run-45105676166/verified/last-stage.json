@@ -1,0 +1,7 @@
+{
+  "stage": "kernel-and-strict-prelink",
+  "exit_code": 0,
+  "log_sha256": "4dc6c68ab9b8e970013fb6370ef8e45ab2aa6714935887f0403bce8d4b81eae5",
+  "log_bytes": 16543,
+  "diagnostic_lines": 1
+}

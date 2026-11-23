@@ -1,0 +1,49 @@
+{
+  "run_id": "45105676166",
+  "production_inputs": true,
+  "loadable": false,
+  "runtime_qualified": false,
+  "darwinboot": "ACCEPT",
+  "seed_bytes": 1183872,
+  "seed_sha256": "9c7d8c86fb56aa6dd2d9a65b0345a8b580a4cb0b391e9b8265db0197b9fcffea",
+  "root_policy": {
+    "kit_revision": "974f043d0c71ba2e60331483a41c6c6d35274ee3",
+    "source_sha256": "9f61a30277c28eec8d11b4ac088275389917894349bb18e2cf09f697eec1e1e3",
+    "trust_anchor_sha256": "73090c0a8fb76a83742486247e32ab2f77dc781723c8f798a7c1e73836c45945",
+    "verified_headers": {
+      "OS": {
+        "bytes": 9613344768,
+        "header_sha256": "c1620241f98757b2f6bcc786c1fcf87389472e3e7081a97935b12336f9fb053b",
+        "generation": 1
+      },
+      "SystemOS": {
+        "bytes": 6016729088,
+        "header_sha256": "00716552a3f14a96f15f9732f912591f4375d85e03bdffba5d259bab0573f590",
+        "generation": 1
+      }
+    },
+    "negative_cases": 6,
+    "full_root_tables_and_media": "NOT_OBSERVED"
+  },
+  "loader": {
+    "used_bytes": 99876864,
+    "window_bytes": 5100273664,
+    "fits_window": true
+  },
+  "fat_budget": {
+    "fat_bytes": 184549376,
+    "content_bytes": 99849747,
+    "budget_95pct_bytes": 175321907,
+    "headroom_bytes": 75472160
+  },
+  "storage_48g_geometry": {
+    "wal_window_blocks": 12624640,
+    "wal_first_lba": 51120379,
+    "wal_last_lba": 63745018,
+    "ledger_first_lba": 51119339,
+    "ledger_last_lba": 51119354,
+    "ledger_blocks": 16
+  },
+  "final_efi_map": "NOT_OBSERVED",
+  "device": "NO-GO"
+}

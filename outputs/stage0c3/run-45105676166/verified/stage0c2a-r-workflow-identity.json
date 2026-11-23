@@ -1,0 +1,15 @@
+{
+  "workflow_ref": "KuriyamaMirai08/UniXNU-sheng/.github/workflows/sheng-stage0c2a-r.yml@refs/heads/codex/stage0c3-production",
+  "workflow_sha": "78afa4ea949a2e841b055abc96e2638553d2d9ee",
+  "workflow_sha256": "4750eb1c6960fe22b47bfb4966a0486b3e0407793e8f935684cfb31b202c78c8",
+  "fixed_source_commit": "bcbce475de0ca2dbb55cfb870e5be5b51b92b727",
+  "fixed_source_tree": "39e7c5a8233a0fa83463f414afde4244487a2ae7",
+  "audit_tool_hashes": {
+    "scripts/audit-stage0c2a-r.py": "536f4ac7d39fe37f618133001bc3bfc5ad69ea3d698861e8a469d933c2a89112",
+    "scripts/build-darwinboot-parser.py": "2abb1d6c048c52ce28d3e0250a0c7df82a3715859ffd334f8ccbf5912365058e",
+    "scripts/finalize-stage0c2a-r.py": "8c77e632e4b8bf60bb0fb49cb21959fc95553588af11a3781b58f509b9737882",
+    "scripts/test-stage0c2a-r.py": "1e8f43fe84cb15e04b1c186808b7db06b74b79ba314f739917d5b3487907b57e"
+  },
+  "run_id": "45105676166",
+  "attempt": "1"
+}

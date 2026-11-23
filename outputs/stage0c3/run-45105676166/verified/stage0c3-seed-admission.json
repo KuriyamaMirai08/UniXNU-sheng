@@ -1,0 +1,14 @@
+{
+  "logical_bytes": 51539607552,
+  "packed_bytes": 1183872,
+  "packed_sha256": "9c7d8c86fb56aa6dd2d9a65b0345a8b580a4cb0b391e9b8265db0197b9fcffea",
+  "allocated_bytes": 116715520,
+  "apfs_container_id": "f64b5730fc854831905eae28cbc348f7",
+  "approval_scope": "resume-existing-only",
+  "approval_sha256": "528d882db0b79589e3ca50bae276ecb3fd71a320755484733bd0b6e111f120c8",
+  "root_policy_bundle_sha256": "e0787c6c86441714f090642594c97dee5b8bfb472278823bcde1cfa9a8a3b46b",
+  "static_seed_admission": "PASS",
+  "initialization_allowed": false,
+  "live_media_ownership": "NOT_OBSERVED",
+  "device": "NO-GO"
+}

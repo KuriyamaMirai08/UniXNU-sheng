@@ -1,0 +1,26 @@
+{
+  "NativeUfs.late.o": {
+    "bytes": 597200,
+    "sha256": "bd0d6d522edf7d8405b602251d7907c0e4f45d3c58ef448d3e65e473e54e526e",
+    "magic": 4277009103,
+    "cpu": 16777228,
+    "subtype": 3221225474,
+    "filetype": 1
+  },
+  "NativeRamBlock.late.o": {
+    "bytes": 430792,
+    "sha256": "2e2437f75f5ff0cff3b5b7ed06ba7d6df8bc12d5d15c733ea6f39d005fe7a45b",
+    "magic": 4277009103,
+    "cpu": 16777228,
+    "subtype": 3221225474,
+    "filetype": 1
+  },
+  "BootLog.o": {
+    "bytes": 420120,
+    "sha256": "ee9ca517241adf48a5441acb90d547af981d88a3bc111b2090f214d4f6e607e0",
+    "magic": 4277009103,
+    "cpu": 16777228,
+    "subtype": 3221225474,
+    "filetype": 1
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "status": "PASS",
+  "fixup_counts": {
+    "bootstrap_rw_owned": 242519,
+    "rx_violation": 0,
+    "unmapped": 0
+  },
+  "load_command_header_bootstrap_rw": 267,
+  "load_command_header_non_rw": 0,
+  "sample_violations": [],
+  "target_ttbr_wxn": "NOT_OBSERVED"
+}

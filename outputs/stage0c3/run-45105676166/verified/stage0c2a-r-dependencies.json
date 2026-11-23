@@ -1,0 +1,26 @@
+{
+  "runner_image": "20261117.0516.1",
+  "python": "3.15.2",
+  "brew_versions": {
+    "dtc": "1.8.1",
+    "cmake": "4.5.0",
+    "mtools": "4.0.50",
+    "ninja": "1.13.2",
+    "glslang": "16.6.0",
+    "shaderc": "2026.4",
+    "spirv-tools": "1.4.363.0",
+    "spirv-headers": "1.4.363.0",
+    "bison": "3.8.2",
+    "pkgconf": "3.0.11",
+    "rustup": "1.29.3",
+    "blacktop/tap/ipsw": "3.1.750",
+    "zstd": "1.5.7_1",
+    "zlib-ng-compat": "2.3.3_1"
+  },
+  "pip_versions": {
+    "cryptography": "50.0.2",
+    "cffi": "2.1.1",
+    "pycparser": "3.12"
+  },
+  "rust": "rustc 1.98.0 (88d9e12ae 2026-08-18)"
+}

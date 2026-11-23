@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "callback_entry_count": 2,
+  "reachable_function_count": 2,
+  "indirect_branch_count": 0,
+  "unresolved_functions": [],
+  "non_rx_pages": [],
+  "target_cache_tlb": "NOT_OBSERVED"
+}

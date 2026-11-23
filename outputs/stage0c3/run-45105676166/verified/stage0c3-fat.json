@@ -1,0 +1,54 @@
+{
+  "track": "stage0c3-production",
+  "static_result": "PASS",
+  "production_inputs": true,
+  "loadable": false,
+  "runtime_qualified": false,
+  "raw_kernel": {
+    "bytes": 98648064,
+    "sha256": "5d73cb56e7c24891edc781a8a4776b3dd04ab9e641f5dbf8984dc1dbf024e16b"
+  },
+  "sealed_kernel": {
+    "bytes": 98648064,
+    "sha256": "a186a16f5f8bbb24ac4bf8541dc5b5fb7c7ad87c63b48c63814dea8f74eb3628"
+  },
+  "map_sha256": "247ff4705f8ed81836c867c210f3d78e8a91c203309096d2776be5f07a02cd5c",
+  "root_policy_source": "same-build-storage-report",
+  "run_s_id": "45101784411",
+  "seed_approval_sha256": "528d882db0b79589e3ca50bae276ecb3fd71a320755484733bd0b6e111f120c8",
+  "seed": {
+    "kind": "production-48g-apfs",
+    "logical_bytes": 51539607552,
+    "packed_bytes": 1183872,
+    "sha256": "9c7d8c86fb56aa6dd2d9a65b0345a8b580a4cb0b391e9b8265db0197b9fcffea"
+  },
+  "fat": {
+    "bytes": 184549376,
+    "sha256": "ecd742dc52544982f148eb9d967ab5e9952d1352724e9c6bdf17ec5d6e4484bc"
+  },
+  "files": {
+    "EFI/UniXNU/Payloads/kernel.macho": {
+      "bytes": 98648064,
+      "sha256": "a186a16f5f8bbb24ac4bf8541dc5b5fb7c7ad87c63b48c63814dea8f74eb3628"
+    },
+    "EFI/UniXNU/Payloads/kernel.macho.adt": {
+      "bytes": 14580,
+      "sha256": "d790ef54ce7516df24022b0461b5f6e862acef544b865317dacc394118615d3c"
+    },
+    "EFI/UniXNU/Payloads/kernel.macho.vroot": {
+      "bytes": 1152,
+      "sha256": "e0787c6c86441714f090642594c97dee5b8bfb472278823bcde1cfa9a8a3b46b"
+    },
+    "EFI/UniXNU/Payloads/scratch-data.img": {
+      "bytes": 1183872,
+      "sha256": "9c7d8c86fb56aa6dd2d9a65b0345a8b580a4cb0b391e9b8265db0197b9fcffea"
+    },
+    "EFI/UniXNU/unixnu.toml": {
+      "bytes": 2079,
+      "sha256": "8ffc58d34392c4a83c5aa0a648393e8f1d7edad1a24fe50c3b22cf6de6dc442d"
+    }
+  },
+  "darwinboot": "ACCEPT",
+  "final_efi_map": "NOT_OBSERVED",
+  "device": "NO-GO"
+}

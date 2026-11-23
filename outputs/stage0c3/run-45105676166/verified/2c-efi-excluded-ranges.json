@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "darwinboot_memory_size": 5100273664,
+  "adt_excluded_ranges": [],
+  "place_image_used_bytes": null,
+  "place_image_window_bytes": null,
+  "final_efi_map": "NOT_OBSERVED",
+  "device": "NO-GO"
+}

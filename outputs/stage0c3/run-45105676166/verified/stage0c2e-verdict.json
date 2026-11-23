@@ -1,0 +1,35 @@
+{
+  "candidate_track": "stage0c2d-resume",
+  "status": "PASS",
+  "issues": [],
+  "build": "success",
+  "capture": "success",
+  "candidate_identity": {
+    "bytes": 98648064,
+    "sha256": "5d73cb56e7c24891edc781a8a4776b3dd04ab9e641f5dbf8984dc1dbf024e16b",
+    "matches_original_1f": false
+  },
+  "parser_observation": "ACCEPT",
+  "artifacts_sha256": {
+    "2c-efi-excluded-ranges.json": "96ac1dd78a6ae6f88eef7f9690554b7646b7dfa6ae9025604abc72ef6a02ee15",
+    "2c-rebase-pac-ownership.json": "179aff8a1e7d098e109154c3fcd25773ded6151a85a69ed62d5d71c3fd8cfc40",
+    "2c-static-if-callback-closure.json": "c173ba6d2f7339b4ec6eb0c9d7b3c61496c70925b1c8fa4b5c6c31799d3360dc",
+    "last-stage.json": "5680f556c6b4d1324f7ea1d1d2be5c3c28367e755ae836165d389aa7ff3e96b9",
+    "objects.json": "c7ca0f59b1d59112681f0404e786226fa476ad169959117570453fc61da1cd9d",
+    "stage0c2a-r-audit-runtime.json": "a879bbd146fadd2a47f50aba0aa0ebfbf75a963d29ec2ac70bfd0b45f057656a",
+    "stage0c2a-r-capture.json": "f0014ea2bd9aafc322dfcac00c3ecce9016bae16ad75e9e3160fd1924d3509ae",
+    "stage0c2a-r-dependencies.json": "7dc5741ac43f9ac9e2dcbad3367af3102b311c14271a363a4781c96d6d266a4a",
+    "stage0c2a-r-parser-tests.json": "5a8ff96e64edfe275632045f0aa03d0d3be1cb4d978648777744f881c6512341",
+    "stage0c2a-r-workflow-identity.json": "187b76675d37d36cf77b99b368eb46b786a21f2c51ed7c3055c58eee04e15d31",
+    "stage0c2c-build-inputs.json": "21d3bee1088bc4045af76e435b3846f3693bc72c41f2950e4cfbe242eec7810c",
+    "stage0c2c-census.json": "07e6599e812fe4679667c8c8a7cd09cd61e86facab6855aa5e33c8e6718ff7b7",
+    "stage0c2c-seal-pair.json": "47b3e9a74c8a02521081a19fcb416bd12b1d6b3f8fbe9c0a4cdbb8ff8f6cf243",
+    "stage0c2e-inputs.json": "751505eec5fa1b0b98688fb3b448cb0e6a813083e56fbdea8b30a45d63ab1b24",
+    "stage0c2e-parser-sdk.json": "cfb48f0f509c7bb1f82bdb284d2ec563e37d9cf8df92f1d014bdb32f0df6e92a",
+    "stage0c3-fat.json": "675e6793b7a6bc1344bc66005df0a18a6d7189375e6c16062f4d55f6d7209110",
+    "stage0c3-ledger-inputs.json": "67c0d653e29c947d4f04ddf81c8b4e89bd720018d008a9779ff0263b801e97fb",
+    "stage0c3-seed-admission.json": "22999b8db64553b93f9cf86090df96e92b7b6b082b6fcc125816cde8af621d49",
+    "strict-result.json": "d04f5bfb0048c1803f159ab7a684dd26bf6cbea1d403a50d896d3f0d1d3d3f60",
+    "toolchain.json": "65a681a5ccd9d5ac411e01a3735f9bfccc391798a4aacc23518ffaa303d3dadb"
+  }
+}

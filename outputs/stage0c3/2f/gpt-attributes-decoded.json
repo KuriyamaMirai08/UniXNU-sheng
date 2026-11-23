@@ -1,0 +1,433 @@
+{
+  "scope": "archived historical vs stock GPT attribute bitfield decode; current device unobserved",
+  "bitfield_spec": {
+    "priority": "bits 48..49",
+    "active": "bit 50",
+    "retry_count": "bits 51..53",
+    "successful": "bit 54",
+    "unbootable": "bit 55"
+  },
+  "summary": {
+    "authority": "Qualcomm ABL treats boot_a/boot_b GPT attributes as slot-selection authority.",
+    "historical_boot_a": {
+      "raw_hex": "0x0077000000000000",
+      "priority": 3,
+      "active": true,
+      "retry_count": 6,
+      "successful": true,
+      "unbootable": false
+    },
+    "historical_boot_b": {
+      "raw_hex": "0x002a000000000000",
+      "priority": 2,
+      "active": false,
+      "retry_count": 5,
+      "successful": false,
+      "unbootable": false
+    },
+    "other_partitions_upper_byte_56_63_hex": {
+      "abl_a": "0x10",
+      "abl_b": "0x10",
+      "uefi_a": "0x10",
+      "uefi_b": "0x10",
+      "init_boot_a": "0x00",
+      "init_boot_b": "0x00",
+      "vendor_boot_a": "0x00",
+      "vendor_boot_b": "0x00",
+      "dtbo_a": "0x00",
+      "dtbo_b": "0x00",
+      "vbmeta_a": "0x10",
+      "vbmeta_b": "0x10",
+      "vbmeta_system_a": "0x10",
+      "vbmeta_system_b": "0x10"
+    },
+    "conclusion": "Historical boot_a (active=True, successful=True, unbootable=False, priority=3, retry=6) was the active successful slot; boot_b (active=False, successful=False, unbootable=False, priority=2, retry=5) was inactive."
+  },
+  "partitions": {
+    "abl_a": {
+      "lun": "sde",
+      "historical": {
+        "raw_hex": "0x10c4000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": true,
+        "retry_count": 0,
+        "successful": true,
+        "unbootable": true,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "stock": {
+        "raw_hex": "0x1000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "differs": true
+    },
+    "abl_b": {
+      "lun": "sde",
+      "historical": {
+        "raw_hex": "0x107b000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 3,
+        "active": false,
+        "retry_count": 7,
+        "successful": true,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "stock": {
+        "raw_hex": "0x1000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "differs": true
+    },
+    "uefi_a": {
+      "lun": "sde",
+      "historical": {
+        "raw_hex": "0x10c4000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": true,
+        "retry_count": 0,
+        "successful": true,
+        "unbootable": true,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "stock": {
+        "raw_hex": "0x1000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "differs": true
+    },
+    "uefi_b": {
+      "lun": "sde",
+      "historical": {
+        "raw_hex": "0x107b000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 3,
+        "active": false,
+        "retry_count": 7,
+        "successful": true,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "stock": {
+        "raw_hex": "0x1000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "differs": true
+    },
+    "boot_a": {
+      "lun": "sde",
+      "historical": {
+        "raw_hex": "0x0077000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 3,
+        "active": true,
+        "retry_count": 6,
+        "successful": true,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "stock": {
+        "raw_hex": "0x0000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "differs": true
+    },
+    "boot_b": {
+      "lun": "sde",
+      "historical": {
+        "raw_hex": "0x002a000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 2,
+        "active": false,
+        "retry_count": 5,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "stock": {
+        "raw_hex": "0x0000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "differs": true
+    },
+    "init_boot_a": {
+      "lun": "sde",
+      "historical": {
+        "raw_hex": "0x00c4000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": true,
+        "retry_count": 0,
+        "successful": true,
+        "unbootable": true,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "stock": {
+        "raw_hex": "0x0000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "differs": true
+    },
+    "init_boot_b": {
+      "lun": "sde",
+      "historical": {
+        "raw_hex": "0x007b000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 3,
+        "active": false,
+        "retry_count": 7,
+        "successful": true,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "stock": {
+        "raw_hex": "0x0000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "differs": true
+    },
+    "vendor_boot_a": {
+      "lun": "sde",
+      "historical": {
+        "raw_hex": "0x00c4000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": true,
+        "retry_count": 0,
+        "successful": true,
+        "unbootable": true,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "stock": {
+        "raw_hex": "0x0000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "differs": true
+    },
+    "vendor_boot_b": {
+      "lun": "sde",
+      "historical": {
+        "raw_hex": "0x007b000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 3,
+        "active": false,
+        "retry_count": 7,
+        "successful": true,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "stock": {
+        "raw_hex": "0x0000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "differs": true
+    },
+    "dtbo_a": {
+      "lun": "sde",
+      "historical": {
+        "raw_hex": "0x00c4000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": true,
+        "retry_count": 0,
+        "successful": true,
+        "unbootable": true,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "stock": {
+        "raw_hex": "0x0000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "differs": true
+    },
+    "dtbo_b": {
+      "lun": "sde",
+      "historical": {
+        "raw_hex": "0x007b000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 3,
+        "active": false,
+        "retry_count": 7,
+        "successful": true,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "stock": {
+        "raw_hex": "0x0000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x00"
+      },
+      "differs": true
+    },
+    "vbmeta_a": {
+      "lun": "sde",
+      "historical": {
+        "raw_hex": "0x10c4000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": true,
+        "retry_count": 0,
+        "successful": true,
+        "unbootable": true,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "stock": {
+        "raw_hex": "0x1000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "differs": true
+    },
+    "vbmeta_b": {
+      "lun": "sde",
+      "historical": {
+        "raw_hex": "0x107b000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 3,
+        "active": false,
+        "retry_count": 7,
+        "successful": true,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "stock": {
+        "raw_hex": "0x1000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "differs": true
+    },
+    "vbmeta_system_a": {
+      "lun": "sda",
+      "historical": {
+        "raw_hex": "0x1004000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": true,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "stock": {
+        "raw_hex": "0x1000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "differs": true
+    },
+    "vbmeta_system_b": {
+      "lun": "sda",
+      "historical": {
+        "raw_hex": "0x1000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "stock": {
+        "raw_hex": "0x1000000000000000",
+        "low_bits_hex": "0x000000000000",
+        "priority": 0,
+        "active": false,
+        "retry_count": 0,
+        "successful": false,
+        "unbootable": false,
+        "upper_byte_56_63_hex": "0x10"
+      },
+      "differs": false
+    }
+  },
+  "device": "NO-GO"
+}

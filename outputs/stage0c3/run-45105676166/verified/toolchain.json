@@ -1,0 +1,14 @@
+{
+  "xcode": "Xcode 26.6\nBuild version 17F113",
+  "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin",
+  "sdk": "26.5",
+  "linker": "{\n\t\"version\": \"1267\",\n\t\"architectures\": [\n\t\t\"armv6\",\n\t\t\"armv7\",\n\t\t\"armv7s\",\n\t\t\"arm64\",\n\t\t\"arm64e\",\n\t\t\"arm64_32\",\n\t\t\"i386\",\n\t\t\"x86_64\",\n\t\t\"x86_64h\",\n\t\t\"armv6m\",\n\t\t\"armv7k\",\n\t\t\"armv7m\",\n\t\t\"armv7em\",\n\t\t\"armv8m.main\",\n\t\t\"armv8.1m.main\"\n\t],\n\t\"lto\": {\n\t\t\"runtime_api_version\": 30,\n\t\t\"static_api_version\": 30,\n\t\t\"version_string\": \"LLVM version 21.0.0\"\n\t},\n\t\"tapi\": {\n\t\t\"version\": \"21.0.0\",\n\t\t\"version_string\": \"Apple TAPI version 21.0.0 (tapi-2100.0.2.6)\"\n\t}\n}",
+  "rust": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+  "macos": "26.7.2",
+  "macos_build": "25G332",
+  "runner_image": "20261117.0516.1",
+  "llvm": "llvm-objcopy, compatible with GNU objcopy\nHomebrew LLVM version 23.1.4\n  Optimized build.",
+  "lld": "Homebrew LLD 23.1.4",
+  "compiler_sha256": "d2e4bf622758eee1bf7267c060497fb2c41e098d37b0fca8be73898dc7e14eda",
+  "apple_ld_sha256": "e412b9f2af31b1567a9eabc28f553a8f1cf34127e2107cb39c2694cf147571a4"
+}

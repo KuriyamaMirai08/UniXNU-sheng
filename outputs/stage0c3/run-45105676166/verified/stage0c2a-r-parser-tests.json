@@ -1,0 +1,52 @@
+{
+  "sample_bytes": 98648064,
+  "sample_sha256": "5d73cb56e7c24891edc781a8a4776b3dd04ab9e641f5dbf8984dc1dbf024e16b",
+  "positive_parser_exit_code": 0,
+  "negative_fixtures": [
+    {
+      "name": "wrong_child_DATA_initprot",
+      "bytes": 98648064,
+      "sha256": "c13d6bf0989dbecc53960a46686cd9f1f9259430b358d9ccd29b4fb68a3b8775",
+      "expected_rejection": "member protection exceeds parent",
+      "parser_exit_code": 1,
+      "expected_source_rejection": "DarwinBoot.c:270-278",
+      "observed_efi_load_error": true
+    },
+    {
+      "name": "wrong_absolute_DATA_fileoff",
+      "bytes": 98648064,
+      "sha256": "3153cae308b3e0583b7559874dbe01d3984971f0f9f60917b1afa0a66ecc719d",
+      "expected_rejection": "member file backing does not match root",
+      "parser_exit_code": 1,
+      "expected_source_rejection": "DarwinBoot.c:271-274",
+      "observed_efi_load_error": true
+    },
+    {
+      "name": "overlapping_member_VA",
+      "bytes": 98648064,
+      "sha256": "e2fb8fc889c877799fa9b6713fc598ec2ebb5b8c3188409b57e4045e0ec6b953",
+      "expected_rejection": "member virtual segments overlap",
+      "parser_exit_code": 1,
+      "expected_source_rejection": "DarwinBoot.c:194-199",
+      "observed_efi_load_error": true
+    },
+    {
+      "name": "duplicate_kernel_fileset_entry",
+      "bytes": 98648064,
+      "sha256": "6486395ed11033563138e550b15b9b1baf3e23a75a5f53ea8c092c88b44630af",
+      "expected_rejection": "kernel entry must be unique",
+      "parser_exit_code": 1,
+      "expected_source_rejection": "DarwinBoot.c:256-258",
+      "observed_efi_load_error": true
+    },
+    {
+      "name": "truncated_root_backing",
+      "bytes": 98648063,
+      "sha256": "3f3a428c60d4319e2ac67d097feafa7396f47074647bbd90658ba77d93a0cf1e",
+      "expected_rejection": "root segment backing exceeds file",
+      "parser_exit_code": 1,
+      "expected_source_rejection": "DarwinBoot.c:176-177",
+      "observed_efi_load_error": true
+    }
+  ]
+}

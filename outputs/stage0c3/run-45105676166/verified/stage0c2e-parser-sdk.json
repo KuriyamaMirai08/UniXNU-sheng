@@ -1,0 +1,8 @@
+{
+  "name": "MacOSX.sdk",
+  "version": "26.5",
+  "settings_sha256": "f8d005f09381389167f9e0aeaa169bc9e7dff162ef22ca2fd8e98df7ff1acafe",
+  "inttypes_header_sha256": "d5fbab3ef6097275a1d35768976eea152fe8fa8b73159d3b49697d6de3cd05d9",
+  "darwinboot_commit": "5243c68ec332a227fe3680cd5da6d5a0e127035c",
+  "empty_input_rejected": true
+}

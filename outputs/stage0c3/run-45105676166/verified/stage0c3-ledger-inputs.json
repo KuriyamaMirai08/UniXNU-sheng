@@ -1,0 +1,15 @@
+{
+  "component": "ShengUfs",
+  "patch": "stage0c3-ledger.patch",
+  "patch_sha256": "b0f606bf710182cf15400a0f92636c1a63ee2df550e63d3936aa3065d38c7d10",
+  "files": {
+    "NativeUfs.cpp": {
+      "before_sha256": "1fb14824b2746a73555c89efca64fcccff0995826279987471bfa0d8444ecb52",
+      "after_sha256": "dcd0de7a74bba9d54f5184345da116af0953f1bce685e5987f81ab94112baf02"
+    },
+    "UfsWriteAuthority.h": {
+      "before_sha256": "84c79c2bca5b041f8e68f2fb014f20fae18bd54e6fe6498df97f210d551f8311",
+      "after_sha256": "e44decdf9aa6b41c79f6b411e0fcb1dcd12fabe7e1a2653b712fc492947f6cf1"
+    }
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "status": "strict_candidate_written_runtime_unqualified",
+  "inputs": {
+    "native_sha256": "ab8d36d8516146879a7685894cfdfc65d233ce39e72aaa3df86192764638f1f7",
+    "reference_sha256": "7780e43d8c20a2cceac28699f4ee52adc1b34806045fefc7f778aa7f32138cba",
+    "kernelcache_sha256": "38e6d9fa5f789b8228f4617ef4c6d2a3fd8ab564abdc9b62920f1db53fc1780a",
+    "baseline_native_sha256": "2d1071d451f27bcd330a688a2579bd789b9c5795b1d5e670239850629ec665d9"
+  },
+  "candidate_sha256": "5d73cb56e7c24891edc781a8a4776b3dd04ab9e641f5dbf8984dc1dbf024e16b",
+  "map_sha256": "247ff4705f8ed81836c867c210f3d78e8a91c203309096d2776be5f07a02cd5c",
+  "placement": "separate-native-data",
+  "retained_entries": 48,
+  "corecrypto_hmac_sha256": "00ebadb9f7177fd807c773d88e2e1e5b6818c039d4ac8c2959a166f886df88ea",
+  "runtime_qualified": false,
+  "loadable": false,
+  "candidate_bytes": 98648064,
+  "segment_layout": {
+    "__TEXT": {
+      "old": "0xfffffff007004000",
+      "new": "0xfffffff007668000",
+      "size": "0x220000"
+    },
+    "__DATA_CONST": {
+      "old": "0xfffffff007224000",
+      "new": "0xfffffff007de4000",
+      "size": "0x164000"
+    },
+    "__TEXT_EXEC": {
+      "old": "0xfffffff007388000",
+      "new": "0xfffffff00ac84000",
+      "size": "0xbb8000"
+    },
+    "__KLD": {
+      "old": "0xfffffff007f40000",
+      "new": "0xfffffff00b83c000",
+      "size": "0x4000"
+    },
+    "__LASTDATA_CONST": {
+      "old": "0xfffffff007f44000",
+      "new": "0xfffffff007f48000",
+      "size": "0x4000"
+    },
+    "__LAST": {
+      "old": "0xfffffff007f48000",
+      "new": "0xfffffff00b840000",
+      "size": "0x0"
+    },
+    "__KLDDATA": {
+      "old": "0xfffffff007f48000",
+      "new": "0xfffffff00cb50000",
+      "size": "0x8000"
+    },
+    "__DATA": {
+      "old": "0xfffffff007f50000",
+      "new": "0xfffffff00cc2c000",
+      "size": "0x1ec000"
+    },
+    "__BOOTDATA": {
+      "old": "0xfffffff00813c000",
+      "new": "0xfffffff00cb58000",
+      "size": "0xd4000"
+    },
+    "__PRELINK_TEXT": {
+      "old": "0xfffffff004004000",
+      "new": "0xfffffff00b840000",
+      "size": "0x0"
+    },
+    "__PRELINK_INFO": {
+      "old": "0xfffffff008210000",
+      "new": "0xfffffff00b840000",
+      "size": "0x0"
+    },
+    "__PLK_TEXT_EXEC": {
+      "old": "0xfffffff008210000",
+      "new": "0xfffffff00b840000",
+      "size": "0x0"
+    },
+    "__PRELINK_DATA": {
+      "old": "0xfffffff008210000",
+      "new": "0xfffffff00b840000",
+      "size": "0x0"
+    },
+    "__PLK_DATA_CONST": {
+      "old": "0xfffffff008210000",
+      "new": "0xfffffff00b840000",
+      "size": "0x0"
+    },
+    "__PLK_LLVM_COV": {
+      "old": "0xfffffff008210000",
+      "new": "0xfffffff00b840000",
+      "size": "0x0"
+    },
+    "__PLK_LINKEDIT": {
+      "old": "0xfffffff008210000",
+      "new": "0xfffffff00b840000",
+      "size": "0x0"
+    },
+    "__LINKINFO": {
+      "old": "0xfffffff008210000",
+      "new": "0xfffffff00bc58000",
+      "size": "0x48000"
+    },
+    "__LINKEDIT": {
+      "old": "0xfffffff008258000",
+      "new": "0xfffffff00bca0000",
+      "size": "0xa3c000"
+    }
+  }
+}

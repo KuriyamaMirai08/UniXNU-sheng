@@ -1,0 +1,10 @@
+{
+  "before_sha256": "5d73cb56e7c24891edc781a8a4776b3dd04ab9e641f5dbf8984dc1dbf024e16b",
+  "after_sha256": "a186a16f5f8bbb24ac4bf8541dc5b5fb7c7ad87c63b48c63814dea8f74eb3628",
+  "bytes": 98648064,
+  "tested_static_if_sites": 10,
+  "source_crypto_post_hmac": "MATCH",
+  "other_binary_changes": false,
+  "runtime": "NOT_OBSERVED",
+  "sealed_parser": "ACCEPT"
+}
