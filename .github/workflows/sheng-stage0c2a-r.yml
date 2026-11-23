@@ -1,5 +1,5 @@
 name: Sheng Stage 0C-3 Production Binding ARM64e and strict-prelink
-run-name: Stage 0C-3 Run P / 48 GiB APFS production binding and strict-prelink
+run-name: Stage 0C-3 Deliverable / encrypted hardened kernel.macho
 on:
   workflow_dispatch:
     inputs:
@@ -15,7 +15,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: sheng-stage0c3-production
+  group: sheng-stage0c3-deliverable
   cancel-in-progress: false
 jobs:
   build-arm64e-stage0c3-production:
@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = refs/heads/codex/stage0c3-production
+          test "$GITHUB_REF" = refs/heads/codex/stage0c3-deliverable
           if [[ "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
             echo 'Stage 0C-3 Run P requires attempt 1' >&2
             exit 1
@@ -378,6 +378,27 @@ jobs:
                           "--seed", str(seed_path),
                           "--approval-sha256", "528d882db0b79589e3ca50bae276ecb3fd71a320755484733bd0b6e111f120c8",
                           "--run-s-id", "45101784411"], check=True)
+          import gzip, secrets
+          deliv_dir = temp / "stage0c3-deliverable"
+          deliv_dir.mkdir(parents=True, exist_ok=True)
+          sealed_bytes = sealed.read_bytes()
+          gz_bytes = gzip.compress(sealed_bytes, compresslevel=6, mtime=0)
+          nonce = secrets.token_bytes(12)
+          enc_bytes = nonce + AESGCM(key).encrypt(nonce, gz_bytes, b"unixnu-sheng-deliverable-20261123")
+          (deliv_dir / "kernel.macho.gz.enc").write_bytes(enc_bytes)
+          policy_file = tree / "build/sheng-source-storage/root-policies.bin"
+          (deliv_dir / "deliverable-receipt.json").write_text(json.dumps({
+              "raw_kernel_bytes": candidate.stat().st_size,
+              "raw_kernel_sha256": hashlib.sha256(candidate.read_bytes()).hexdigest(),
+              "sealed_kernel_bytes": len(sealed_bytes),
+              "sealed_kernel_sha256": hashlib.sha256(sealed_bytes).hexdigest(),
+              "gzip_bytes": len(gz_bytes),
+              "gzip_sha256": hashlib.sha256(gz_bytes).hexdigest(),
+              "encrypted_bytes": len(enc_bytes),
+              "encrypted_sha256": hashlib.sha256(enc_bytes).hexdigest(),
+              "root_policies_sha256": hashlib.sha256(policy_file.read_bytes()).hexdigest(),
+              "aad": "unixnu-sheng-deliverable-20261123",
+          }, indent=2) + "\n", encoding="utf-8")
           PY
       - name: Validate evidence and decide job result
         if: always() && steps.identity.outcome == 'success'
@@ -418,3 +439,13 @@ jobs:
             ${{ runner.temp }}/stage0c2a-r-publish/2c-efi-excluded-ranges.json
           if-no-files-found: error
           retention-days: 14
+      - name: Upload encrypted deliverable artifact
+        if: success() && steps.identity.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sheng-stage0c3-deliverable-${{ github.run_id }}
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/stage0c3-deliverable/kernel.macho.gz.enc
+            ${{ runner.temp }}/stage0c3-deliverable/deliverable-receipt.json
