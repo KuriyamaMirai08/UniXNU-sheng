@@ -1,5 +1,5 @@
 name: Sheng Stage 0C-3 Production Binding ARM64e and strict-prelink
-run-name: Stage 0C-3 Deliverable / encrypted hardened kernel.macho
+run-name: Stage 0C-3 Diagnostic / greenbar progress + panic screen
 on:
   workflow_dispatch:
     inputs:
@@ -15,7 +15,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: sheng-stage0c3-deliverable
+  group: sheng-stage0c3-diag-greenbar
   cancel-in-progress: false
 jobs:
   build-arm64e-stage0c3-production:
@@ -35,7 +35,7 @@ jobs:
       EXPECTED_NEGATIVE_TEST_SHA256: 1e8f43fe84cb15e04b1c186808b7db06b74b79ba314f739917d5b3487907b57e
       EXPECTED_STAGE2E_ASSET_0: e3cde9571528cb648aa69411061f612e69bbac7478b3820e69bfdbcb4eb10db1
       EXPECTED_STAGE2E_ASSET_1: 62b017e743b01de94ad1e964bb783160c783829e3e7479a6c7f212b32960be80
-      EXPECTED_STAGE2E_ASSET_2: 019db129747a03836d820b6983d68719b4e627ae6c8f43eedc8bcaf303d347f8
+      EXPECTED_STAGE2E_ASSET_2: 6195d92e49d8be8acbf4c3622c419bc58054b39dfec3a9fb1471b73b93f733b1
       EXPECTED_STAGE2E_ASSET_3: 98a092ce9705089e090368c9501ab81fb51723be00cf5327b2be294a6f3e9cb1
       EXPECTED_STAGE2E_ASSET_4: 751505eec5fa1b0b98688fb3b448cb0e6a813083e56fbdea8b30a45d63ab1b24
     steps:
@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = refs/heads/codex/stage0c3-deliverable
+          test "$GITHUB_REF" = refs/heads/codex/stage0c3-diag-greenbar
           if [[ "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
             echo 'Stage 0C-3 Run P requires attempt 1' >&2
             exit 1

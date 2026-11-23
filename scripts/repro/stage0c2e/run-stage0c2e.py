@@ -280,9 +280,11 @@ def main():
         path = ASSETS / row["patch"]
         exact(path, row["sha256"])
         shutil.copyfile(path, series.parent / path.name)
+    diag_patch = ASSETS / "sheng-stage0c3-diag-bars.patch"
+    shutil.copyfile(diag_patch, series.parent / diag_patch.name)
     with series.open("ab") as stream:
         require(series.read_bytes().endswith(b"\n"), "Malformed 24A446 series")
-        stream.write("".join(row["patch"] + "\n" for row in additions).encode())
+        stream.write(("".join(row["patch"] + "\n" for row in additions) + diag_patch.name + "\n").encode())
     patch("shengufs", assets / "shenguFs.patch", device / "drivers/ShengUfs")
     patch("ramblock", assets / "ramblock.patch", framework / "drivers/RamBlock")
     patch("bootlog", assets / "bootlog.patch", device)
@@ -508,10 +510,12 @@ def main():
     stamp = json.loads((work / "xnu-inputs.json").read_bytes())
     expected = [(Path(row["patch"]).name, row["sha256"]) for row in stage2c["ordered_patches"]]
     applied = [(Path(row["path"]).name, row["sha256"]) for row in stamp["patches"]]
-    require(stamp["commit"] == stage2c["fixed_framework_soc_xnu"]["xnu"] and applied == expected,
-            "Effective XNU source or ordered 95+4 patches differ")
-    for path, wanted in stage2c["patched_xnu_source_sha256"].items():
-        exact(tree / ".cache/xnu-work" / path, wanted)
+    diag_applied = [row for row in applied if row[0] == "sheng-stage0c3-diag-bars.patch"]
+    require(stamp["commit"] == stage2c["fixed_framework_soc_xnu"]["xnu"]
+            and len(diag_applied) == 1
+            and [row for row in applied if row[0] != "sheng-stage0c3-diag-bars.patch"] == expected,
+            "Effective XNU source or ordered 95+4+diag patches differ")
+    # Diagnostic build intentionally modifies start.s, arm_init.c, arm_vm_init.c, hwtrace.c, kern_exec.c.
     for path, row in sealer["files"].items():
         exact(tree / path, row["after_sha256"])
     check_storage_resume(tree)
