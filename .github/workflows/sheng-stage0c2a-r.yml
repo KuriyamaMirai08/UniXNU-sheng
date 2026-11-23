@@ -1,5 +1,5 @@
-name: Sheng Stage 0C-2B private FAT calibration ARM64e and strict-prelink
-run-name: Stage 0C-2B private FAT calibration / fixed input compile and strict-prelink
+name: Sheng Stage 0C-3 Production Binding ARM64e and strict-prelink
+run-name: Stage 0C-3 Run P / 48 GiB APFS production binding and strict-prelink
 on:
   workflow_dispatch:
     inputs:
@@ -15,10 +15,10 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: sheng-stage0c2b-fat
+  group: sheng-stage0c3-production
   cancel-in-progress: false
 jobs:
-  build-arm64e-stage0c2b-fat:
+  build-arm64e-stage0c3-production:
     runs-on: macos-26
     timeout-minutes: 360
     env:
@@ -34,8 +34,8 @@ jobs:
       EXPECTED_FINALIZER_SHA256: 8c77e632e4b8bf60bb0fb49cb21959fc95553588af11a3781b58f509b9737882
       EXPECTED_NEGATIVE_TEST_SHA256: 1e8f43fe84cb15e04b1c186808b7db06b74b79ba314f739917d5b3487907b57e
       EXPECTED_STAGE2E_ASSET_0: e3cde9571528cb648aa69411061f612e69bbac7478b3820e69bfdbcb4eb10db1
-      EXPECTED_STAGE2E_ASSET_1: 4b3a4cf395d1c6d0f061d252dbb689f12050d45f9f56d09880a7c79c1b52c1df
-      EXPECTED_STAGE2E_ASSET_2: 281cebb66c981333c09a2b250fdccc7fce4096687fc363adc443c63bc060463d
+      EXPECTED_STAGE2E_ASSET_1: 62b017e743b01de94ad1e964bb783160c783829e3e7479a6c7f212b32960be80
+      EXPECTED_STAGE2E_ASSET_2: 97db142a5337242cd8933b0286a7176dbe4bb782f77014964d569ab264a439a2
       EXPECTED_STAGE2E_ASSET_3: 98a092ce9705089e090368c9501ab81fb51723be00cf5327b2be294a6f3e9cb1
       EXPECTED_STAGE2E_ASSET_4: 751505eec5fa1b0b98688fb3b448cb0e6a813083e56fbdea8b30a45d63ab1b24
     steps:
@@ -43,9 +43,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = refs/heads/codex/stage0c2b-fat
+          test "$GITHUB_REF" = refs/heads/codex/stage0c3-production
           if [[ "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
-            echo 'Stage 0C-2B private FAT calibration requires attempt 1' >&2
+            echo 'Stage 0C-3 Run P requires attempt 1' >&2
             exit 1
           fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -103,7 +103,7 @@ jobs:
               "scripts/repro/stage0c2e/shengufs.patch": os.environ["EXPECTED_STAGE2E_ASSET_3"],
               "scripts/repro/stage0c2e/stage0c2e-inputs.json": os.environ["EXPECTED_STAGE2E_ASSET_4"],
           }
-          stage2c_assets = {'scripts/repro/stage0c2e/sheng-stage0c2c-panic-marker.patch': 'e114d89c88927bde55df9f3957e23a4bca4b0309a80222f4e6611161adc5e294', 'scripts/repro/stage0c2e/sheng-stage0c2c-static-if-preimage.patch': '97f09ef79474a92eaa733e35314a63d054c055a1d5475f0f380ab0b9748650d4', 'scripts/repro/stage0c2e/audit-stage0c2c.py': 'b9fdee3840e5993e16afd8c67061d39259e710530e65758cf742dfef36477c9e', 'scripts/repro/stage0c2e/kc_image.py': '2a2561308b27ace4e21dd4e45924bdeca937ee13047b7c6fd5ce580018f68747', 'scripts/repro/stage0c2e/stage0c2c-inputs.json': 'ee45907fd8cd4c4178411f9d96b4379e89694e7c9bdb1710de073a862d335eb0', 'scripts/repro/stage0c2e/sheng-stage0c2c-marker-link-modes.patch': 'dd99ff4cc82383956e76f7924056785ea9a2c309d13ac1aa6b8dac5c0264ea97', 'scripts/repro/stage0c2e/stage0c2c-wx-bootstrap.patch': '527812d639f6759b791e8d712d3c773a92660359471fe8211c96d35f504ee500', 'scripts/repro/stage0c2e/stage0c2c-static-if-noop.patch': 'ae5c2d8bb97282ea4db377c4aef0c1c8df8ed3f7519d81ad1f03d869d49f7e4e', 'scripts/repro/stage0c2e/stage0c2c-preseal-fileset.patch': '46e6c8a4651d672b8aa5727c157cf9235059c99652b54ecceb23aff7d5cedc1d', 'scripts/repro/stage0c2e/verify-stage0c2c-seal-pair.py': '74f0b1bc4055f05e13a6e01208ce71a95ee770986e3e6ee3f403f19b4edc4e40', 'scripts/repro/stage0c2e/stage0c2d-ramblock-resume.patch': 'b3ab7b6e22a43d975008ce250443cbdf1b971bec0726b217c939580e79de174e', 'scripts/repro/stage0c2e/stage0c2d-shengufs-resume.patch': '8f93652b4ebb95b7554c2f06024006465626f069c439dd95fd55bf3c370aa43c', 'scripts/repro/stage0c2e/audit-stage0c2b-fat.py': '766f97912ab61c126a84212871b0afe33d2d27e48c0a96efddd7d227dac1fb7b', 'scripts/repro/stage0c2e/stage0c2b-fat-pins.json': 'a20a2af58edeb9f3d14a569ae3a8ea903efe28b027411b3f611c7e0a90d3c8bf', 'scripts/repro/stage0c2e/stage0c2b-resume-packaging.patch': '310b35c010d71a82a5a9a9aa1a16e12982e567d18d26bbd5952923a4db781c18'}
+          stage2c_assets = {'scripts/repro/stage0c2e/sheng-stage0c2c-panic-marker.patch': 'e114d89c88927bde55df9f3957e23a4bca4b0309a80222f4e6611161adc5e294', 'scripts/repro/stage0c2e/sheng-stage0c2c-static-if-preimage.patch': '97f09ef79474a92eaa733e35314a63d054c055a1d5475f0f380ab0b9748650d4', 'scripts/repro/stage0c2e/audit-stage0c2c.py': 'b9fdee3840e5993e16afd8c67061d39259e710530e65758cf742dfef36477c9e', 'scripts/repro/stage0c2e/kc_image.py': '2a2561308b27ace4e21dd4e45924bdeca937ee13047b7c6fd5ce580018f68747', 'scripts/repro/stage0c2e/stage0c2c-inputs.json': 'ee45907fd8cd4c4178411f9d96b4379e89694e7c9bdb1710de073a862d335eb0', 'scripts/repro/stage0c2e/sheng-stage0c2c-marker-link-modes.patch': 'dd99ff4cc82383956e76f7924056785ea9a2c309d13ac1aa6b8dac5c0264ea97', 'scripts/repro/stage0c2e/stage0c2c-wx-bootstrap.patch': '527812d639f6759b791e8d712d3c773a92660359471fe8211c96d35f504ee500', 'scripts/repro/stage0c2e/stage0c2c-static-if-noop.patch': 'ae5c2d8bb97282ea4db377c4aef0c1c8df8ed3f7519d81ad1f03d869d49f7e4e', 'scripts/repro/stage0c2e/stage0c2c-preseal-fileset.patch': '46e6c8a4651d672b8aa5727c157cf9235059c99652b54ecceb23aff7d5cedc1d', 'scripts/repro/stage0c2e/verify-stage0c2c-seal-pair.py': '74f0b1bc4055f05e13a6e01208ce71a95ee770986e3e6ee3f403f19b4edc4e40', 'scripts/repro/stage0c2e/stage0c2d-ramblock-resume.patch': 'b3ab7b6e22a43d975008ce250443cbdf1b971bec0726b217c939580e79de174e', 'scripts/repro/stage0c2e/stage0c2d-shengufs-resume.patch': '8f93652b4ebb95b7554c2f06024006465626f069c439dd95fd55bf3c370aa43c', 'scripts/repro/stage0c2e/audit-stage0c2b-fat.py': '766f97912ab61c126a84212871b0afe33d2d27e48c0a96efddd7d227dac1fb7b', 'scripts/repro/stage0c2e/stage0c2b-fat-pins.json': 'a20a2af58edeb9f3d14a569ae3a8ea903efe28b027411b3f611c7e0a90d3c8bf', 'scripts/repro/stage0c2e/stage0c2b-resume-packaging.patch': '310b35c010d71a82a5a9a9aa1a16e12982e567d18d26bbd5952923a4db781c18', 'scripts/repro/stage0c2e/stage0c3-ledger.patch': 'b0f606bf710182cf15400a0f92636c1a63ee2df550e63d3936aa3065d38c7d10', 'scripts/repro/stage0c2e/stage0c3-ledger-pins.json': '1287b6a0b11f356d47f4ed2a53b8ce72ae7b4c1179f54a6b447f33a66193d4bf', 'scripts/repro/stage0c2e/audit-stage0c3-fat.py': 'd5aa5825965911e5cd550fcd8b8863de4fe36b574cbb688807caaa4391407fb9', 'scripts/repro/stage0c2e/audit-stage0c3-2c.py': 'bc3843f19441f42c3f21d45411c89054596a1a945c01842e1593a600cb2b9c42'}
           for name, wanted in (expected | stage2e_assets | stage2c_assets).items():
               actual = hashlib.sha256((root / name).read_bytes()).hexdigest()
               if actual != wanted:
@@ -279,14 +279,40 @@ jobs:
       - name: Parse candidate and capture reviewed structural evidence
         id: capture
         if: ${{ always() && !cancelled() && steps.identity.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UNIXNU_SHENG_SEED_KEY_20261123: ${{ secrets.UNIXNU_SHENG_SEED_KEY_20261123 }}
         shell: bash
         run: |
           set -euo pipefail
+          seed_dir="$RUNNER_TEMP/stage0c3-seed"
+          trap 'rm -rf "$seed_dir"' EXIT
+          for attempt in 1 2 3; do
+            dl="$RUNNER_TEMP/stage0c3-seed-attempt-$attempt"
+            if gh run download 45101784411 --repo KuriyamaMirai08/UniXNU-sheng \
+                --name sheng-stage0c3-seed-45101784411-1 --dir "$dl" &&
+                test -s "$dl/data.dbr.enc"; then
+              mv "$dl" "$seed_dir"
+              break
+            fi
+            if [[ "$attempt" == 3 ]]; then exit 1; fi
+            sleep "$((attempt * 5))"
+          done
+          test "$(shasum -a 256 "$seed_dir/data.dbr.enc" | cut -d ' ' -f 1)" = 0f43683c43ba0a2ecfd0dd673070a4ceb53ea2bf9552e85d2579cc533861d97f
           python3 - <<'PY'
-          import hashlib, json, os, subprocess
+          import base64, hashlib, json, os, shutil, subprocess, sys
           from pathlib import Path
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
           root = Path.cwd()
           temp = Path(os.environ["RUNNER_TEMP"])
+          seed_dir = temp / "stage0c3-seed"
+          key = base64.b64decode(os.environ["UNIXNU_SHENG_SEED_KEY_20261123"].strip())
+          enc = (seed_dir / "data.dbr.enc").read_bytes()
+          pt = AESGCM(key).decrypt(enc[:12], enc[12:], b"unixnu-sheng-seed-20261123")
+          if hashlib.sha256(pt).hexdigest() != "9c7d8c86fb56aa6dd2d9a65b0345a8b580a4cb0b391e9b8265db0197b9fcffea":
+              raise SystemExit("Decrypted production seed SHA-256 mismatch")
+          seed_path = seed_dir / "data.dbr"
+          seed_path.write_bytes(pt)
           evidence = temp / "stage0c1f-evidence"
           candidate = temp / "stage0c1f-private/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/kernel/kernel.macho"
           map_file = candidate.with_suffix(".map.json")
@@ -325,7 +351,7 @@ jobs:
           subprocess.run(["python3", "-B", str(assets / "audit-stage0c2c.py"), "--candidate", str(candidate),
                           "--capture", str(capture), "--kit", str(assets / "kc_image.py"),
                           "--output", str(evidence / "stage0c2c-census.json"), "--require-panic-marker"], check=True)
-          import re, shutil, sys
+          import re
           tree = candidate.parent.parent / "tree"
           installed_kit = tree / "kits/XnuPrelink/kc_image.py"
           if installed_kit.read_bytes() != (assets / "kc_image.py").read_bytes():
@@ -347,8 +373,11 @@ jobs:
           row = json.loads(pair.read_bytes())
           row["sealed_parser"] = "ACCEPT"
           result.write_text(json.dumps(row, indent=2) + "\n")
-          subprocess.run([sys.executable, "-B", str(assets / "audit-stage0c2b-fat.py"), str(temp),
-                          str(assets / "stage0c2b-fat-pins.json")], check=True)
+          subprocess.run([sys.executable, "-B", str(assets / "audit-stage0c3-fat.py"), str(temp),
+                          str(assets / "stage0c2b-fat-pins.json"),
+                          "--seed", str(seed_path),
+                          "--approval-sha256", "528d882db0b79589e3ca50bae276ecb3fd71a320755484733bd0b6e111f120c8",
+                          "--run-s-id", "45101784411"], check=True)
           PY
       - name: Validate evidence and decide job result
         if: always() && steps.identity.outcome == 'success'
@@ -364,7 +393,7 @@ jobs:
         if: always() && steps.identity.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: sheng-stage0c2b-fat-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: sheng-stage0c3-production-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2a-r-workflow-identity.json
             ${{ runner.temp }}/stage0c2a-r-publish/toolchain.json
@@ -381,6 +410,11 @@ jobs:
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2c-build-inputs.json
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2c-census.json
             ${{ runner.temp }}/stage0c2a-r-publish/stage0c2c-seal-pair.json
-            ${{ runner.temp }}/stage0c2a-r-publish/stage0c2b-fat.json
+            ${{ runner.temp }}/stage0c2a-r-publish/stage0c3-fat.json
+            ${{ runner.temp }}/stage0c2a-r-publish/stage0c3-seed-admission.json
+            ${{ runner.temp }}/stage0c2a-r-publish/stage0c3-ledger-inputs.json
+            ${{ runner.temp }}/stage0c2a-r-publish/2c-rebase-pac-ownership.json
+            ${{ runner.temp }}/stage0c2a-r-publish/2c-static-if-callback-closure.json
+            ${{ runner.temp }}/stage0c2a-r-publish/2c-efi-excluded-ranges.json
           if-no-files-found: error
           retention-days: 14

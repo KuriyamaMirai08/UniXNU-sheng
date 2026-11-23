@@ -391,10 +391,25 @@ def main():
         for name, row in plan["files"].items():
             exact(owner / name, row["after_sha256"])
 
+    ledger_pins = json.loads((ASSETS / "stage0c3-ledger-pins.json").read_bytes())
+    ledger_owner = device / "drivers" / ledger_pins["component"]
+    for name, row in ledger_pins["files"].items():
+        exact(ledger_owner / name, row["before_sha256"])
+    ledger_patch_path = ASSETS / ledger_pins["patch"]
+    exact(ledger_patch_path, ledger_pins["patch_sha256"])
+    patch("stage0c3-ledger", ledger_patch_path, ledger_owner)
+    for name, row in ledger_pins["files"].items():
+        exact(ledger_owner / name, row["after_sha256"])
+    save("stage0c3-ledger-inputs.json", ledger_pins)
+
     def check_storage_resume(tree):
         for component, plan in storage_resume.items():
             for name, row in plan["files"].items():
+                if component == ledger_pins["component"] and name in ledger_pins["files"]:
+                    continue
                 exact(tree / "drivers" / component / name, row["after_sha256"])
+        for name, row in ledger_pins["files"].items():
+            exact(tree / "drivers" / ledger_pins["component"] / name, row["after_sha256"])
 
     step("assemble-tree", [*cli, "tree", *common])
     work = root / "out/sheng/ipados-27.0.1-24A446/sheng_ipados27"

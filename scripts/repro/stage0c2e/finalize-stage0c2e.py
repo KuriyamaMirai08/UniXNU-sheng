@@ -105,7 +105,7 @@ def main():
          (RULES["LD"], RULES["CLANG"], "25G332", "26.5")),
         ("RUST_TOOLCHAIN", dependencies.get("runner_image") == tools.get("runner_image") and
          dependencies.get("rust") == tools.get("rust") == "rustc 1.98.0 (88d9e12ae 2026-08-18)"),
-        ("NEW_IDENTITY", bool(candidate) and candidate.get("sha256") not in {RULES["CANDIDATE"], BASELINE_2E, "e38e88b00accde4a56108d03088d11343a5f0a126df026bc4b83c134a2695275", "445f592f3bb87cd847adf6a89aca8ec15aa5e094953c0a8f64a19ec82399709b", "accf4a51323207ede22ac97adb730c7ac7ac579249b123fb8c3c6c3e82eef450"} and
+        ("NEW_IDENTITY", bool(candidate) and candidate.get("sha256") not in {RULES["CANDIDATE"], BASELINE_2E, "e38e88b00accde4a56108d03088d11343a5f0a126df026bc4b83c134a2695275", "445f592f3bb87cd847adf6a89aca8ec15aa5e094953c0a8f64a19ec82399709b", "accf4a51323207ede22ac97adb730c7ac7ac579249b123fb8c3c6c3e82eef450", "e131c2ce8b173e95c858f04d43a4cb9e88d70e71132bfeea2b9768cbada84412"} and
          capture.get("sample_kind") == "new-candidate"),
         ("STRICT_AND_MAP", strict.get("candidate_sha256") == candidate.get("sha256") and
          strict.get("candidate_bytes") == candidate.get("bytes") and strict.get("map_sha256") ==
@@ -155,10 +155,23 @@ def main():
                 and seal["source_crypto_post_hmac"] == "MATCH" and seal["other_binary_changes"] is False
                 and seal["runtime"] == "NOT_OBSERVED" and seal["sealed_parser"] == "ACCEPT", "SEALED_IDENTITY")
         save("stage0c2c-seal-pair.json", seal)
-        fat = read_json(base / "stage0c2b-fat.json")
-        check_fat = runpy.run_path(str(Path(__file__).with_name("audit-stage0c2b-fat.py")))["validate_receipt"]
+        fat = read_json(base / "stage0c3-fat.json")
+        check_fat = runpy.run_path(str(Path(__file__).with_name("audit-stage0c3-fat.py")))["validate_receipt"]
         check_fat(fat, strict, seal)
-        save("stage0c2b-fat.json", fat)
+        save("stage0c3-fat.json", fat)
+        admission = read_json(base / "stage0c3-seed-admission.json")
+        require(admission.get("static_seed_admission") == "PASS"
+                and admission.get("initialization_allowed") is False
+                and admission.get("device") == "NO-GO", "SEED_ADMISSION")
+        save("stage0c3-seed-admission.json", admission)
+        ledger_pins = read_json(Path(__file__).with_name("stage0c3-ledger-pins.json"))
+        ledger_inputs = read_json(base / "stage0c3-ledger-inputs.json")
+        require(ledger_inputs == ledger_pins, "LEDGER_PINS")
+        save("stage0c3-ledger-inputs.json", ledger_inputs)
+        for name in ("2c-rebase-pac-ownership.json", "2c-static-if-callback-closure.json", "2c-efi-excluded-ranges.json"):
+            doc = read_json(base / name)
+            require(doc.get("status") == "PASS", "AUDIT_2C/" + name)
+            save(name, doc)
     except (OSError, ValueError, KeyError, TypeError):
         issue.append("STAGE0C2C_INPUTS_OR_CENSUS")
     digests = {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(args.publish.glob("*.json"))}

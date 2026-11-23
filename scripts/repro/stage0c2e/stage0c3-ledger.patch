@@ -1,0 +1,126 @@
+diff --git a/NativeUfs.cpp b/NativeUfs.cpp
+index d98d339..399df20 100644
+--- a/NativeUfs.cpp
++++ b/NativeUfs.cpp
+@@ -1566,6 +1566,46 @@ static void storeAccount (volatile uint64_t *ops, volatile uint64_t *ticks, uint
+   while (spent > seen && !__atomic_compare_exchange_n (&native_ufs_store_max_ticks, &seen, spent, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) { }
+ }
+ 
++static uint64_t gLedgerRegionFirst = 0, gLedgerRegionBlocks = 0;
++static constexpr uint64_t kLedgerGuardBlocks = 1024;
++static constexpr uint64_t kLedgerBlocks = 16;
++
++extern "C" int native_ufs_ledger_open (uint64_t storeFirst, uint64_t *ledgerFirst, const char **why)
++{
++  const char *reason = "";
++  int ok = 0;
++  if (!gStoreGeometry.valid || !gHost.ready || hostTransportPoisoned ()) reason = "no root layout";
++  else if (gLedgerRegionBlocks) reason = "ledger already open";
++  else {
++    uint64_t imageBlocks = (gStoreGeometry.imageBytes + 4095) / 4096;
++    if (storeFirst < gStoreGeometry.first + imageBlocks + kLedgerGuardBlocks + kLedgerBlocks ||
++        storeFirst > gStoreGeometry.last + 1) {
++      reason = "ledger overlaps root or guard";
++    } else {
++      uint64_t first = storeFirst - kLedgerGuardBlocks - kLedgerBlocks;
++      if (!ufsWriteAuthorityRegister (UfsWriteRole::Ledger, first, kLedgerBlocks)) reason = "ledger authority refused";
++      else {
++        gLedgerRegionFirst = first;
++        gLedgerRegionBlocks = kLedgerBlocks;
++        if (ledgerFirst) *ledgerFirst = first;
++        ok = 1;
++      }
++    }
++  }
++  if (why) *why = reason;
++  return ok;
++}
++
++extern "C" int native_ufs_ledger_read (uint64_t rel, uint32_t blocks, void *dst)
++{
++  uint64_t lba = 0;
++  if (!gLedgerRegionBlocks || !dst || !blocks || rel >= gLedgerRegionBlocks ||
++      blocks > gLedgerRegionBlocks - rel || !checkedWriteLba (gLedgerRegionFirst, rel, blocks, &lba)) {
++    return 0;
++  }
++  return hostRead4k (0, lba, blocks, dst) == kIOReturnSuccess;
++}
++
+ extern "C" int native_ufs_store_read (uint64_t rel, uint32_t blocks, void *dst)
+ {
+   if (!gStoreRegionBlocks || !dst || !blocks || rel >= gStoreRegionBlocks || blocks > gStoreRegionBlocks - rel) return 0;
+diff --git a/UfsWriteAuthority.h b/UfsWriteAuthority.h
+index 9b51d62..fedd5e4 100644
+--- a/UfsWriteAuthority.h
++++ b/UfsWriteAuthority.h
+@@ -38,7 +38,8 @@ enum class UfsWriteRole : uint32_t {
+   Data = 1,
+   Export = 2,
+   Log = 3,
+-  Panic = 4
++  Panic = 4,
++  Ledger = 5
+ };
+ 
+ struct UfsWriteAuthority {
+@@ -53,6 +54,7 @@ struct UfsWriteAuthority {
+   uint64_t dataFirst, dataBlocks;
+   uint64_t exportFirst, exportBlocks;
+   uint64_t logFirst, logBlocks;
++  uint64_t ledgerFirst, ledgerBlocks;
+   uint32_t primaryHeaderCrc, primaryEntriesCrc;
+   uint32_t backupHeaderCrc, backupEntriesCrc;
+   uint32_t matchedEntry;
+@@ -188,6 +190,8 @@ static bool ufsWriteWindow (const UfsWriteAuthority &authority, UfsWriteRole rol
+     case UfsWriteRole::Log:
+     case UfsWriteRole::Panic:
+       *first = authority.logFirst; *blocks = authority.logBlocks; return true;
++    case UfsWriteRole::Ledger:
++      *first = authority.ledgerFirst; *blocks = authority.ledgerBlocks; return true;
+     default:
+       *first = *blocks = 0;
+       return false;
+@@ -213,9 +217,9 @@ static bool ufsWriteAuthorityBaseValid (const UfsWriteAuthority &authority)
+     return false;
+   }
+ 
+-  const uint64_t first[3] = { authority.dataFirst, authority.exportFirst, authority.logFirst };
+-  const uint64_t blocks[3] = { authority.dataBlocks, authority.exportBlocks, authority.logBlocks };
+-  for (unsigned index = 0; index < 3; ++index) {
++  const uint64_t first[4] = { authority.dataFirst, authority.exportFirst, authority.logFirst, authority.ledgerFirst };
++  const uint64_t blocks[4] = { authority.dataBlocks, authority.exportBlocks, authority.logBlocks, authority.ledgerBlocks };
++  for (unsigned index = 0; index < 4; ++index) {
+     if (!blocks[index]) continue;
+     if (first[index] < authority.protectedFloor || !ufsWriteRangeFitsRead10 (first[index], blocks[index]) ||
+         first[index] > authority.partitionLast ||
+@@ -234,6 +238,7 @@ static void ufsWriteAuthorityClearRoles (UfsWriteAuthority *authority)
+   authority->dataFirst = authority->dataBlocks = 0;
+   authority->exportFirst = authority->exportBlocks = 0;
+   authority->logFirst = authority->logBlocks = 0;
++  authority->ledgerFirst = authority->ledgerBlocks = 0;
+ }
+ 
+ // Reset to Sealed and bump the epoch. I/O still in flight is preserved so Establish stays refused
+@@ -338,7 +343,7 @@ static bool ufsWriteAuthorityRegisterLocked (UfsWriteRole role, uint64_t first,
+       ++gUfsWriteAuthority.deniedWrites;
+       gUfsWriteAuthority.denialReason = 3;
+     } else {
+-      const UfsWriteRole roles[3] = { UfsWriteRole::Data, UfsWriteRole::Export, UfsWriteRole::Log };
++      const UfsWriteRole roles[4] = { UfsWriteRole::Data, UfsWriteRole::Export, UfsWriteRole::Log, UfsWriteRole::Ledger };
+       bool overlap = false;
+       for (UfsWriteRole other : roles) {
+         uint64_t otherFirst, otherBlocks;
+@@ -355,9 +360,12 @@ static bool ufsWriteAuthorityRegisterLocked (UfsWriteRole role, uint64_t first,
+         } else if (role == UfsWriteRole::Export) {
+           gUfsWriteAuthority.exportFirst = first;
+           gUfsWriteAuthority.exportBlocks = blocks;
+-        } else {
++        } else if (role == UfsWriteRole::Log) {
+           gUfsWriteAuthority.logFirst = first;
+           gUfsWriteAuthority.logBlocks = blocks;
++        } else {
++          gUfsWriteAuthority.ledgerFirst = first;
++          gUfsWriteAuthority.ledgerBlocks = blocks;
+         }
+         ok = ufsWriteAuthorityBaseValid (gUfsWriteAuthority);
+       }
