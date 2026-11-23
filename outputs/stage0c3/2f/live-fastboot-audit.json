@@ -1,0 +1,15 @@
+{
+  "scope": "read-only fastboot getvar all audit; sanitized (no serialno or unique IDs)",
+  "vars": {
+    "unlocked": "yes",
+    "secure": "yes",
+    "current-slot": "a",
+    "slot-count": "2",
+    "max-download-size": "805306368",
+    "is-userspace": "no",
+    "product": "sheng",
+    "variant": "SMP UFS",
+    "version-bootloader": "",
+    "version-baseband": ""
+  }
+}
