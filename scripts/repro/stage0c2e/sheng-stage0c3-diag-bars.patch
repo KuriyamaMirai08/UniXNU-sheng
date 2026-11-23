@@ -402,13 +402,30 @@ index 6d95536..e770e11 100644
  
  #if defined(APPLE_ARM64_ARCH_FAMILY)
 diff --git a/pexpert/arm/hwtrace/hwtrace.c b/pexpert/arm/hwtrace/hwtrace.c
-index 402b110..cd9baab 100644
+index 402b110..6306b95 100644
 --- a/pexpert/arm/hwtrace/hwtrace.c
 +++ b/pexpert/arm/hwtrace/hwtrace.c
-@@ -498,6 +498,248 @@ PE_singlestep_hook(void)
+@@ -498,6 +498,286 @@ PE_singlestep_hook(void)
  
  #if DEVELOPMENT && XNU_SHENG_PANIC_MARKER
  extern void boot_log_panic_flush(void);
++extern volatile uint32_t native_owner_data_stage __attribute__((weak_import));
++extern volatile int native_owner_data_status __attribute__((weak_import));
++extern volatile uint32_t native_owner_data_readonly __attribute__((weak_import));
++extern volatile uint32_t native_data_persist_state __attribute__((weak_import));
++extern volatile uint32_t native_data_persist_header __attribute__((weak_import));
++extern volatile uint32_t native_data_persist_gpt __attribute__((weak_import));
++extern volatile uint64_t native_data_persist_errors __attribute__((weak_import));
++extern volatile uint64_t native_data_persist_present __attribute__((weak_import));
++extern volatile uint64_t native_data_persist_loaded __attribute__((weak_import));
++extern volatile uint64_t native_data_persist_writes __attribute__((weak_import));
++extern volatile uint64_t native_data_persist_syncs __attribute__((weak_import));
++extern volatile uint32_t native_wal_last_fault __attribute__((weak_import));
++extern volatile uint32_t native_wal_flags __attribute__((weak_import));
++extern volatile uint64_t native_wal_gen __attribute__((weak_import));
++extern volatile uint64_t native_wal_base_seq __attribute__((weak_import));
++extern volatile uint64_t native_wal_last_seq __attribute__((weak_import));
++extern volatile uint64_t native_wal_next_slot __attribute__((weak_import));
 +
 +struct sheng_diag_vc_info {
 +	unsigned int v_height;
@@ -603,6 +620,27 @@ index 402b110..cd9baab 100644
 +	__asm__ volatile ("mrs %0, far_el1\n\tmrs %1, esr_el1" : "=r"(hw_far), "=r"(hw_esr));
 +	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "HW_FAR:", hw_far);
 +	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "HW_ESR:", hw_esr);
++	cx = 40; cy += 42;
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "D_STG:", &native_owner_data_stage ? (uint64_t)native_owner_data_stage : 0xDEADULL);
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "D_ERR:", &native_owner_data_status ? (uint64_t)(uint32_t)native_owner_data_status : 0xDEADULL);
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "D_RO:", &native_owner_data_readonly ? (uint64_t)native_owner_data_readonly : 0xDEADULL);
++	cx = 40; cy += 42;
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "P_ST:", &native_data_persist_state ? (uint64_t)native_data_persist_state : 0xDEADULL);
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "P_HDR:", &native_data_persist_header ? (uint64_t)native_data_persist_header : 0xDEADULL);
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "P_GPT:", &native_data_persist_gpt ? (uint64_t)native_data_persist_gpt : 0xDEADULL);
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "P_ERR:", &native_data_persist_errors ? native_data_persist_errors : 0xDEADULL);
++	cx = 40; cy += 42;
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "P_PRS:", &native_data_persist_present ? native_data_persist_present : 0xDEADULL);
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "P_WR:", &native_data_persist_writes ? native_data_persist_writes : 0xDEADULL);
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "P_SY:", &native_data_persist_syncs ? native_data_persist_syncs : 0xDEADULL);
++	cx = 40; cy += 42;
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "W_FLT:", &native_wal_last_fault ? (uint64_t)native_wal_last_fault : 0xDEADULL);
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "W_FLG:", &native_wal_flags ? (uint64_t)native_wal_flags : 0xDEADULL);
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "W_GEN:", &native_wal_gen ? native_wal_gen : 0xDEADULL);
++	cx = 40; cy += 42;
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "W_BAS:", &native_wal_base_seq ? native_wal_base_seq : 0xDEADULL);
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "W_LST:", &native_wal_last_seq ? native_wal_last_seq : 0xDEADULL);
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "W_SLT:", &native_wal_next_slot ? native_wal_next_slot : 0xDEADULL);
 +	cx = 40; cy += 48;
 +	sheng_diag_draw_str(fb, stride_px, &cx, &cy, "PANIC: ");
 +	if (str != NULL && sheng_diag_probe_r((uintptr_t)str)) {
@@ -654,7 +692,7 @@ index 402b110..cd9baab 100644
  #endif
  
  void
-@@ -506,6 +748,7 @@ PE_panic_hook(const char *str __unused)
+@@ -506,6 +786,7 @@ PE_panic_hook(const char *str __unused)
  #if DEVELOPMENT && XNU_SHENG_PANIC_MARKER
  	/* The sheng BootLog panic entry only publishes a memory flag. */
  	boot_log_panic_flush();

@@ -405,11 +405,13 @@ def main():
     for name, row in ledger_pins["files"].items():
         exact(ledger_owner / name, row["after_sha256"])
     save("stage0c3-ledger-inputs.json", ledger_pins)
+    patch("stage0c3-diag-ufs-sync-range", ASSETS / "sheng-stage0c3-diag-ufs-sync-range.patch",
+          device / "drivers/ShengUfs")
 
     def check_storage_resume(tree):
         for component, plan in storage_resume.items():
             for name, row in plan["files"].items():
-                if component == "RamBlock" and name == "PersistOverlay.h":
+                if component == "RamBlock" and name in ("PersistOverlay.h", "NativeRamBlock.cpp"):
                     continue
                 if component == ledger_pins["component"] and name in ledger_pins["files"]:
                     continue
@@ -427,7 +429,7 @@ def main():
     exact(tree / REGRESSION_POLICY, contract["regression_policy_sha256"])
     for relative, wanted in stage2e["sources"].items():
         resolved = "kits/sheng/BootLog.c" if relative == "package/BootLog.c" else relative
-        if resolved not in ("drivers/ShengUfs/NativeUfs.cpp", "drivers/ShengUfs/UfsWriteAuthority.h"):
+        if resolved not in ("drivers/ShengUfs/NativeUfs.cpp", "drivers/ShengUfs/UfsWriteAuthority.h", "drivers/ShengUfs/RootCommands.h"):
             exact(tree / resolved, wanted)
     check_storage_resume(tree)
     exact(tree / STORAGE_BUILDER, storage_builder["prepared_sha256"])

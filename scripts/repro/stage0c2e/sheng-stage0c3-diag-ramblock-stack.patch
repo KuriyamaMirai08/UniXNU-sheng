@@ -1,3 +1,45 @@
+diff --git a/NativeRamBlock.cpp b/NativeRamBlock.cpp
+--- a/NativeRamBlock.cpp
++++ b/NativeRamBlock.cpp
+@@ -71,6 +71,8 @@
+ volatile uint64_t native_data_persist_pages = 0, native_data_persist_loaded = 0, native_data_persist_writes = 0,
+                   native_data_persist_syncs = 0, native_data_persist_errors = 0, native_data_persist_first_lba = 0,
+                   native_data_persist_present = 0;
++volatile uint32_t native_wal_last_fault = 0, native_wal_flags = 0;
++volatile uint64_t native_wal_gen = 0, native_wal_base_seq = 0, native_wal_last_seq = 0, native_wal_next_slot = 0;
+ }
+ 
+ class NativeRamBlock : public IOBlockStorageDevice {
+@@ -361,6 +363,15 @@
+         overlay.resumeExistingV2(ops, pages, seedHash, mode == 1, overlayBits, walEntries,
+                                  walEntryCapacity, kWalV2Blocks);
+     native_data_persist_header = static_cast<uint32_t>(overlay.header);
++    native_wal_last_fault = overlay.walStore.lastFault;
++    native_wal_flags = (overlay.walStore.checkpointCapable ? 1u : 0u) |
++                       (overlay.walStore.recoveredCommittedTail ? 2u : 0u) |
++                       (overlay.walStore.stoppedAtUncommittedTail ? 4u : 0u) |
++                       (overlay.walStore.spaceExhausted ? 8u : 0u);
++    native_wal_gen = overlay.walStore.checkpointGeneration;
++    native_wal_base_seq = overlay.walStore.baseSequence;
++    native_wal_last_seq = overlay.walStore.lastSequence;
++    native_wal_next_slot = overlay.walStore.nextSlot;
+     if (!resumed || !verifyAuthority()) {
+       persistFailed(storeState.isFailed() ? storeState.fault() : persist::StoreFault::OverlayReset);
+       IOLockUnlock(gate);
+@@ -429,8 +440,11 @@
+     // checkpoint. Write-through v1 is already durable page by page.
+     if (!writeBack) {
+       if (direct && !verifyAuthority()) return kIOReturnIOError;
+-      if (direct && overlay.walV2)
+-        return flushStore(false) ? kIOReturnSuccess : kIOReturnIOError;
++      if (direct && overlay.walV2) {
++        if (!storeState.isWritable() || overlay.inconsistent) return kIOReturnIOError;
++        StoreOps store = { this, false };
++        return store.sync() ? kIOReturnSuccess : kIOReturnIOError;
++      }
+       return kIOReturnSuccess;
+     }
+     // Write back: the pages written so far, then their bitmap blocks. Barrier and full requests are both served as a full flush.
 diff --git a/PersistOverlay.h b/PersistOverlay.h
 --- a/PersistOverlay.h
 +++ b/PersistOverlay.h

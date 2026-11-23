@@ -1,0 +1,64 @@
+diff --git a/RootCommands.h b/RootCommands.h
+--- a/RootCommands.h
++++ b/RootCommands.h
+@@ -567,6 +567,31 @@
+ // lock also covers preparation of the descriptor and driver-owned buffer. A submitted command is
+ // registered in flight and stays so until its completion is observed. On entry *issued is false; it
+ // becomes true only once the doorbell has rung.
++struct RoleDirtyRange {
++  uint32_t epoch;
++  bool valid;
++  uint64_t first;
++  uint64_t end;
++};
++static RoleDirtyRange gRoleDirty[6];
++
++static void noteRoleDirtyLocked (UfsWriteRole role, uint32_t epoch, uint64_t lba, uint32_t blocks)
++{
++  const uint32_t idx = static_cast<uint32_t> (role);
++  if (idx >= 6 || !blocks) return;
++  RoleDirtyRange &d = gRoleDirty[idx];
++  const uint64_t end = lba + blocks;
++  if (!d.valid || d.epoch != epoch) {
++    d.epoch = epoch;
++    d.valid = true;
++    d.first = lba;
++    d.end = end;
++  } else {
++    if (lba < d.first) d.first = lba;
++    if (end > d.end) d.end = end;
++  }
++}
++
+ static IOReturn hostWriteSubmit (const UfsSlot &slot, UfsWriteRole role, uint64_t lba, uint32_t blocks, const void *src,
+                                  uint32_t epoch, bool fua, uint32_t *scsi, bool *issued)
+ {
+@@ -595,6 +620,7 @@
+     return status;
+   }
+   *issued = true;
++  noteRoleDirtyLocked (role, epoch, lba, blocks);
+   ufsAuthorityProbe (UfsProbeAfterDoorbell);
+   ufsWriteAuthorityRelease ();
+   ufsAuthorityProbe (UfsProbeAfterRelease);
+@@ -652,6 +678,20 @@
+   ufsWriteAuthorityAcquire ();
+   const uint32_t epoch = gUfsWriteAuthority.epoch;
+   const bool allowed = ufsWriteAuthorityRoleWindowLocked (role, &lba, &blocks);
++  if (allowed) {
++    const uint64_t winFirst = lba, winBlocks = blocks;
++    const uint32_t idx = static_cast<uint32_t> (role);
++    lba = winFirst;
++    blocks = 1;
++    if (idx < 6 && gRoleDirty[idx].valid && gRoleDirty[idx].epoch == epoch) {
++      const uint64_t df = gRoleDirty[idx].first, de = gRoleDirty[idx].end;
++      if (de > df && df >= winFirst && de - winFirst <= winBlocks) {
++        lba = df;
++        blocks = de - df;
++      }
++      gRoleDirty[idx].valid = false;
++    }
++  }
+   ufsWriteAuthorityRelease ();
+   if (!allowed) return kIOReturnNotPrivileged;
+   IOReturn status = kIOReturnSuccess;
