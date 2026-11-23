@@ -1,0 +1,176 @@
+diff --git a/PersistOverlay.h b/PersistOverlay.h
+--- a/PersistOverlay.h
++++ b/PersistOverlay.h
+@@ -115,6 +115,14 @@
+ // seed and no reset asked, the window untouched. Failed: an I/O or format error.
+ enum class Open { Resumed, Fresh, Blank, Kept, Failed };
+ 
++template <typename = void>
++struct OverlayScratch {
++  alignas(64) static uint8_t a[kBlock];
++  alignas(64) static uint8_t b[kBlock];
++};
++template <typename T> alignas(64) uint8_t OverlayScratch<T>::a[kBlock];
++template <typename T> alignas(64) uint8_t OverlayScratch<T>::b[kBlock];
++
+ struct Overlay {
+   uint64_t pages = 0, generation = 0, present = 0;
+   uint8_t *bitmap = nullptr;       // bitmapBlocks(pages) * kBlock bytes, owned by the caller
+@@ -196,7 +204,8 @@
+     }
+     dirtyBlocks = 0;
+     if (dirty) memset (dirty, 0, static_cast<size_t> (bb));
+-    uint8_t block[kBlock], rootB[kBlock];
++    uint8_t (&block)[kBlock] = OverlayScratch<>::a;
++    uint8_t (&rootB)[kBlock] = OverlayScratch<>::b;
+     if (!ops.read (0, 1, block) || !ops.read (1, 1, rootB)) {
+       fail();
+       return Open::Failed;
+@@ -277,7 +286,8 @@
+     // write after this point can therefore lose availability, but cannot resurrect an
+     // old valid header over a partially cleared bitmap.
+     if (invalidateExisting) {
+-      uint8_t invalid[kBlock] = {};
++      uint8_t (&invalid)[kBlock] = OverlayScratch<>::b;
++      memset (invalid, 0, sizeof invalid);
+       if (!ops.write (0, 1, invalid) || !ops.sync ()) {
+         fail();
+         return Open::Failed;
+diff --git a/PersistWalV2.h b/PersistWalV2.h
+--- a/PersistWalV2.h
++++ b/PersistWalV2.h
+@@ -432,6 +432,18 @@
+   Recovered,
+   ReadOnly
+ };
++
++template <typename = void>
++struct ScratchBuf {
++  alignas(64) static uint8_t read[kBlock];
++  alignas(64) static uint8_t a[kBlock];
++  alignas(64) static uint8_t b[kBlock];
++  alignas(64) static uint8_t c[kBlock];
++};
++template <typename T> alignas(64) uint8_t ScratchBuf<T>::read[kBlock];
++template <typename T> alignas(64) uint8_t ScratchBuf<T>::a[kBlock];
++template <typename T> alignas(64) uint8_t ScratchBuf<T>::b[kBlock];
++template <typename T> alignas(64) uint8_t ScratchBuf<T>::c[kBlock];
+ 
+ struct Wal {
+   uint64_t pages = 0;
+@@ -575,7 +587,7 @@
+   bool readPageUnlocked(Ops &ops, uint64_t index, void *dst) const
+   {
+     if (!active || index >= pages || !dst) return false;
+-    uint8_t block[kBlock];
++    uint8_t (&block)[kBlock] = ScratchBuf<>::read;
+     Entry *entry = nullptr;
+     if (!entryFind(index, &entry, nullptr)) return false;
+     if (entry) {
+@@ -689,7 +701,8 @@
+     const uint64_t bitmapCrc = crc64Finish(bitmapDigest);
+ 
+     uint64_t checksumDigest = crc64Init();
+-    uint8_t image[kBlock], pageImage[kBlock];
++    uint8_t (&image)[kBlock] = ScratchBuf<>::a;
++    uint8_t (&pageImage)[kBlock] = ScratchBuf<>::b;
+     for (uint64_t b = 0; b < checksumCount; ++b) {
+       memset(image, 0, sizeof image);
+       const uint64_t first = b * (kBlock / 4ULL);
+@@ -708,7 +721,7 @@
+     }
+     const uint64_t checksumCrc = crc64Finish(checksumDigest);
+ 
+-    uint8_t header[kBlock];
++    uint8_t (&header)[kBlock] = ScratchBuf<>::a;
+     if (!encodeSnapshotHeader(header, bank, sequence, generation, present,
+                               bitmapCrc, checksumCrc) ||
+         !ops.write(start, 1, header) ||
+@@ -729,7 +742,7 @@
+     const uint64_t start = snapshotStart(bank);
+     const uint64_t bitmapStart = start + kSnapshotHeaderBlocks;
+     const uint64_t checksumBase = bitmapStart + bitmapCount;
+-    uint8_t block[kBlock];
++    uint8_t (&block)[kBlock] = ScratchBuf<>::a;
+     if (!ops.read(start, 1, block) ||
+         !decodeSnapshotHeader(block, bank, sequence, generation,
+                               &headerPresent, &bitmapExpected,
+@@ -763,7 +776,7 @@
+   template <class Ops>
+   bool verifyEffectiveUnlocked(Ops &ops)
+   {
+-    uint8_t page[kBlock];
++    uint8_t (&page)[kBlock] = ScratchBuf<>::a;
+     for (uint64_t index = 0; index < pages; ++index) {
+       if (!rawHas(index)) continue;
+       if (!readPageUnlocked(ops, index, page)) return false;
+@@ -774,7 +787,8 @@
+   template <class Ops>
+   bool clearWalUnlocked(Ops &ops)
+   {
+-    uint8_t zero[kBlock] = {};
++    uint8_t (&zero)[kBlock] = ScratchBuf<>::c;
++    memset(zero, 0, sizeof zero);
+     // A one-block source cannot be mistaken for a larger contiguous transfer.
+     // The UFS StoreOps layer may coalesce safe runs above this interface.
+     for (uint64_t blockIndex = 0; blockIndex < walBlocks; ++blockIndex)
+@@ -792,7 +806,7 @@
+     }
+     if (lastSequence == baseSequence) return ops.sync();
+ 
+-    uint8_t page[kBlock];
++    uint8_t (&page)[kBlock] = ScratchBuf<>::a;
+     for (uint64_t i = 0; i < pages; ++i) {
+       if (!rawHas(i)) continue;
+       if (!readPageUnlocked(ops, i, page) ||
+@@ -817,7 +831,8 @@
+       return false;
+     }
+ 
+-    uint8_t rootA[kBlock], rootB[kBlock];
++    uint8_t (&rootA)[kBlock] = ScratchBuf<>::a;
++    uint8_t (&rootB)[kBlock] = ScratchBuf<>::b;
+     encodeRoot(rootA, pages, seedCopy, lastSequence, newGeneration,
+                walStart, walBlocks, newBank, layout.snapshotBlocks,
+                layout.baseStart, layout.baseBlocks, 0);
+@@ -895,7 +910,8 @@
+       return false;
+     }
+ 
+-    uint8_t begin[kBlock], commit[kBlock];
++    uint8_t (&begin)[kBlock] = ScratchBuf<>::a;
++    uint8_t (&commit)[kBlock] = ScratchBuf<>::b;
+     memset(begin, 0, sizeof begin);
+     memset(commit, 0, sizeof commit);
+     memcpy(begin, "SHNGV2JB", 8);
+@@ -1062,7 +1078,8 @@
+       fail();
+       return false;
+     }
+-    uint8_t rootA[kBlock], rootB[kBlock];
++    uint8_t (&rootA)[kBlock] = ScratchBuf<>::a;
++    uint8_t (&rootB)[kBlock] = ScratchBuf<>::b;
+     encodeRoot(rootA, pages, seedCopy, baseSequence, checkpointGeneration,
+                walStart, walBlocks, checkpointBank, layout.snapshotBlocks,
+                layout.baseStart, layout.baseBlocks, walHeadSlot);
+@@ -1113,7 +1130,8 @@
+       return false;
+     }
+ 
+-    uint8_t rootBlockA[kBlock], rootBlockB[kBlock];
++    uint8_t (&rootBlockA)[kBlock] = ScratchBuf<>::a;
++    uint8_t (&rootBlockB)[kBlock] = ScratchBuf<>::b;
+     if (!ops.read(kRootSlotA, 1, rootBlockA) ||
+         !ops.read(kRootSlotB, 1, rootBlockB)) {
+       fail();
+@@ -1184,7 +1202,9 @@
+       memset(bitmap, 0, size_t(bitmapBlocksForValue()) * kBlock);
+     }
+ 
+-    uint8_t begin[kBlock], commit[kBlock], pageData[kBlock];
++    uint8_t (&begin)[kBlock] = ScratchBuf<>::a;
++    uint8_t (&commit)[kBlock] = ScratchBuf<>::b;
++    uint8_t (&pageData)[kBlock] = ScratchBuf<>::c;
+     uint64_t scanned = 0;
+     for (; scanned < slotCount; ++scanned) {
+       const uint64_t slot = (walHeadSlot + scanned) % slotCount;

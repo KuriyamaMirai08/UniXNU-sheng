@@ -392,6 +392,8 @@ def main():
         patch("stage0c2d-" + component, staged_patch, owner)
         for name, row in plan["files"].items():
             exact(owner / name, row["after_sha256"])
+    patch("stage0c3-diag-ramblock-stack", ASSETS / "sheng-stage0c3-diag-ramblock-stack.patch",
+          framework / "drivers/RamBlock")
 
     ledger_pins = json.loads((ASSETS / "stage0c3-ledger-pins.json").read_bytes())
     ledger_owner = device / "drivers" / ledger_pins["component"]
@@ -407,6 +409,8 @@ def main():
     def check_storage_resume(tree):
         for component, plan in storage_resume.items():
             for name, row in plan["files"].items():
+                if component == "RamBlock" and name == "PersistOverlay.h":
+                    continue
                 if component == ledger_pins["component"] and name in ledger_pins["files"]:
                     continue
                 exact(tree / "drivers" / component / name, row["after_sha256"])
