@@ -41,10 +41,10 @@ index cc3c5d3..4cf0b17 100644
  	extern int sheng_boot_watchdog_policy(void *, uint64_t);
  	boot_progress_stage("temporary watchdog launch policy enter");
 diff --git a/osfmk/arm/arm_init.c b/osfmk/arm/arm_init.c
-index e8db5d8..9593369 100644
+index e8db5d8..3b09cef 100644
 --- a/osfmk/arm/arm_init.c
 +++ b/osfmk/arm/arm_init.c
-@@ -345,6 +345,41 @@ arm_auxkc_init(void *mh, void *base)
+@@ -345,6 +345,77 @@ arm_auxkc_init(void *mh, void *base)
   *		Function:		Runs on the boot CPU, once, on entry from iBoot.
   */
  
@@ -59,6 +59,20 @@ index e8db5d8..9593369 100644
 +extern struct sheng_diag_vc_info vinfo;
 +
 +void sheng_diag_bar_va(uintptr_t fb, unsigned idx, uint32_t color);
++
++struct sheng_diag_fault_info {
++	uint64_t valid;
++	uint64_t pc;
++	uint64_t lr;
++	uint64_t far;
++	uint64_t esr;
++	uint64_t fp;
++	uint64_t sp;
++	uint64_t x0;
++	uint64_t x1;
++};
++extern struct sheng_diag_fault_info sheng_diag_fault;
++struct sheng_diag_fault_info sheng_diag_fault;
 +
 +void
 +sheng_diag_bar_va(uintptr_t fb, unsigned idx, uint32_t color)
@@ -81,12 +95,34 @@ index e8db5d8..9593369 100644
 +	}
 +	__asm__ volatile ("dsb sy" ::: "memory");
 +}
++
++static void
++sheng_diag_bar_va_r(uintptr_t fb, unsigned idx, uint32_t color)
++{
++	uint64_t par = 1;
++	if (fb == 0) {
++		return;
++	}
++	__asm__ volatile ("at s1e1w, %1\n\tisb\n\tmrs %0, par_el1"
++	    : "=r"(par) : "r"(fb) : "memory");
++	if (par & 1ULL) {
++		return;
++	}
++	volatile uint32_t *p = (volatile uint32_t *)(fb + (uintptr_t)idx * 36ULL * 12192ULL);
++	for (unsigned r = 0; r < 36; r++) {
++		for (unsigned c = 1540; c < 3020; c++) {
++			p[c] = color;
++		}
++		p += 3048;
++	}
++	__asm__ volatile ("dsb sy" ::: "memory");
++}
 +#endif
 +
  __startup_func
  void
  arm_init(
-@@ -357,6 +392,10 @@ arm_init(
+@@ -357,6 +428,10 @@ arm_init(
  	DTEntry chosen = NULL;
  	unsigned int dt_entry_size = 0;
  
@@ -97,7 +133,7 @@ index e8db5d8..9593369 100644
  #if T0SZ_USER != T0SZ_BOOT
  	/* Final TTBR0 size before the first pointer is signed (see TCR_EL1_KVA_ENTRY). */
  	set_tcr(TCR_EL1_KVA_ENTRY);
-@@ -366,6 +405,9 @@ arm_init(
+@@ -366,6 +441,9 @@ arm_init(
  	arm_slide_rebase_and_sign_image();
  
  	arm_static_if_init(args);
@@ -107,7 +143,7 @@ index e8db5d8..9593369 100644
  
  	/* If kernel integrity is supported, use a constant copy of the boot args. */
  	const_boot_args = *args;
-@@ -587,6 +629,9 @@ arm_init(
+@@ -587,6 +665,9 @@ arm_init(
  	gDramSize = *dram_size;
  	pmap_first_pnum = (ppnum_t)atop(gDramBase);
  
@@ -117,7 +153,7 @@ index e8db5d8..9593369 100644
  	boot_progress_stage("arm_vm_init enter");
  	arm_vm_init(xmaxmem, args);
  	boot_progress_stage("arm_vm_init returned");
-@@ -645,6 +690,9 @@ arm_init(
+@@ -645,6 +726,9 @@ arm_init(
  		disableConsoleOutput = FALSE;     /* Allow printfs to happen */
  	}
  	PE_create_console();
@@ -127,6 +163,51 @@ index e8db5d8..9593369 100644
  
  	/* setup console output */
  	PE_init_printf(FALSE);
+@@ -656,8 +740,14 @@ arm_init(
+ #endif
+ 
+ 	cpu_machine_idle_init(TRUE);
++#if DEVELOPMENT
++	sheng_diag_bar_va_r((uintptr_t)vinfo.v_baseaddr, 1, 0xFFFFFFFFU);
++#endif
+ 
+ 	PE_init_platform(TRUE, &BootCpuData);
++#if DEVELOPMENT
++	sheng_diag_bar_va_r((uintptr_t)vinfo.v_baseaddr, 2, 0xFF0077FFU);
++#endif
+ 
+ 	/* Initialize the debug infrastructure system-wide and on the local core. */
+ 	pe_arm_debug_init_early(&BootCpuData);
+@@ -669,6 +759,9 @@ arm_init(
+ 	}
+ 
+ 	ml_map_cpu_pio();
++#if DEVELOPMENT
++	sheng_diag_bar_va_r((uintptr_t)vinfo.v_baseaddr, 3, 0xFFFFFF00U);
++#endif
+ 
+ #if APPLE_ARM64_ARCH_FAMILY
+ 	configure_late_apple_regs(true);
+@@ -684,6 +777,9 @@ arm_init(
+ #endif /* KPERF */
+ 
+ 	PE_init_cpu();
++#if DEVELOPMENT
++	sheng_diag_bar_va_r((uintptr_t)vinfo.v_baseaddr, 4, 0xFFFF00FFU);
++#endif
+ #if __arm64__
+ 	apt_msg_init();
+ 	apt_msg_init_cpu();
+@@ -707,6 +803,9 @@ arm_init(
+ 	 * against string vulnerabilities
+ 	 */
+ 	__stack_chk_guard &= ~(0xFFULL << 8);
++#if DEVELOPMENT
++	sheng_diag_bar_va_r((uintptr_t)vinfo.v_baseaddr, 5, 0xFF00FFFFU);
++#endif
+ 	machine_startup(args);
+ }
+ 
 diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 index 1571fa3..f4d131c 100644
 --- a/osfmk/arm64/arm_vm_init.c
@@ -162,6 +243,43 @@ index 1571fa3..f4d131c 100644
  	arm_vm_wx_check_root(cpu_tte, ARM_TT_L1_SHIFT, exec_start, exec_end);
  	for (pmap_paddr_t offset = 0; offset < exec_size; offset += ARM_PGBYTES) {
  		if (!arm_vm_wx_exec_covered(cpu_tte, exec_va + offset, exec_start + offset)) {
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+index 9561134..901cee9 100644
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -627,6 +627,32 @@ panic_with_thread_kernel_state(const char *msg, arm_saved_state_t *ss)
+ 	arm_saved_state64_t *state = saved_state64(ss);
+ 
+ 	os_atomic_cmpxchg(&original_faulting_state, NULL, state, seq_cst);
++#if DEVELOPMENT
++	{
++		extern struct sheng_diag_fault_info {
++			uint64_t valid;
++			uint64_t pc;
++			uint64_t lr;
++			uint64_t far;
++			uint64_t esr;
++			uint64_t fp;
++			uint64_t sp;
++			uint64_t x0;
++			uint64_t x1;
++		} sheng_diag_fault;
++		if (!sheng_diag_fault.valid) {
++			sheng_diag_fault.pc = state->pc;
++			sheng_diag_fault.lr = state->lr;
++			sheng_diag_fault.far = state->far;
++			sheng_diag_fault.esr = state->esr;
++			sheng_diag_fault.fp = state->fp;
++			sheng_diag_fault.sp = state->sp;
++			sheng_diag_fault.x0 = state->x[0];
++			sheng_diag_fault.x1 = state->x[1];
++			sheng_diag_fault.valid = 1;
++		}
++	}
++#endif
+ 
+ 	// rdar://80659177
+ 	// Read SoCD tracepoints up to twice — once the first time we call panic and
 diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 index 6d95536..e770e11 100644
 --- a/osfmk/arm64/start.s
@@ -284,10 +402,10 @@ index 6d95536..e770e11 100644
  
  #if defined(APPLE_ARM64_ARCH_FAMILY)
 diff --git a/pexpert/arm/hwtrace/hwtrace.c b/pexpert/arm/hwtrace/hwtrace.c
-index 402b110..d5f2803 100644
+index 402b110..cd9baab 100644
 --- a/pexpert/arm/hwtrace/hwtrace.c
 +++ b/pexpert/arm/hwtrace/hwtrace.c
-@@ -498,6 +498,183 @@ PE_singlestep_hook(void)
+@@ -498,6 +498,248 @@ PE_singlestep_hook(void)
  
  #if DEVELOPMENT && XNU_SHENG_PANIC_MARKER
  extern void boot_log_panic_flush(void);
@@ -300,6 +418,19 @@ index 402b110..d5f2803 100644
 +	unsigned long v_baseaddr;
 +};
 +extern struct sheng_diag_vc_info vinfo;
++
++struct sheng_diag_fault_info {
++	uint64_t valid;
++	uint64_t pc;
++	uint64_t lr;
++	uint64_t far;
++	uint64_t esr;
++	uint64_t fp;
++	uint64_t sp;
++	uint64_t x0;
++	uint64_t x1;
++};
++extern struct sheng_diag_fault_info sheng_diag_fault;
 +
 +static const uint64_t sheng_diag_font[96] = 
 +{                                           0x0000000000000000, 0x0842108000020084,   0x0005294000000000, 0x15F528000000295F,   0x1C52F88000023E94, 0x088556400004D542,   0x04528800000B2725, 0x0002108000000000,   0x0421108800821042, 0x1084108200221108,   0x0957548000000000, 0x3E42000000000084,   0x0000000000223000, 0x3E00000000000000,   0x0000000000471000, 0x0884420000008442,   0x2318A88000022A31, 0x08429880000F9084,   0x1108C5C0000F8444, 0x1C4443E000074610,   0x14A62100000423E9, 0x26D087E000074610,   0x1E10C5C000074631, 0x088443E000010844,   0x1D18C5C000074631, 0x3D18C5C000074610,   0x08E2000000471000, 0x08E2000000223000,   0x0222220000082082, 0x01F00000000003E0,   0x2082082000008888, 0x1108C5C000020084,   0x2B98C5C0000F05B5, 0x2318A8800008C63F,   0x1D2949E00007CA52, 0x0210C5C000074421,   0x252949E00007CA52, 0x1E1087E0000F8421,   0x1E1087E000008421, 0x0210C5C000074639,   0x3F18C6200008C631, 0x084211C000071084,   0x1084238000032508, 0x0654C6200008C525,   0x02108420000F8421, 0x2B5DC6200008C631,   0x2B59CE200008C739, 0x2318C5C000074631,   0x1F18C5E000008421, 0x2318C5C001075631,   0x1F18C5E00008C525, 0x1C10C5C000074610,   0x084213E000021084, 0x2318C62000074631,   0x1518C6200002114A, 0x2B18C620000556B5,   0x08A546200008C54A, 0x08A5462000021084,   0x088443E0000F8442, 0x0421084E00E10842,   0x0821042000084108, 0x1084210E00E42108,   0x0008A88000000000, 0x0000000001F00000,   0x0000010400000000, 0x20E00000000B663E,   0x22F084200007C631, 0x22E0000000074421,   0x23E84200000F4631, 0x22E000000007443F,   0x1E21498000010842, 0x22E000001D187A31,   0x26D084200008C631, 0x0860100000071084,   0x10C020000C94A108, 0x0A9084200008A4A3,   0x084210C000071084, 0x2AB000000008D6B5,   0x26D000000008C631, 0x22E0000000074631,   0x22F000000210BE31, 0x23E0000021087A31,   0x26D0000000008421, 0x22E0000000074506,   0x04F1080000064842, 0x23100000000B6631,   0x2310000000022951, 0x23100000000556B5,   0x151000000008A884, 0x231000001D185B31,   0x11F00000000F8444, 0x0642109801821084,   0x0842108000021084, 0x3042108300321084,   0x0004D64000000000, 0x0000000000000000  };
@@ -381,6 +512,30 @@ index 402b110..d5f2803 100644
 +	}
 +}
 +
++static void
++sheng_diag_draw_str(volatile uint32_t *fb, uint32_t stride_px, int *cx, int *cy, const char *s)
++{
++	for (int i = 0; s[i] != '\0'; i++) {
++		if (*cx + 18 >= 3000) {
++			*cx = 40;
++			*cy += 42;
++		}
++		if (*cy + 36 >= 1880) {
++			return;
++		}
++		sheng_diag_draw_char(fb, stride_px, *cx, *cy, s[i], 0xFFFFFFFFU);
++		*cx += 18;
++	}
++}
++
++static void
++sheng_diag_draw_kv(volatile uint32_t *fb, uint32_t stride_px, int *cx, int *cy, const char *label, uint64_t val)
++{
++	sheng_diag_draw_str(fb, stride_px, cx, cy, label);
++	sheng_diag_draw_hex64(fb, stride_px, cx, cy, val);
++	*cx += 18;
++}
++
 +__attribute__((noinline))
 +static void
 +sheng_diag_panic_screen(const char *str)
@@ -405,7 +560,7 @@ index 402b110..d5f2803 100644
 +	}
 +	volatile uint32_t *fb = (volatile uint32_t *)fb_addr;
 +	const uint32_t stride_px = 3048U;
-+	for (int y = 520; y < 1400; y++) {
++	for (int y = 520; y < 1900; y++) {
 +		volatile uint32_t *row = fb + (size_t)y * stride_px;
 +		for (int x = 20; x < 3028; x++) {
 +			row[x] = 0xFF660000U;
@@ -413,13 +568,45 @@ index 402b110..d5f2803 100644
 +	}
 +	int cx = 40;
 +	int cy = 540;
-+	const char *hdr = "PANIC: ";
-+	for (int i = 0; hdr[i] != '\0'; i++) {
-+		sheng_diag_draw_char(fb, stride_px, cx, cy, hdr[i], 0xFFFFFFFFU);
-+		cx += 18;
++	if (sheng_diag_fault.valid) {
++		sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "PC:", sheng_diag_fault.pc);
++		sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "LR:", sheng_diag_fault.lr);
++		cx = 40; cy += 42;
++		sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "FAR:", sheng_diag_fault.far);
++		sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "ESR:", sheng_diag_fault.esr);
++		cx = 40; cy += 42;
++		sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "X0:", sheng_diag_fault.x0);
++		sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "X1:", sheng_diag_fault.x1);
++		cx = 40; cy += 42;
++		sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "SP:", sheng_diag_fault.sp);
++		sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "FP:", sheng_diag_fault.fp);
++		cx = 40; cy += 42;
++		sheng_diag_draw_str(fb, stride_px, &cx, &cy, "FLT_BT: ");
++		uint64_t ffp = sheng_diag_fault.fp;
++		for (int depth = 0; depth < 10; depth++) {
++			if (ffp < 0xFFFFFF8000000000ULL || (ffp & 7ULL) != 0 ||
++			    !sheng_diag_probe_r((uintptr_t)ffp) || !sheng_diag_probe_r((uintptr_t)(ffp + 8ULL))) {
++				break;
++			}
++			uint64_t next_fp = *(volatile const uint64_t *)ffp;
++			uint64_t lr = *(volatile const uint64_t *)(ffp + 8ULL);
++			sheng_diag_draw_hex64(fb, stride_px, &cx, &cy, lr);
++			cx += 18;
++			if (next_fp <= ffp) {
++				break;
++			}
++			ffp = next_fp;
++		}
++		cx = 40; cy += 48;
 +	}
++	uint64_t hw_far = 0, hw_esr = 0;
++	__asm__ volatile ("mrs %0, far_el1\n\tmrs %1, esr_el1" : "=r"(hw_far), "=r"(hw_esr));
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "HW_FAR:", hw_far);
++	sheng_diag_draw_kv(fb, stride_px, &cx, &cy, "HW_ESR:", hw_esr);
++	cx = 40; cy += 48;
++	sheng_diag_draw_str(fb, stride_px, &cx, &cy, "PANIC: ");
 +	if (str != NULL && sheng_diag_probe_r((uintptr_t)str)) {
-+		for (int i = 0; i < 512; i++) {
++		for (int i = 0; i < 120; i++) {
 +			uintptr_t p = (uintptr_t)(str + i);
 +			if ((p & 0xFFFUL) == 0 && !sheng_diag_probe_r(p)) {
 +				break;
@@ -437,7 +624,7 @@ index 402b110..d5f2803 100644
 +				cx = 40;
 +				cy += 42;
 +			}
-+			if (cy + 36 >= 1340) {
++			if (cy + 36 >= 1880) {
 +				break;
 +			}
 +			sheng_diag_draw_char(fb, stride_px, cx, cy, ch, 0xFFFFFFFFU);
@@ -445,14 +632,10 @@ index 402b110..d5f2803 100644
 +		}
 +	}
 +	cx = 40;
-+	cy += 54;
-+	const char *fph = "FP: ";
-+	for (int i = 0; fph[i] != '\0'; i++) {
-+		sheng_diag_draw_char(fb, stride_px, cx, cy, fph[i], 0xFFFFFFFFU);
-+		cx += 18;
-+	}
++	cy += 48;
++	sheng_diag_draw_str(fb, stride_px, &cx, &cy, "CUR_BT: ");
 +	uint64_t fp = (uint64_t)(uintptr_t)__builtin_frame_address(0);
-+	for (int depth = 0; depth < 6; depth++) {
++	for (int depth = 0; depth < 12; depth++) {
 +		if (fp < 0xFFFFFF8000000000ULL || (fp & 7ULL) != 0 ||
 +		    !sheng_diag_probe_r((uintptr_t)fp) || !sheng_diag_probe_r((uintptr_t)(fp + 8ULL))) {
 +			break;
@@ -471,7 +654,7 @@ index 402b110..d5f2803 100644
  #endif
  
  void
-@@ -506,6 +683,7 @@ PE_panic_hook(const char *str __unused)
+@@ -506,6 +748,7 @@ PE_panic_hook(const char *str __unused)
  #if DEVELOPMENT && XNU_SHENG_PANIC_MARKER
  	/* The sheng BootLog panic entry only publishes a memory flag. */
  	boot_log_panic_flush();

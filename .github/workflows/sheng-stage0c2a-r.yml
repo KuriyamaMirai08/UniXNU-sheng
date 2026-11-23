@@ -196,6 +196,16 @@ jobs:
                               darwinboot_commit=revision, empty_input_rejected=True)
           (temp / "stage0c2e-parser-sdk.json").write_text(json.dumps(sdk_identity) + "\n")
           PY
+      - name: Cache open-source build tool downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/Homebrew
+            ~/.rustup
+            ~/Library/Caches/pip
+          key: sheng-diag-tools-${{ runner.os }}-${{ env.ImageVersion }}-v1
+          restore-keys: |
+            sheng-diag-tools-${{ runner.os }}-
       - name: Prepare ARM64 build tools
         working-directory: _stage0c1f_source
         shell: bash
