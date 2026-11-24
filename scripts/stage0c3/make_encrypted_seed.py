@@ -18,8 +18,7 @@ import uuid
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 BLOCK = 4096
-GIB_48 = 48 << 30
-AAD = b"unixnu-sheng-seed-20261123"
+AAD = b"unixnu-sheng-seed-3os-20261125"
 IPSW_SPEC = {
     "url": "https://updates.cdn-apple.com/2026FallFCS/6074e110-d48d-40c2-b0e8-b611520941a3/iPad17,1,iPad17,2,iPad17,3,iPad17,4_27.0.1_24A446_Restore.ipsw",
     "product": "iPad17,3",
@@ -124,14 +123,29 @@ def single_volume_uuid(pages):
     return identities.pop()
 
 
+def compute_seed_hash(logical, pages):
+    h = hashlib.sha256()
+    h.update(b"SHNGSEED2" + struct.pack("<Q", logical))
+    for idx in sorted(pages):
+        pg = pages[idx]
+        if any(pg):
+            h.update(struct.pack("<Q", idx))
+            h.update(pg)
+    return h.hexdigest()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--unixnu", type=Path, required=True)
     ap.add_argument("--work", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--gibs", default="8,10")
     args = ap.parse_args()
 
-    key_b64 = os.environ.get("UNIXNU_SHENG_SEED_KEY_20261123", "").strip()
+    gibs = [int(x.strip()) for x in args.gibs.split(",") if x.strip()]
+    require(bool(gibs) and all(3 <= g <= 1024 for g in gibs), f"invalid --gibs: {args.gibs}")
+
+    key_b64 = os.environ.get("UNIXNU_SHENG_SEED_KEY_3OS", "").strip()
     key = base64.b64decode(key_b64)
     require(len(key) == 32, "seed encryption key must be 32 bytes")
 
@@ -195,55 +209,63 @@ def main():
 
     mount = work / "os-mount"
     mount.mkdir(parents=True, exist_ok=True)
-    seed_path = work / "data.dbr"
-    if seed_path.exists():
-        seed_path.unlink()
+    results = {}
 
     attached = plistlib.loads(subprocess.check_output(
         ["hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", str(mount), "-plist", str(os_dmg)]
     ))
     dev = attached["system-entities"][0]["dev-entry"]
     try:
-        subprocess.run(
-            ["sudo", sys.executable, str(unixnu / "scripts/make-data-seed.py"),
-             str(mount), str(seed_path), "--gib", "48", "--build", "24A446", "--skip-setup"],
-            check=True,
-        )
+        for gib in gibs:
+            seed_path = work / f"data-{gib}g.dbr"
+            if seed_path.exists():
+                seed_path.unlink()
+            subprocess.run(
+                ["sudo", sys.executable, str(unixnu / "scripts/make-data-seed.py"),
+                 str(mount), str(seed_path), "--gib", str(gib), "--build", "24A446", "--skip-setup"],
+                check=True,
+            )
+            raw_bytes = seed_path.read_bytes()
+            logical, pages = packed_pages(raw_bytes)
+            expected_logical = gib << 30
+            require(logical == expected_logical, f"logical size {logical} != {expected_logical}")
+            stats = space_manager(logical, pages)
+            vol_uuid = single_volume_uuid(pages)
+            seed_hash = compute_seed_hash(logical, pages)
+            packed_sha = hashlib.sha256(raw_bytes).hexdigest()
+
+            nonce = secrets.token_bytes(12)
+            ciphertext = AESGCM(key).encrypt(nonce, raw_bytes, AAD)
+            enc_blob = nonce + ciphertext
+            enc_path = out / f"data-{gib}g.dbr.enc"
+            enc_path.write_bytes(enc_blob)
+            enc_sha = hashlib.sha256(enc_blob).hexdigest()
+
+            seed_path.unlink(missing_ok=True)
+            results[f"{gib}g"] = {
+                "gib": gib,
+                "packed_sha256": packed_sha,
+                "packed_bytes": len(raw_bytes),
+                "logical_bytes": logical,
+                "seed_hash_shngseed2": seed_hash,
+                "apfs_container_id": stats["container_id"],
+                "volume_uuid": vol_uuid,
+                "nonfree_main_bytes": stats["nonfree_main_bytes"],
+                "xid": stats["xid"],
+                "skip_setup": True,
+                "encrypted_file": enc_path.name,
+                "encrypted_sha256": enc_sha,
+                "encrypted_bytes": len(enc_blob),
+            }
     finally:
         subprocess.run(["hdiutil", "detach", dev], check=True)
 
-    raw_bytes = seed_path.read_bytes()
-    logical, pages = packed_pages(raw_bytes)
-    require(logical == GIB_48, f"logical size {logical} != {GIB_48}")
-    stats = space_manager(logical, pages)
-    vol_uuid = single_volume_uuid(pages)
-    packed_sha = hashlib.sha256(raw_bytes).hexdigest()
-
-    nonce = secrets.token_bytes(12)
-    ciphertext = AESGCM(key).encrypt(nonce, raw_bytes, AAD)
-    enc_blob = nonce + ciphertext
-    enc_path = out / "data.dbr.enc"
-    enc_path.write_bytes(enc_blob)
-    enc_sha = hashlib.sha256(enc_blob).hexdigest()
-
-    # Scrub plaintext seed and decrypted OS image from runner work dir
-    seed_path.unlink(missing_ok=True)
+    # Scrub decrypted OS image from runner work dir
     shutil.rmtree(work / "out", ignore_errors=True)
 
     ipsw_ver = subprocess.check_output(["ipsw", "version"], text=True).strip()
     receipt = {
-        "purpose": "production-seed-generation",
-        "packed_sha256": packed_sha,
-        "packed_bytes": len(raw_bytes),
-        "logical_bytes": logical,
-        "apfs_container_id": stats["container_id"],
-        "volume_uuid": vol_uuid,
-        "nonfree_main_bytes": stats["nonfree_main_bytes"],
-        "xid": stats["xid"],
-        "skip_setup": True,
-        "encrypted_file": enc_path.name,
-        "encrypted_sha256": enc_sha,
-        "encrypted_bytes": len(enc_blob),
+        "purpose": "3os-seed-generation-8g-10g",
         "cipher": "AES-256-GCM",
         "nonce_bytes": 12,
         "aad": AAD.decode("ascii"),
@@ -253,9 +275,10 @@ def main():
         "ipsw_tool_version": ipsw_ver,
         "runner_image": os.environ.get("ImageVersion", "missing"),
         "sw_vers_build": subprocess.check_output(["sw_vers", "-buildVersion"], text=True).strip(),
+        "seeds": results,
     }
-    (out / "seed-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"packed_sha256": packed_sha, "packed_bytes": len(raw_bytes), "logical_bytes": logical, "apfs_container_id": stats["container_id"]}))
+    (out / "seed-receipt-3os.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(results, indent=2))
 
 
 if __name__ == "__main__":

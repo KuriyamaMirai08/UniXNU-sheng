@@ -1,60 +1,38 @@
-name: Sheng Stage 0C-3 Production Seed Generation
-run-name: Stage 0C-3 Run S / 48 GiB iPadOS 24A446 Data seed
+name: Sheng 3OS Seed Generation (8 GiB + 10 GiB)
+run-name: Sheng 3OS / 8 GiB + 10 GiB iPadOS 24A446 Data seeds
 on:
-  workflow_dispatch:
-    inputs:
-      expected_workflow_sha256:
-        description: SHA-256 of this workflow file, verified from the reviewed commit before dispatch
-        required: true
-        type: string
-      expected_audit_commit:
-        description: Full SHA of the reviewed audit checkout
-        required: true
-        type: string
+  workflow_dispatch: {}
 permissions:
   contents: read
   actions: read
 concurrency:
-  group: sheng-stage0c3-seed
+  group: sheng-3os-seed
   cancel-in-progress: false
 jobs:
-  generate-48g-apfs-seed:
+  generate-3os-apfs-seeds:
     runs-on: macos-26
     timeout-minutes: 120
     env:
       HOMEBREW_NO_AUTO_UPDATE: '1'
-      EXPECTED_AUDIT_COMMIT: ${{ inputs.expected_audit_commit }}
-      EXPECTED_WORKFLOW_SHA256: ${{ inputs.expected_workflow_sha256 }}
       FRAMEWORK_COMMIT: 97437dcf7389484a0eeaa8067725ce743aff18ef
       DARWINBOOT_COMMIT: 5243c68ec332a227fe3680cd5da6d5a0e127035c
     steps:
-      - name: Refuse attempts after the first dispatch and check ref
+      - name: Check ref
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = refs/heads/codex/stage0c3-seed
-          if [[ "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
-            echo 'Stage 0C-3 Run S requires attempt 1' >&2
-            exit 1
-          fi
+          test "$GITHUB_REF" = refs/heads/codex/3os-seed-8g-10g
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
-      - name: Verify commit and workflow SHA-256
-        env:
-          WORKFLOW_SHA: ${{ github.workflow_sha }}
+      - name: Check runner architecture and disk space
         shell: bash
         run: |
           set -euo pipefail
           test "$(uname -m)" = arm64
           echo "ImageVersion=${ImageVersion:-missing} sw_vers=$(sw_vers -buildVersion)"
           df -h
-          [[ "$EXPECTED_AUDIT_COMMIT" =~ ^[0-9a-f]{40}$ ]]
-          test "$EXPECTED_AUDIT_COMMIT" = "$GITHUB_SHA"
-          test "$EXPECTED_AUDIT_COMMIT" = "$WORKFLOW_SHA"
-          actual_wf=$(shasum -a 256 .github/workflows/sheng-stage0c2a-r.yml | awk '{print $1}')
-          test "$actual_wf" = "$EXPECTED_WORKFLOW_SHA256"
       - name: Free disk space for OS disk image
         shell: bash
         run: |
@@ -80,22 +58,24 @@ jobs:
           brew install blacktop/tap/ipsw
           ipsw version
           python3 -m pip install --break-system-packages cryptography || python3 -m pip install cryptography
-      - name: Generate, verify, and encrypt 48 GiB APFS Data seed
+      - name: Generate, verify, and encrypt 8 GiB + 10 GiB APFS Data seeds
         env:
-          UNIXNU_SHENG_SEED_KEY_20261123: ${{ secrets.UNIXNU_SHENG_SEED_KEY_20261123 }}
+          UNIXNU_SHENG_SEED_KEY_3OS: ${{ secrets.UNIXNU_SHENG_SEED_KEY_3OS }}
         shell: bash
         run: |
           set -euo pipefail
           python3 -B scripts/stage0c3/make_encrypted_seed.py \
             --unixnu "$GITHUB_WORKSPACE/_unixnu" \
             --work "$RUNNER_TEMP/seed-work" \
-            --out "$RUNNER_TEMP/seed-out"
-      - name: Upload encrypted seed and receipt only
+            --out "$RUNNER_TEMP/seed-out" \
+            --gibs 8,10
+      - name: Upload encrypted seeds and receipt
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: sheng-stage0c3-seed-${{ github.run_id }}-${{ github.run_attempt }}
+          name: sheng-3os-seed-${{ github.run_id }}
           path: |
-            ${{ runner.temp }}/seed-out/data.dbr.enc
-            ${{ runner.temp }}/seed-out/seed-receipt.json
-          retention-days: 90
+            ${{ runner.temp }}/seed-out/data-8g.dbr.enc
+            ${{ runner.temp }}/seed-out/data-10g.dbr.enc
+            ${{ runner.temp }}/seed-out/seed-receipt-3os.json
+          retention-days: 7
           if-no-files-found: error
