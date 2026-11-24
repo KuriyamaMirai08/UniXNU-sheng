@@ -1,65 +1,12 @@
-diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
-index cc3c5d3..4cf0b17 100644
---- a/bsd/kern/kern_exec.c
-+++ b/bsd/kern/kern_exec.c
-@@ -9322,6 +9322,18 @@ void
- load_init_program(proc_t p)
- {
- 	boot_progress_stage("load_init_program enter");
-+#if DEVELOPMENT
-+	struct sheng_diag_vc_info {
-+		unsigned int v_height;
-+		unsigned int v_width;
-+		unsigned int v_depth;
-+		unsigned int v_rowbytes;
-+		unsigned long v_baseaddr;
-+	};
-+	extern struct sheng_diag_vc_info vinfo;
-+	extern void sheng_diag_bar_va(uintptr_t fb, unsigned idx, uint32_t color);
-+	sheng_diag_bar_va((uintptr_t)vinfo.v_baseaddr, 11, 0xFFFFD700U);
-+#endif
- 	uint32_t i;
- 	int error;
- 	vm_map_t map = current_map();
-@@ -9341,12 +9353,18 @@ load_init_program(proc_t p)
- 	int cache_error = native_owner_cache_prepare(p, (user_addr_t)scratch_addr, &init_envp);
- 	boot_progress_stage("SystemOS mount returned");
- 	if (cache_error) panic("offline owner SystemOS mount failed: %d", cache_error);
-+#if DEVELOPMENT
-+	sheng_diag_bar_va((uintptr_t)vinfo.v_baseaddr, 12, 0xFFFF66CCU);
-+#endif
- #endif
- #if defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
- 	boot_progress_stage("Data mount enter");
- 	int data_error = native_owner_data_prepare(p, (user_addr_t)scratch_addr);
- 	boot_progress_stage("Data mount returned");
- 	if (data_error) panic("offline scratch Data mount failed: %d", data_error);
-+#if DEVELOPMENT
-+	sheng_diag_bar_va((uintptr_t)vinfo.v_baseaddr, 13, 0xFF00CCAAU);
-+#endif
- #if defined(XNU_BOOT_PROGRESS) && XNU_BOOT_PROGRESS
- 	extern int sheng_boot_watchdog_policy(void *, uint64_t);
- 	boot_progress_stage("temporary watchdog launch policy enter");
 diff --git a/osfmk/arm/arm_init.c b/osfmk/arm/arm_init.c
 index e8db5d8..3b09cef 100644
 --- a/osfmk/arm/arm_init.c
 +++ b/osfmk/arm/arm_init.c
-@@ -345,6 +345,77 @@ arm_auxkc_init(void *mh, void *base)
+@@ -345,6 +345,22 @@ arm_auxkc_init(void *mh, void *base)
   *		Function:		Runs on the boot CPU, once, on entry from iBoot.
   */
  
 +#if DEVELOPMENT
-+struct sheng_diag_vc_info {
-+	unsigned int v_height;
-+	unsigned int v_width;
-+	unsigned int v_depth;
-+	unsigned int v_rowbytes;
-+	unsigned long v_baseaddr;
-+};
-+extern struct sheng_diag_vc_info vinfo;
-+
-+void sheng_diag_bar_va(uintptr_t fb, unsigned idx, uint32_t color);
-+
 +struct sheng_diag_fault_info {
 +	uint64_t valid;
 +	uint64_t pc;
@@ -74,140 +21,10 @@ index e8db5d8..3b09cef 100644
 +extern struct sheng_diag_fault_info sheng_diag_fault;
 +struct sheng_diag_fault_info sheng_diag_fault;
 +
-+void
-+sheng_diag_bar_va(uintptr_t fb, unsigned idx, uint32_t color)
-+{
-+	uint64_t par = 1;
-+	if (fb == 0) {
-+		return;
-+	}
-+	__asm__ volatile ("at s1e1w, %1\n\tisb\n\tmrs %0, par_el1"
-+	    : "=r"(par) : "r"(fb) : "memory");
-+	if (par & 1ULL) {
-+		return;
-+	}
-+	volatile uint32_t *p = (volatile uint32_t *)(fb + (uintptr_t)idx * 36ULL * 12192ULL);
-+	for (unsigned r = 0; r < 36; r++) {
-+		for (unsigned c = 0; c < 1500; c++) {
-+			p[c] = color;
-+		}
-+		p += 3048;
-+	}
-+	__asm__ volatile ("dsb sy" ::: "memory");
-+}
-+
-+static void
-+sheng_diag_bar_va_r(uintptr_t fb, unsigned idx, uint32_t color)
-+{
-+	uint64_t par = 1;
-+	if (fb == 0) {
-+		return;
-+	}
-+	__asm__ volatile ("at s1e1w, %1\n\tisb\n\tmrs %0, par_el1"
-+	    : "=r"(par) : "r"(fb) : "memory");
-+	if (par & 1ULL) {
-+		return;
-+	}
-+	volatile uint32_t *p = (volatile uint32_t *)(fb + (uintptr_t)idx * 36ULL * 12192ULL);
-+	for (unsigned r = 0; r < 36; r++) {
-+		for (unsigned c = 1540; c < 3020; c++) {
-+			p[c] = color;
-+		}
-+		p += 3048;
-+	}
-+	__asm__ volatile ("dsb sy" ::: "memory");
-+}
 +#endif
-+
  __startup_func
  void
  arm_init(
-@@ -357,6 +428,10 @@ arm_init(
- 	DTEntry chosen = NULL;
- 	unsigned int dt_entry_size = 0;
- 
-+#if DEVELOPMENT
-+	sheng_diag_bar_va(0xFFFFFFC038000000UL, 6, 0xFFFF8800U);
-+#endif
-+
- #if T0SZ_USER != T0SZ_BOOT
- 	/* Final TTBR0 size before the first pointer is signed (see TCR_EL1_KVA_ENTRY). */
- 	set_tcr(TCR_EL1_KVA_ENTRY);
-@@ -366,6 +441,9 @@ arm_init(
- 	arm_slide_rebase_and_sign_image();
- 
- 	arm_static_if_init(args);
-+#if DEVELOPMENT
-+	sheng_diag_bar_va(0xFFFFFFC038000000UL, 7, 0xFFAA44FFU);
-+#endif
- 
- 	/* If kernel integrity is supported, use a constant copy of the boot args. */
- 	const_boot_args = *args;
-@@ -587,6 +665,9 @@ arm_init(
- 	gDramSize = *dram_size;
- 	pmap_first_pnum = (ppnum_t)atop(gDramBase);
- 
-+#if DEVELOPMENT
-+	sheng_diag_bar_va(0xFFFFFFC038000000UL, 8, 0xFF00FF88U);
-+#endif
- 	boot_progress_stage("arm_vm_init enter");
- 	arm_vm_init(xmaxmem, args);
- 	boot_progress_stage("arm_vm_init returned");
-@@ -645,6 +726,9 @@ arm_init(
- 		disableConsoleOutput = FALSE;     /* Allow printfs to happen */
- 	}
- 	PE_create_console();
-+#if DEVELOPMENT
-+	sheng_diag_bar_va((uintptr_t)vinfo.v_baseaddr, 10, 0xFF88FF00U);
-+#endif
- 
- 	/* setup console output */
- 	PE_init_printf(FALSE);
-@@ -656,8 +740,14 @@ arm_init(
- #endif
- 
- 	cpu_machine_idle_init(TRUE);
-+#if DEVELOPMENT
-+	sheng_diag_bar_va_r((uintptr_t)vinfo.v_baseaddr, 1, 0xFFFFFFFFU);
-+#endif
- 
- 	PE_init_platform(TRUE, &BootCpuData);
-+#if DEVELOPMENT
-+	sheng_diag_bar_va_r((uintptr_t)vinfo.v_baseaddr, 2, 0xFF0077FFU);
-+#endif
- 
- 	/* Initialize the debug infrastructure system-wide and on the local core. */
- 	pe_arm_debug_init_early(&BootCpuData);
-@@ -669,6 +759,9 @@ arm_init(
- 	}
- 
- 	ml_map_cpu_pio();
-+#if DEVELOPMENT
-+	sheng_diag_bar_va_r((uintptr_t)vinfo.v_baseaddr, 3, 0xFFFFFF00U);
-+#endif
- 
- #if APPLE_ARM64_ARCH_FAMILY
- 	configure_late_apple_regs(true);
-@@ -684,6 +777,9 @@ arm_init(
- #endif /* KPERF */
- 
- 	PE_init_cpu();
-+#if DEVELOPMENT
-+	sheng_diag_bar_va_r((uintptr_t)vinfo.v_baseaddr, 4, 0xFFFF00FFU);
-+#endif
- #if __arm64__
- 	apt_msg_init();
- 	apt_msg_init_cpu();
-@@ -707,6 +803,9 @@ arm_init(
- 	 * against string vulnerabilities
- 	 */
- 	__stack_chk_guard &= ~(0xFFULL << 8);
-+#if DEVELOPMENT
-+	sheng_diag_bar_va_r((uintptr_t)vinfo.v_baseaddr, 5, 0xFF00FFFFU);
-+#endif
- 	machine_startup(args);
- }
- 
 diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 index 1571fa3..f4d131c 100644
 --- a/osfmk/arm64/arm_vm_init.c
@@ -230,19 +47,6 @@ index 1571fa3..f4d131c 100644
  	}
  }
  #endif
-@@ -2259,6 +2259,12 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
- 	if (exec_end <= exec_start || ((exec_start | exec_end) & ARM_PGMASK) != 0) {
- 		panic("Invalid executable range for TTBR1 transition");
- 	}
-+#if DEVELOPMENT
-+	{
-+		extern void sheng_diag_bar_va(uintptr_t fb, unsigned idx, uint32_t color);
-+		sheng_diag_bar_va(0xFFFFFFC038000000UL, 9, 0xFF33CCFFU);
-+	}
-+#endif
- 	arm_vm_wx_check_root(cpu_tte, ARM_TT_L1_SHIFT, exec_start, exec_end);
- 	for (pmap_paddr_t offset = 0; offset < exec_size; offset += ARM_PGBYTES) {
- 		if (!arm_vm_wx_exec_covered(cpu_tte, exec_va + offset, exec_start + offset)) {
 diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
 index 9561134..901cee9 100644
 --- a/osfmk/arm64/sleh.c
@@ -284,64 +88,11 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 index 6d95536..e770e11 100644
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
-@@ -469,6 +469,31 @@ start_cpu:
-  * Cold boot init routine.  Called from __start
-  *   x0 - Boot args
-  */
-+#if DEVELOPMENT && !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
-+.macro SHENG_DIAG_BAR base_addr, idx, lo16, hi16, width
-+	MOV64	x9, \base_addr
-+	mov	x10, #(\idx * 36)
-+	mov	x11, #12192
-+	mul	x10, x10, x11
-+	add	x9, x9, x10
-+	movz	w10, #\lo16
-+	movk	w10, #\hi16, lsl #16
-+	mov	x11, #36
-+91:
-+	mov	x12, x9
-+	mov	x13, #\width
-+92:
-+	str	w10, [x12], #4
-+	subs	x13, x13, #1
-+	b.ne	92b
-+	mov	x13, #12192
-+	add	x9, x9, x13
-+	subs	x11, x11, #1
-+	b.ne	91b
-+	dsb	sy
-+.endm
-+#endif
-+
- 	.align 2
- 	.globl EXT(start_first_cpu)
- LEXT(start_first_cpu)
-@@ -485,6 +510,9 @@ LEXT(start_first_cpu)
- 	add		x0, x0, EXT(LowExceptionVectorBase)@pageoff
- 	MSR_VBAR_EL1_X0
- 
-+#if DEVELOPMENT && !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
-+	SHENG_DIAG_BAR 0xB8000000, 1, 0xFFFF, 0xFFFF, 1500
-+#endif
- 
- 	// Get the kernel memory parameters from the boot args
- 	ldr		x22, [x20, BA_VIRT_BASE]			// Get the kernel virt base
-@@ -700,6 +728,9 @@ Lkernelcache_base_found:
- 	b.lo	Lbootstrap_tables_exhausted
- 	cmp	x5, x4
- 	b.hs	Lbootstrap_tables_exhausted
-+#if DEVELOPMENT && !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
-+	SHENG_DIAG_BAR 0xB8000000, 2, 0x77FF, 0xFF00, 1500
-+#endif
- 	add	x1, x25, #(BOOTSTRAP_TABLE_BYTES >> 12), lsl #12
- 	mov	x15, #((1 << (64 - T1SZ_BOOT - ARM_TT_L1_SHIFT)) << TTE_SHIFT)
- 	mov	x0, x25
-@@ -707,6 +738,13 @@ Lkernelcache_base_found:
+@@ -707,6 +707,12 @@ Lkernelcache_base_found:
  	add	x0, x25, #4096
  	bl	Lbootstrap_wx_retag
  	mov	lr, x19
 +#if DEVELOPMENT && !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
-+	SHENG_DIAG_BAR 0xB8000000, 3, 0xFF00, 0xFFFF, 1500
 +	/* Map TTBR1[0] (0xFFFFFFC000000000..0xFFFFFFC03FFFFFFF) -> 0x80000000..0xBFFFFFFF Device 1GiB block */
 +	MOV64	x9, 0x006000008000040D
 +	add	x10, x25, #4096
@@ -350,7 +101,7 @@ index 6d95536..e770e11 100644
  #endif
  	b Lbootstrap_tables_ready
  
-@@ -885,6 +923,26 @@ Lbootstrap_wx_next_root:
+@@ -885,6 +891,26 @@ Lbootstrap_wx_next_root:
  Lbootstrap_tables_exhausted:
  	// MMU is still off. Stop with the offending cursor/end preserved for
  	// the early debugger rather than corrupting memory or forging a map.
@@ -377,30 +128,6 @@ index 6d95536..e770e11 100644
  	b Lbootstrap_tables_exhausted
  Lbootstrap_tables_ready:
  	/* Ensure TTEs are visible */
-@@ -1014,6 +1072,11 @@ common_start:
- 	PAC_INIT_KEY_STATE tmp=x0, tmp2=x1
- #endif /* HAS_APPLE_PAC */
- 
-+#if DEVELOPMENT && !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
-+	cbnz	x21, Lsheng_skip_bar4
-+	SHENG_DIAG_BAR 0xB8000000, 4, 0x00FF, 0xFFFF, 1500
-+Lsheng_skip_bar4:
-+#endif
- 	// Enable caches, MMU, ROP and JOP
- 	MOV64   x0, SCTLR_EL1_DEFAULT
- 	MSR_SCTLR_EL1_X0
-@@ -1039,6 +1102,11 @@ common_start:
- 
- 	// Clear thread pointer
- 	msr		TPIDR_EL1, xzr						// Set thread register
-+#if DEVELOPMENT && !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
-+	cbnz	x21, Lsheng_skip_bar5
-+	SHENG_DIAG_BAR 0xFFFFFFC038000000, 5, 0xFFFF, 0xFF00, 1500
-+Lsheng_skip_bar5:
-+#endif
- 
- 
- #if defined(APPLE_ARM64_ARCH_FAMILY)
 diff --git a/pexpert/arm/hwtrace/hwtrace.c b/pexpert/arm/hwtrace/hwtrace.c
 index 402b110..6306b95 100644
 --- a/pexpert/arm/hwtrace/hwtrace.c
